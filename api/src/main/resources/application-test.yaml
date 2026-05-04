@@ -1,0 +1,51 @@
+spring:
+  config:
+    activate:
+      on-profile: test
+  devtools:
+    add-properties: false
+  datasource:
+    url: jdbc:h2:mem:testdb;DB_CLOSE_DELAY=-1
+    username: sa
+    password:
+    driver-class-name: org.h2.Driver
+  jpa:
+    show-sql: true
+    database-platform: org.hibernate.dialect.H2Dialect
+    hibernate:
+      ddl-auto: create-drop
+  sendgrid:
+    api-key: test-key
+    from-email: test@test.com
+    template-id: test-template
+    verification-link: http://localhost:5173/verify
+
+springdoc:
+  api-docs:
+    enabled: true
+  swagger-ui:
+    enabled: true
+  packages-to-scan: com.cacanode.api
+
+openapi:
+  service:
+    api-docs: api
+    server: http://localhost:${server.port}
+    title: CacaNode API (Test)
+    version: 1.0.0
+
+jwt:
+  access-token-key: test-access-secret-key-minimum-32-chars
+  refresh-token-key: test-refresh-secret-key-minimum-32-chars
+  expiry-mins: 15
+  expiry-days: 7
+
+grpc:
+  server:
+    port: 9091                          # different port to avoid conflicts
+    security:
+      enabled: false
+  client:
+    fastapi-service:
+      address: static://localhost:50051
+      negotiation-type: plaintext

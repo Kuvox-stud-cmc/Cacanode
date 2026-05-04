@@ -1,0 +1,36 @@
+syntax = "proto3";
+
+package cacanode.tenant;
+
+option java_package = "com.cacanode.api.grpc.tenant";
+option java_outer_classname = "TenantProto";
+option java_multiple_files = true;
+
+// Called by FastAPI -> Spring Boot
+// FastAPI needs to verify tenant status and get config
+
+service TenantService {
+  rpc GetTenantConfig (TenantRequest) returns (TenantConfig);
+  rpc ValidateTenant (TenantRequest) returns (TenantValidation);
+}
+
+message TenantRequest {
+  string tenant_id = 1;
+}
+
+message TenantConfig {
+  string tenant_id = 1;
+  string plan = 2;
+  string status = 3;
+  string llm_provider = 4;
+  string llm_model = 5;
+  string embed_provider = 6;
+  string embed_model = 7;
+  string api_key_enc = 8;
+}
+
+message TenantValidation {
+  bool valid = 1;
+  string status = 2;
+  string reason = 3;
+}

@@ -1,0 +1,104 @@
+services:
+
+  # ─── Databases ──────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: rag_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: cacanode
+      POSTGRES_USER: nghiemgiabao
+      POSTGRES_PASSWORD: nghiemgiabao@123
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    container_name: rag_redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+  # ─── Vector Store ────────────────────────────────────────────────
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: rag_qdrant
+    restart: unless-stopped
+    ports:
+      - "6333:6333"   # REST API + Swagger UI
+      - "6334:6334"   # gRPC
+    volumes:
+      - qdrant_data:/qdrant/storage
+
+  # ─── Message Queue ───────────────────────────────────────────────
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: rag_rabbitmq
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: rag_user
+      RABBITMQ_DEFAULT_PASS: rag_password
+    ports:
+      - "5672:5672"   # AMQP
+      - "15672:15672" # Management UI
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+
+  # ─── Object Storage ──────────────────────────────────────────────
+  seaweedfs-master:
+    image: chrislusf/seaweedfs:latest
+    container_name: rag_seaweedfs_master
+    restart: unless-stopped
+    ports:
+      - "9333:9333"   # Master HTTP
+      - "19333:19333" # Master gRPC
+    command: master -mdir=/data
+    volumes:
+      - seaweedfs_master:/data
+
+  seaweedfs-volume:
+    image: chrislusf/seaweedfs:latest
+    container_name: rag_seaweedfs_volume
+    restart: unless-stopped
+    ports:
+      - "8123:8123"
+    command: volume -mserver=seaweedfs-master:9333 -dir=/data -port=8080
+    volumes:
+      - seaweedfs_volume:/data
+    depends_on:
+      - seaweedfs-master
+
+  seaweedfs-s3:
+    image: chrislusf/seaweedfs:latest
+    container_name: rag_seaweedfs_s3
+    restart: unless-stopped
+    ports:
+      - "8333:8333"   # S3-compatible API endpoint
+    command: s3 -filer=seaweedfs-filer:8888
+    depends_on:
+      - seaweedfs-filer
+
+  seaweedfs-filer:
+    image: chrislusf/seaweedfs:latest
+    container_name: rag_seaweedfs_filer
+    restart: unless-stopped
+    ports:
+      - "8888:8888"
+    command: filer -master=seaweedfs-master:9333
+    volumes:
+      - seaweedfs_filer:/data
+    depends_on:
+      - seaweedfs-master
+
+volumes:
+  postgres_data:
+  redis_data:
+  qdrant_data:
+  rabbitmq_data:
+  seaweedfs_master:
+  seaweedfs_volume:
+  seaweedfs_filer:

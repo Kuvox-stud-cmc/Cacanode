@@ -1,0 +1,38 @@
+syntax = "proto3";
+
+package cacanode.chat;
+
+option java_package = "com.cacanode.api.grpc.chat";
+option java_outer_classname = "ChatProto";
+option java_multiple_files = true;
+
+// Called by Spring Boot -> FastAPI
+// Before forwarding a chat request, Spring Boot checks quota
+// then FastAPI processes the GraphRAG query
+
+service ChatService {
+  rpc CheckQuota (QuotaRequest) returns (QuotaResponse);
+  rpc StreamChat (ChatRequest) returns (stream ChatChunk);
+}
+
+message QuotaRequest {
+  string tenant_id = 1;
+}
+
+message QuotaResponse {
+  bool allowed = 1;
+  string reason = 2;            // populated if not allowed
+  int32 message_used = 3;
+  int32 message_limit = 4;
+}
+
+message ChatRequest {
+  string tenant_id = 1;
+  string session_id = 2;
+  string message = 3;
+}
+
+message ChatChunk {
+  string delta = 1;             // streamed token
+  bool done = 2;                // true on last chunk
+}

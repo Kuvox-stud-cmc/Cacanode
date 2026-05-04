@@ -1,0 +1,67 @@
+spring:
+  config:
+    activate:
+      on-profile: dev
+  devtools:
+    add-properties: true
+  datasource:
+    url: ${POSTGRES_URL}
+    username: ${POSTGRES_USER}
+    password: ${POSTGRES_PASSWORD}
+  jpa:
+    show-sql: true
+    hibernate:
+      ddl-auto: update
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: true
+        jdbc:
+          batch_size: 20
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      timeout: 2000ms
+  rabbitmq:
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USER:rag_user}
+    password: ${RABBITMQ_PASSWORD:rag_password}
+    virtual-host: /
+  sendgrid:
+    api-key: ${SENDGRID_API_KEY}
+    from-email: ${FROM_EMAIL}
+    template-id: ${TEMPLATE_ID}
+    verification-link: ${VERIFICATION_LINK}
+
+springdoc:
+  api-docs:
+    enabled: true
+  swagger-ui:
+    enabled: true
+  packages-to-scan: com.cacanode.api
+
+openapi:
+  service:
+    api-docs: api
+    server: http://localhost:${server.port}
+    title: CacaNode API
+    version: 1.0.0
+
+jwt:
+  access-token-key: ${ACCESS_TOKEN_KEY}
+  refresh-token-key: ${REFRESH_TOKEN_KEY}
+  expiry-mins: ${EXPIRY_MINS:15}
+  expiry-days: ${EXPIRY_DAYS:7}
+
+grpc:
+  server:
+    port: 9090                          # Spring Boot gRPC server port
+    security:
+      enabled: false                    # no TLS in dev
+  client:
+    fastapi-service:
+      address: static://localhost:50051 # FastAPI gRPC server port
+      negotiation-type: plaintext       # no TLS in dev
