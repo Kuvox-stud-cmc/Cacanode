@@ -1,9 +1,10 @@
 package com.cacanode.api.auth.service.implement;
 
 import com.cacanode.api.auth.service.JwtService;
+
+import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -16,14 +17,14 @@ import java.security.SecureRandom;
 import java.util.Base64;
 import java.util.Date;
 import java.util.UUID;
+import java.util.function.Function;
 
 @Service
 @Slf4j(topic = "JWT-SERVICE")
-@RequiredArgsConstructor
 public class JwtServiceImpl implements JwtService {
 
-    @Value("${jwt.access-token-key}")
-    private String accessTokenKey;
+    @Value("${jwt.token-key}")
+    private String tokenKey;
 
     @Value("${jwt.expiry-mins}")
     private int expiryMins;
@@ -31,7 +32,7 @@ public class JwtServiceImpl implements JwtService {
     @Override
     public String generateAccessToken(UUID userId, UUID tenantId, String email, String role) {
         SecretKey key = Keys.hmacShaKeyFor(
-          accessTokenKey.getBytes(StandardCharsets.UTF_8)
+          tokenKey.getBytes(StandardCharsets.UTF_8)
         );
 
         return Jwts.builder()
@@ -70,29 +71,36 @@ public class JwtServiceImpl implements JwtService {
 
     @Override
     public String extractEmail(String token) {
-        SecretKey key = Keys.hmacShaKeyFor(
-                accessTokenKey.getBytes(StandardCharsets.UTF_8)
-        );
-
-        return Jwts.parser()
-                .verifyWith(key)
-                .build()
-                .parseSignedClaims(token)
-                .getPayload()
-                .getSubject();
+        return extractClaim(token, io.jsonwebtoken.Claims::getSubject);
     }
 
     @Override
     public String extractTenantId(String token) {
+        return extractClaim(token, claims -> claims.get("tenantId", String.class));
+    }
+
+    @Override
+    public String extractUserId(String token) {
+        return extractClaim(token, claims -> claims.get("userId", String.class));
+    }
+
+    @Override
+    public String extractRole(String token) {
+        return extractClaim(token, claims -> claims.get("role", String.class));
+    }
+
+    @Override
+    public <T> T extractClaim(String token, Function<Claims, T> claimsResolver) {
         SecretKey key = Keys.hmacShaKeyFor(
-            accessTokenKey.getBytes(StandardCharsets.UTF_8)
+            tokenKey.getBytes(StandardCharsets.UTF_8)
         );
 
-        return Jwts.parser()
+        Claims claims = Jwts.parser()
                 .verifyWith(key)
                 .build()
                 .parseSignedClaims(token)
-                .getPayload()
-                .get("tenantId", String.class);
+                .getPayload();
+
+        return claimsResolver.apply(claims);
     }
 }

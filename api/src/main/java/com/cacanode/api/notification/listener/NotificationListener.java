@@ -1,6 +1,8 @@
 package com.cacanode.api.notification.listener;
 
 import com.cacanode.api.common.event.UserRegisteredEvent;
+import com.cacanode.api.notification.service.NotificationService;
+
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.event.EventListener;
@@ -12,11 +14,24 @@ import org.springframework.stereotype.Component;
 @RequiredArgsConstructor
 public class NotificationListener {
 
-    @Async
+    private final NotificationService notificationService;
+
+    @Async                  // runs in a separate thread - don't block registration
     @EventListener
     public void handleUserRegistered(UserRegisteredEvent event) {
         log.info("Sending confirmation email to: {}", event.getEmail());
-        // TODO: call SendGrid to send confirmation email
+        try {
+            notificationService.sendAndRecordWelcomeEmail(
+                event.getTenantId(),
+                event.getUserId(),
+                event.getEmail(),
+                event.getFullName(),
+                event.getCompanyName()
+            );
+        } catch (Exception e) {
+            // Never let email failure break registration
+            log.error("Failed to send welcome email to {}: {}", event.getEmail(), e.getMessage());
+        }
     }
 
 }

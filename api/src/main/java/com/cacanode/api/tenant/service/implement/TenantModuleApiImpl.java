@@ -1,9 +1,9 @@
 package com.cacanode.api.tenant.service.implement;
 
 import com.cacanode.api.common.event.UserRegisteredEvent;
+import com.cacanode.api.tenant.api.RegisterTenantCommand;
 import com.cacanode.api.tenant.api.TenantModuleApi;
-import com.cacanode.api.tenant.dto.RegisterTenantCommand;
-import com.cacanode.api.tenant.dto.TenantUserResult;
+import com.cacanode.api.tenant.api.TenantUserResult;
 import com.cacanode.api.tenant.dto.UserAuthDto;
 import com.cacanode.api.tenant.enums.TenantPlan;
 import com.cacanode.api.tenant.enums.TenantStatus;
@@ -16,12 +16,14 @@ import com.cacanode.api.tenant.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.text.Normalizer;
 import java.time.LocalDateTime;
 import java.util.Locale;
+import java.util.UUID;
 import java.util.regex.Pattern;
 
 @Service
@@ -29,6 +31,7 @@ import java.util.regex.Pattern;
 @RequiredArgsConstructor
 public class TenantModuleApiImpl implements TenantModuleApi {
 
+    private final PasswordEncoder passwordEncoder;
     private final TenantRepository tenantRepository;
     private final UserRepository userRepository;
     private final ApplicationEventPublisher eventPublisher;
@@ -60,14 +63,14 @@ public class TenantModuleApiImpl implements TenantModuleApi {
         user.setPasswordHash(command.getPasswordHash());
         user.setFullName(command.getFullName());
         user.setRole(UserRole.TENANT_ADMIN);
-        user.setStatus(UserStatus.ACTIVE);
+        user.setStatus(UserStatus.PENDING);
         userRepository.save(user);
 
         log.info("Tenant and admin user created: tenantId={}, userId={}", tenant.getId(), user.getId());
 
         // 3. Publish event
         eventPublisher.publishEvent(
-                new UserRegisteredEvent(this, user.getId(), tenant.getId(), user.getEmail())
+                new UserRegisteredEvent(this, user.getId(), tenant.getId(), user.getEmail(), user.getFullName(), tenant.getName())
         );
 
         // 4. Return result - no entity crosses the boundary
@@ -82,12 +85,49 @@ public class TenantModuleApiImpl implements TenantModuleApi {
     }
 
     @Override
+    @Transactional
+    public TenantUserResult authenticateUser(String email, String password) {
+        return userRepository.findByEmail(email)
+                .filter(user -> passwordEncoder.matches(password, user.getPasswordHash()))
+                .map(user -> TenantUserResult.builder()
+                        .tenantId(user.getTenant().getId())
+                        .userId(user.getId())
+                        .email(user.getEmail())
+                        .role(user.getRole().name())
+                        .plan(user.getTenant().getPlan().name())
+                        .status(user.getStatus().name())
+                        .build()
+                )
+                .orElse(null);
+    }
+
+    @Override
     public UserAuthDto findUserByEmail(String email) {
         return userRepository.findByEmail(email)
                 .map(user -> UserAuthDto.builder()
                         .userId(user.getId())
                         .tenantId(user.getTenant().getId())
                         .email(user.getEmail())
+                        .fullName(user.getFullName())
+                        .plan(user.getTenant().getPlan().name())
+                        .passwordHash(user.getPasswordHash())
+                        .role(user.getRole().name())
+                        .status(user.getStatus().name())
+                        .tenantStatus(user.getTenant().getStatus().name())
+                        .build()
+                )
+                .orElse(null);
+    }
+
+    @Override
+    public UserAuthDto findUserById(UUID userId) {
+        return userRepository.findById(userId)
+                .map(user -> UserAuthDto.builder()
+                        .userId(user.getId())
+                        .tenantId(user.getTenant().getId())
+                        .email(user.getEmail())
+                        .fullName(user.getFullName())
+                        .plan(user.getTenant().getPlan().name())
                         .passwordHash(user.getPasswordHash())
                         .role(user.getRole().name())
                         .status(user.getStatus().name())

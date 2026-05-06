@@ -11,6 +11,8 @@ public class UserAuthDto {
     private UUID userId;
     private UUID tenantId;
     private String email;
+    private String fullName;
+    private String plan;
     private String passwordHash;
     private String role;
     private String status;

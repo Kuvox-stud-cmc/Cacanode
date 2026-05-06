@@ -33,4 +33,8 @@ public class RefreshToken extends BaseImmutableEntity {
 
     @Column(name = "tenant_id", nullable = false)
     private UUID tenantId;
+
+    /** Mirrors rememberMe / post-register: persisted cookie vs session cookie (survives rotation). */
+    @Column(name = "persistent", nullable = false, columnDefinition = "BOOLEAN DEFAULT FALSE")
+    private boolean persistent = false;
 }

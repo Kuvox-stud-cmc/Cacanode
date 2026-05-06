@@ -48,6 +48,7 @@ CREATE TABLE refresh_tokens (
                                 token_hash      VARCHAR(255) UNIQUE NOT NULL,
                                 expires_at      TIMESTAMP NOT NULL,
                                 revoked         BOOLEAN NOT NULL DEFAULT FALSE,
+                                persistent      BOOLEAN NOT NULL DEFAULT FALSE,
                                 created_at      TIMESTAMP NOT NULL DEFAULT NOW()
 );
 

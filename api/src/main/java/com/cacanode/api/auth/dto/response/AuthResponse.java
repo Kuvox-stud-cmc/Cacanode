@@ -7,7 +7,6 @@ import lombok.Getter;
 @Builder
 public class AuthResponse {
     private String accessToken;
-    private String refreshToken;
     private String tokenType;
     private long expiresIn;         // access token expiry in seconds
     private UserInfo user;
@@ -17,6 +16,7 @@ public class AuthResponse {
     public static class UserInfo {
         private String userId;
         private String tenantId;
+        private String fullName;
         private String email;
         private String role;
         private String plan;

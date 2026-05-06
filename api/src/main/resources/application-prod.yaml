@@ -1,3 +1,9 @@
+app:
+  cors:
+    allowed-origins:
+      - "https://cacanode.com"
+      - "https://www.cacanode.com"
+
 spring:
   config:
     activate:
@@ -47,10 +53,9 @@ management:
       show-details: never
 
 jwt:
-  access-token-key: ${ACCESS_TOKEN_KEY}
-  refresh-token-key: ${REFRESH_TOKEN_KEY}
-  expiry-mins: 15
-  expiry-days: 7
+  token-key: ${TOKEN_KEY}
+  expiry-mins: ${EXPIRY_MINS:15}
+  expiry-days: ${EXPIRY_DAYS:7}
 
 grpc:
   server:

@@ -1,8 +1,9 @@
 package com.cacanode.api.notification.model;
 
 import com.cacanode.api.common.model.BaseImmutableEntity;
-import com.cacanode.api.document.enums.DocumentStatus;
-import com.cacanode.api.document.enums.DocumentType;
+import com.cacanode.api.notification.enums.NotificationStatus;
+import com.cacanode.api.notification.enums.NotificationType;
+
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.Setter;
@@ -29,7 +30,7 @@ public class Notification extends BaseImmutableEntity {
 
     @Enumerated(EnumType.STRING)
     @Column(name = "type", nullable = false, length = 100)
-    private DocumentType type;
+    private NotificationType type;
 
     @Column(name = "title", nullable = false)
     private String title;
@@ -39,7 +40,7 @@ public class Notification extends BaseImmutableEntity {
 
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 50)
-    private DocumentStatus status = DocumentStatus.PENDING;
+    private NotificationStatus status = NotificationStatus.PENDING;
 
     @Column(name = "sent_at")
     private LocalDateTime sentAt;
