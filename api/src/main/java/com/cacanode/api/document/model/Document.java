@@ -3,8 +3,6 @@ package com.cacanode.api.document.model;
 import com.cacanode.api.common.model.BaseEntity;
 import com.cacanode.api.document.enums.DocumentStatus;
 import com.cacanode.api.document.enums.DocumentType;
-import com.cacanode.api.tenant.model.Tenant;
-import com.cacanode.api.tenant.model.User;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.Setter;

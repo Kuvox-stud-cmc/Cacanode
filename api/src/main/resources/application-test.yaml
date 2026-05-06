@@ -1,3 +1,9 @@
+app:
+  cors:
+    allowed-origin-patterns:
+      - "http://localhost:*"
+      - "http://127.0.0.1:*"
+
 spring:
   config:
     activate:
@@ -35,10 +41,9 @@ openapi:
     version: 1.0.0
 
 jwt:
-  access-token-key: test-access-secret-key-minimum-32-chars
-  refresh-token-key: test-refresh-secret-key-minimum-32-chars
-  expiry-mins: 15
-  expiry-days: 7
+  token-key: ${TOKEN_KEY}
+  expiry-mins: ${EXPIRY_MINS:15}
+  expiry-days: ${EXPIRY_DAYS:7}
 
 grpc:
   server:
