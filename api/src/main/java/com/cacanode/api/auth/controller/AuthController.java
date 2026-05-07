@@ -6,6 +6,7 @@ import com.cacanode.api.auth.dto.response.AuthResponse;
 import com.cacanode.api.auth.service.AuthService;
 import com.cacanode.api.common.exception.custom.UnauthorizedException;
 
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -17,6 +18,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+@Tag(name = "Authentication", description = "Endpoints for user registration, login, token refresh, and logout")
 @RestController
 @RequestMapping("/api/auth")
 @RequiredArgsConstructor
