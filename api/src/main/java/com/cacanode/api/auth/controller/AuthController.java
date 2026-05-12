@@ -2,10 +2,17 @@ package com.cacanode.api.auth.controller;
 
 import com.cacanode.api.auth.dto.request.LoginRequest;
 import com.cacanode.api.auth.dto.request.RegisterRequest;
+import com.cacanode.api.auth.dto.request.ResendLogin2FARequest;
+import com.cacanode.api.auth.dto.request.ResendVerificationRequest;
+import com.cacanode.api.auth.dto.request.VerifyEmailRequest;
+import com.cacanode.api.auth.dto.request.VerifyLogin2FARequest;
 import com.cacanode.api.auth.dto.response.AuthResponse;
+import com.cacanode.api.auth.dto.response.RegisterResponse;
+import com.cacanode.api.auth.dto.response.ResendVerificationResponse;
 import com.cacanode.api.auth.service.AuthService;
 import com.cacanode.api.common.exception.custom.UnauthorizedException;
 
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -17,6 +24,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+@Tag(name = "Authentication", description = "Endpoints for user registration, login, token refresh, and logout")
 @RestController
 @RequestMapping("/api/auth")
 @RequiredArgsConstructor
@@ -25,28 +33,51 @@ public class AuthController {
         private final AuthService authService;
 
         @PostMapping("/register")
-        public ResponseEntity<AuthResponse> register(
-                @Valid @RequestBody RegisterRequest request,
-                HttpServletResponse response
-        ) {
-            return ResponseEntity
-                    .status(HttpStatus.CREATED)
-                    .body(authService.register(request, response));
+        public ResponseEntity<RegisterResponse> register(
+                        @Valid @RequestBody RegisterRequest request) {
+                return ResponseEntity
+                                .status(HttpStatus.CREATED)
+                                .body(authService.register(request));
+        }
+
+        @PostMapping("/verify-email")
+        public ResponseEntity<AuthResponse> verifyEmail(
+                        @Valid @RequestBody VerifyEmailRequest request,
+                        HttpServletResponse response) {
+                return ResponseEntity.ok(authService.verifyEmail(request.getToken(), response));
+        }
+
+        @PostMapping("/resend-verification")
+        public ResponseEntity<ResendVerificationResponse> resendVerification(
+                        @Valid @RequestBody ResendVerificationRequest request) {
+                return ResponseEntity.ok(authService.resendVerificationEmail(request.getEmail()));
         }
 
         @PostMapping("/login")
-        public ResponseEntity<AuthResponse> login(
-                @Valid @RequestBody LoginRequest request,
-                HttpServletResponse response
-        ) { 
-            return ResponseEntity.ok(authService.login(request, response));
+        public ResponseEntity<Object> login(
+                        @Valid @RequestBody LoginRequest request,
+                        HttpServletResponse response) {
+                Object result = authService.login(request, response);
+                return ResponseEntity.ok(result);
         }
-        
+
+        @PostMapping("/verify-login-2fa")
+        public ResponseEntity<AuthResponse> verifyLogin2FA(
+                        @Valid @RequestBody VerifyLogin2FARequest request,
+                        HttpServletResponse response) {
+                return ResponseEntity.ok(authService.verifyLogin2FA(request.getToken(), response));
+        }
+
+        @PostMapping("/resend-login-2fa")
+        public ResponseEntity<ResendVerificationResponse> resendLogin2FA(
+                        @Valid @RequestBody ResendLogin2FARequest request) {
+                return ResponseEntity.ok(authService.resendLogin2FA(request.getEmail()));
+        }
+
         @PostMapping("/refresh")
         public ResponseEntity<AuthResponse> refresh(
-                @CookieValue(name = "refresh_token", required = false) String refreshToken,
-                HttpServletResponse response
-        ) {
+                        @CookieValue(name = "refresh_token", required = false) String refreshToken,
+                        HttpServletResponse response) {
                 if (refreshToken == null) {
                         throw new UnauthorizedException("Refresh token missing");
                 }
@@ -55,9 +86,8 @@ public class AuthController {
 
         @PostMapping("/logout")
         public ResponseEntity<Void> logout(
-                @CookieValue(name = "refresh_token", required = false) String refreshToken,
-                HttpServletResponse response
-        ) {
+                        @CookieValue(name = "refresh_token", required = false) String refreshToken,
+                        HttpServletResponse response) {
                 if (refreshToken != null) {
                         authService.logout(refreshToken);
                 }

@@ -23,4 +23,18 @@ public interface JwtService {
 
     public <T> T extractClaim(String token, Function<io.jsonwebtoken.Claims, T> claimsResolver);
 
+    /**
+     * Generates a short-lived verification token for email activation.
+     * 
+     * @return JWT token valid for 24 hours
+     */
+    public String generateVerificationToken(UUID userId, String email);
+
+    /**
+     * Validates a verification token and returns its claims.
+     * 
+     * @throws UnauthorizedException if token is invalid or expired
+     */
+    public io.jsonwebtoken.Claims validateVerificationToken(String token);
+
 }

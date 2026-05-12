@@ -17,3 +17,5 @@ docker-compose.override.yml
 
 # ─── Environment (root level if any) ─────────────────────────────────────────
 .env
+
+.claude

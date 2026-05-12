@@ -12,6 +12,8 @@ spring:
       on-profile: dev
   devtools:
     add-properties: true
+  flyway:
+    enabled: false
   datasource:
     url: ${POSTGRES_URL}
     username: ${POSTGRES_USER}
@@ -42,7 +44,12 @@ spring:
     api-key: ${SENDGRID_API_KEY}
     from-email: ${FROM_EMAIL}
     template-id: ${TEMPLATE_ID}
-    verification-link: ${VERIFICATION_LINK}
+    verification-link: ${VERIFICATION_LINK:http://localhost:3000/verify-email}
+    login-2fa-link: ${LOGIN_2FA_LINK:http://localhost:3000/verify-login}
+    support-email: ${SUPPORT_EMAIL:support@cacanode.com}
+    verification-resend-cooldown-seconds: ${VERIFICATION_RESEND_COOLDOWN_SECONDS:60}
+    max-verification-resend-attempts: ${MAX_VERIFICATION_RESEND_ATTEMPTS:5}
+    login-2fa-expiry-minutes: ${LOGIN_2FA_EXPIRY_MINUTES:15}
 
 springdoc:
   api-docs:
@@ -65,10 +72,10 @@ jwt:
 
 grpc:
   server:
-    port: 9090                          # Spring Boot gRPC server port
+    port: 9090 # Spring Boot gRPC server port
     security:
-      enabled: false                    # no TLS in dev
+      enabled: false # no TLS in dev
   client:
     fastapi-service:
       address: static://localhost:50051 # FastAPI gRPC server port
-      negotiation-type: plaintext       # no TLS in dev
+      negotiation-type: plaintext # no TLS in dev

@@ -24,7 +24,7 @@ spring:
     api-key: test-key
     from-email: test@test.com
     template-id: test-template
-    verification-link: http://localhost:5173/verify
+    verification-link: http://localhost:3000/verify
 
 springdoc:
   api-docs:

@@ -24,7 +24,7 @@ class Settings(BaseSettings):
     # ============================================
     APP_ENV: str = "development"
     APP_PORT: int = 8000
-    CORS_ORIGINS: str = "http://localhost:5173"
+    CORS_ORIGINS: str = "http://localhost:3000"
 
     # ============================================
     # LLM Configuration (Groq - default provider)
