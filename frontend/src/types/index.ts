@@ -34,6 +34,26 @@ export interface AuthResponse {
   user: AuthUser;
 }
 
+export interface RegisterResponse {
+  message: string;
+  email: string;
+  tenantId: string;
+  userId: string;
+}
+
+export interface ResendVerificationResponse {
+  message: string;
+  canRetryAfterSeconds?: number;
+}
+
+export interface LoginStep1Response {
+  message: string;
+  email: string;
+  requires2FA: boolean;
+}
+
+export type LoginResponse = AuthResponse | LoginStep1Response;
+
 export interface Message {
   id: string;
   role: "user" | "assistant";

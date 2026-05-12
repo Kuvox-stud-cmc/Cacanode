@@ -1,47 +1,48 @@
-"use client"
+"use client";
 
-import { useState } from "react"
-import { useForm } from "react-hook-form"
-import { zodResolver } from "@hookform/resolvers/zod"
-import { z } from "zod"
-import Link from "next/link"
-import { useRouter } from "next/navigation"
-import { AlertCircle, Eye, EyeOff, Loader2, X } from "lucide-react"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
+import { useState } from "react";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from "zod";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { AlertCircle, Eye, EyeOff, Loader2, X } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Card,
   CardContent,
   CardHeader,
   CardTitle,
   CardDescription,
-} from "@/components/ui/card"
-import { useAuthStore } from "@/components/providers/StoreProvider"
-import { registerApi } from "@/lib/auth-api"
-import { cn } from "@/lib/utils"
+} from "@/components/ui/card";
+import { registerApi } from "@/lib/auth-api";
+import { cn } from "@/lib/utils";
 
 const registerSchema = z
   .object({
     companyName: z.string().min(1, "Company name is required"),
     fullName: z.string().min(1, "Full name is required"),
-    email: z.string().min(1, "Email is required").email("Invalid email address"),
+    email: z
+      .string()
+      .min(1, "Email is required")
+      .email("Invalid email address"),
     password: z.string().min(8, "Password must be at least 8 characters"),
     confirmPassword: z.string().min(1, "Please confirm your password"),
   })
   .refine((data) => data.password === data.confirmPassword, {
     message: "Passwords do not match",
     path: ["confirmPassword"],
-  })
+  });
 
-type RegisterForm = z.infer<typeof registerSchema>
+type RegisterForm = z.infer<typeof registerSchema>;
 
 export default function RegisterPage() {
-  const router = useRouter()
-  const setAuth = useAuthStore((s) => s.setAuth)
-  const [showPassword, setShowPassword] = useState(false)
-  const [showConfirm, setShowConfirm] = useState(false)
-  const [apiError, setApiError] = useState<string | null>(null)
+  const router = useRouter();
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
+  const [apiError, setApiError] = useState<string | null>(null);
 
   const {
     register,
@@ -56,33 +57,38 @@ export default function RegisterPage() {
       password: "",
       confirmPassword: "",
     },
-  })
+  });
 
-  const clearApiError = () => setApiError(null)
+  const clearApiError = () => setApiError(null);
 
   const onSubmit = async (data: RegisterForm) => {
-    setApiError(null)
+    setApiError(null);
     try {
-      const res = await registerApi({
+      await registerApi({
         companyName: data.companyName,
         fullName: data.fullName,
         email: data.email,
         password: data.password,
-      })
-      setAuth(res.user, res.accessToken, res.user.tenantId)
-      router.push("/dashboard")
+      });
+      router.push(`/check-email?email=${encodeURIComponent(data.email)}`);
     } catch (e) {
-      const msg = e instanceof Error ? e.message : "Something went wrong"
-      setApiError(msg)
+      const msg = e instanceof Error ? e.message : "Something went wrong";
+      setApiError(msg);
     }
-  }
+  };
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-slate-50 px-4 py-8">
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
           <div className="flex items-center justify-center gap-2 mb-2">
-            <img src="/logo.png" alt="" className="w-8 h-8" width={32} height={32} />
+            <img
+              src="/logo.png"
+              alt=""
+              className="w-8 h-8"
+              width={32}
+              height={32}
+            />
             <span className="text-2xl font-bold bg-gradient-to-r from-indigo-600 to-violet-600 bg-clip-text text-transparent">
               CacaNode
             </span>
@@ -107,7 +113,9 @@ export default function RegisterPage() {
                   {...register("companyName", { onChange: clearApiError })}
                 />
                 {errors.companyName && (
-                  <p className="text-red-600 text-xs">{errors.companyName.message}</p>
+                  <p className="text-red-600 text-xs">
+                    {errors.companyName.message}
+                  </p>
                 )}
               </div>
 
@@ -121,7 +129,9 @@ export default function RegisterPage() {
                   {...register("fullName", { onChange: clearApiError })}
                 />
                 {errors.fullName && (
-                  <p className="text-red-600 text-xs">{errors.fullName.message}</p>
+                  <p className="text-red-600 text-xs">
+                    {errors.fullName.message}
+                  </p>
                 )}
               </div>
 
@@ -158,7 +168,9 @@ export default function RegisterPage() {
                     disabled={isSubmitting}
                     onClick={() => setShowPassword((v) => !v)}
                     className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-800 p-1 rounded-md disabled:opacity-50"
-                    aria-label={showPassword ? "Hide password" : "Show password"}
+                    aria-label={
+                      showPassword ? "Hide password" : "Show password"
+                    }
                   >
                     {showPassword ? (
                       <EyeOff className="w-4 h-4" />
@@ -168,7 +180,9 @@ export default function RegisterPage() {
                   </button>
                 </div>
                 {errors.password && (
-                  <p className="text-red-600 text-xs">{errors.password.message}</p>
+                  <p className="text-red-600 text-xs">
+                    {errors.password.message}
+                  </p>
                 )}
               </div>
 
@@ -182,7 +196,9 @@ export default function RegisterPage() {
                     disabled={isSubmitting}
                     className="pr-10"
                     aria-invalid={!!errors.confirmPassword}
-                    {...register("confirmPassword", { onChange: clearApiError })}
+                    {...register("confirmPassword", {
+                      onChange: clearApiError,
+                    })}
                   />
                   <button
                     type="button"
@@ -200,7 +216,9 @@ export default function RegisterPage() {
                   </button>
                 </div>
                 {errors.confirmPassword && (
-                  <p className="text-red-600 text-xs">{errors.confirmPassword.message}</p>
+                  <p className="text-red-600 text-xs">
+                    {errors.confirmPassword.message}
+                  </p>
                 )}
               </div>
 
@@ -227,7 +245,7 @@ export default function RegisterPage() {
                 disabled={isSubmitting}
                 className={cn(
                   "w-full h-10 bg-indigo-600 hover:bg-indigo-700 text-white",
-                  isSubmitting && "opacity-70"
+                  isSubmitting && "opacity-70",
                 )}
               >
                 {isSubmitting ? (
@@ -243,7 +261,10 @@ export default function RegisterPage() {
 
             <p className="text-center text-sm text-slate-500 mt-4">
               Already have an account?{" "}
-              <Link href="/login" className="text-indigo-600 hover:underline font-medium">
+              <Link
+                href="/login"
+                className="text-indigo-600 hover:underline font-medium"
+              >
                 Sign in
               </Link>
             </p>
@@ -251,5 +272,5 @@ export default function RegisterPage() {
         </Card>
       </div>
     </div>
-  )
+  );
 }

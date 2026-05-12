@@ -21,20 +21,23 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 public class EmailService {
 
-  private final SendGrid sendGrid;
+    private final SendGrid sendGrid;
 
-  @Value("${spring.sendgrid.from-email}")
-  private String fromEmail;
+    @Value("${spring.sendgrid.from-email}")
+    private String fromEmail;
 
-  @Value("${spring.sendgrid.verification-link}")
-  private String verificationLink;
+    @Value("${spring.sendgrid.verification-link}")
+    private String verificationLink;
 
-  public void sendWelcomeEmail(String toEmail, String fullName, String companyName) {
+    @Value("${spring.sendgrid.login-2fa-link:http://localhost:3000/verify-login}")
+    private String login2FALink;
+
+    public void sendWelcomeEmail(String toEmail, String fullName, String companyName, String verificationToken) {
         Email from = new Email(fromEmail, "CacaNode");
         Email to = new Email(toEmail);
 
         String subject = "Welcome to CacaNode — Confirm your email";
-        String htmlContent = buildWelcomeEmailHtml(fullName, companyName, toEmail);
+        String htmlContent = buildWelcomeEmailHtml(fullName, companyName, verificationToken);
 
         Content content = new Content("text/html", htmlContent);
         Mail mail = new Mail(from, subject, to, content);
@@ -62,9 +65,8 @@ public class EmailService {
     private String buildWelcomeEmailHtml(
             String fullName,
             String companyName,
-            String email
-    ) {
-        String verifyUrl = verificationLink + "?email=" + email;
+            String verificationToken) {
+        String verifyUrl = verificationLink + "?token=" + verificationToken;
 
         return """
                 <!DOCTYPE html>
@@ -79,7 +81,7 @@ public class EmailService {
                         h1 { font-size: 22px; color: #111827; }
                         p { color: #6b7280; line-height: 1.6; }
                         .btn { display: inline-block; padding: 12px 28px; background: #4f46e5;
-                               color: #fff; text-decoration: none; border-radius: 6px;
+                               color: #fff!important; text-decoration: none; border-radius: 6px;
                                font-weight: bold; margin: 24px 0; }
                         .footer { margin-top: 32px; font-size: 12px; color: #9ca3af; }
                     </style>
@@ -103,5 +105,78 @@ public class EmailService {
                 </body>
                 </html>
                 """.formatted(fullName, companyName, verifyUrl);
+    }
+
+    public void sendLogin2FAEmail(String toEmail, String fullName, String verificationToken) {
+        Email from = new Email(fromEmail, "CacaNode");
+        Email to = new Email(toEmail);
+
+        String subject = "Login Verification - CacaNode";
+        log.info("User login full name: {}", fullName);
+        String htmlContent = buildLogin2FAEmailHtml(fullName, verificationToken);
+
+        Content content = new Content("text/html", htmlContent);
+        Mail mail = new Mail(from, subject, to, content);
+
+        try {
+            Request request = new Request();
+            request.setMethod(Method.POST);
+            request.setEndpoint("mail/send");
+            request.setBody(mail.build());
+
+            Response response = sendGrid.api(request);
+
+            if (response.getStatusCode() >= 200 && response.getStatusCode() < 300) {
+                log.info("Login 2FA email sent to: {}", toEmail);
+            } else {
+                log.error("Failed to send login 2FA email to: {} — status: {} body: {}",
+                        toEmail, response.getStatusCode(), response.getBody());
+            }
+
+        } catch (IOException e) {
+            log.error("Exception sending login 2FA email to: {} — {}", toEmail, e.getMessage());
+        }
+    }
+
+    private String buildLogin2FAEmailHtml(String fullName, String verificationToken) {
+        String verifyUrl = login2FALink + "?token=" + verificationToken;
+
+        return """
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <meta charset="UTF-8">
+                    <style>
+                        body { font-family: Arial, sans-serif; background: #f9f9f9; margin: 0; padding: 0; }
+                        .container { max-width: 600px; margin: 40px auto; background: #fff;
+                                     border-radius: 8px; padding: 40px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+                        .logo { font-size: 24px; font-weight: bold; color: #4f46e5; margin-bottom: 24px; }
+                        h1 { font-size: 22px; color: #111827; }
+                        p { color: #6b7280; line-height: 1.6; }
+                        .btn { display: inline-block; padding: 12px 28px; background: #4f46e5;
+                               color: #fff!important; text-decoration: none; border-radius: 6px;
+                               font-weight: bold; margin: 24px 0; }
+                        .footer { margin-top: 32px; font-size: 12px; color: #9ca3af; }
+                    </style>
+                </head>
+                <body>
+                    <div class="container">
+                        <div class="logo">CacaNode</div>
+                        <h1>Hello, %s!</h1>
+                        <p>
+                            We received a login request for your CacaNode account.
+                            Please click the button below to verify and complete your login.
+                        </p>
+                        <a href="%s" class="btn">Verify Login</a>
+                        <p>If you did not attempt to log in, please ignore this email and ensure your account is secure.</p>
+                        <div class="footer">
+                            © 2026 CacaNode. All rights reserved.<br>
+                            This link expires in 15 minutes.
+                        </div>
+                    </div>
+                </body>
+                </html>
+                """
+                .formatted(fullName, verifyUrl);
     }
 }

@@ -20,16 +20,32 @@ public interface TenantModuleApi {
     /**
      * Finds a user by email for authentication
      * Called by auth module during login.
-     * */
+     */
     UserAuthDto findUserByEmail(String email);
 
     /**
      * Get user by userId for token refresh
-     * */
+     */
     UserAuthDto findUserById(UUID userId);
 
     /**
      * Checks if email already exists across all tenants.
-     * */
+     */
     boolean existsByEmail(String email);
+
+    /**
+     * Activates a user by setting their status to ACTIVE.
+     * Called by auth module during email verification.
+     *
+     * @return UserAuthDto with updated user info
+     */
+    UserAuthDto activateUser(UUID userId);
+
+    /**
+     * Suspends a user by setting their status to SUSPENDED.
+     * Called by auth module when verification resend limit exceeded.
+     *
+     * @param userId the user ID to suspend
+     */
+    void suspendUser(UUID userId);
 }

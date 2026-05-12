@@ -1,39 +1,39 @@
-"use client"
+"use client";
 
-import { useState } from "react"
-import { useForm } from "react-hook-form"
-import { zodResolver } from "@hookform/resolvers/zod"
-import { z } from "zod"
-import Link from "next/link"
-import { useRouter } from "next/navigation"
-import { AlertCircle, Eye, EyeOff, Loader2, X } from "lucide-react"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
+import { useState } from "react";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from "zod";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { AlertCircle, Eye, EyeOff, Loader2, X } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Card,
   CardContent,
   CardHeader,
   CardTitle,
   CardDescription,
-} from "@/components/ui/card"
-import { useAuthStore } from "@/components/providers/StoreProvider"
-import { loginApi } from "@/lib/auth-api"
-import { cn } from "@/lib/utils"
+} from "@/components/ui/card";
+import { useAuthStore } from "@/components/providers/StoreProvider";
+import { loginApi } from "@/lib/auth-api";
+import { cn } from "@/lib/utils";
 
 const loginSchema = z.object({
   email: z.string().min(1, "Email is required").email("Invalid email address"),
   password: z.string().min(1, "Password is required"),
   rememberMe: z.boolean(),
-})
+});
 
-type LoginForm = z.infer<typeof loginSchema>
+type LoginForm = z.infer<typeof loginSchema>;
 
 export default function LoginPage() {
-  const router = useRouter()
-  const setAuth = useAuthStore((s) => s.setAuth)
-  const [showPassword, setShowPassword] = useState(false)
-  const [apiError, setApiError] = useState<string | null>(null)
+  const router = useRouter();
+  const setAuth = useAuthStore((s) => s.setAuth);
+  const [showPassword, setShowPassword] = useState(false);
+  const [apiError, setApiError] = useState<string | null>(null);
 
   const {
     register,
@@ -46,29 +46,53 @@ export default function LoginPage() {
       password: "",
       rememberMe: false,
     },
-  })
+  });
 
   const onSubmit = async (data: LoginForm) => {
-    setApiError(null)
+    setApiError(null);
     try {
       const res = await loginApi({
         email: data.email,
         password: data.password,
         rememberMe: data.rememberMe,
-      })
-      setAuth(res.user, res.accessToken, res.user.tenantId)
-      router.push("/dashboard")
-    } catch {
-      setApiError("Invalid email or password")
+      });
+
+      // Check if 2FA is required
+      if ("requires2FA" in res && res.requires2FA) {
+        // Redirect to check-login-email page for 2FA
+        router.push(
+          `/check-login-email?email=${encodeURIComponent(res.email)}`,
+        );
+        return;
+      }
+
+      // Direct login (AuthResponse)
+      if ("accessToken" in res && "user" in res) {
+        setAuth(res.user, res.accessToken, res.user.tenantId);
+        router.push("/dashboard");
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Invalid email or password";
+      if (msg.includes("suspended")) {
+        setApiError(msg);
+      } else {
+        setApiError(msg);
+      }
     }
-  }
+  };
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-slate-50 px-4">
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
           <div className="flex items-center justify-center gap-2 mb-2">
-            <img src="/logo.png" alt="" className="w-8 h-8" width={32} height={32} />
+            <img
+              src="/logo.png"
+              alt=""
+              className="w-8 h-8"
+              width={32}
+              height={32}
+            />
             <span className="text-2xl font-bold bg-gradient-to-r from-indigo-600 to-violet-600 bg-clip-text text-transparent">
               CacaNode
             </span>
@@ -79,7 +103,9 @@ export default function LoginPage() {
         <Card className="shadow-md bg-white">
           <CardHeader>
             <CardTitle>Welcome back</CardTitle>
-            <CardDescription>Sign in to your account to continue</CardDescription>
+            <CardDescription>
+              Sign in to your account to continue
+            </CardDescription>
           </CardHeader>
           <CardContent>
             <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
@@ -108,7 +134,9 @@ export default function LoginPage() {
                     disabled={isSubmitting}
                     className="pr-10"
                     aria-invalid={!!errors.password}
-                    {...register("password", { onChange: () => setApiError(null) })}
+                    {...register("password", {
+                      onChange: () => setApiError(null),
+                    })}
                   />
                   <button
                     type="button"
@@ -116,7 +144,9 @@ export default function LoginPage() {
                     disabled={isSubmitting}
                     onClick={() => setShowPassword((v) => !v)}
                     className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-800 p-1 rounded-md disabled:opacity-50"
-                    aria-label={showPassword ? "Hide password" : "Show password"}
+                    aria-label={
+                      showPassword ? "Hide password" : "Show password"
+                    }
                   >
                     {showPassword ? (
                       <EyeOff className="w-4 h-4" />
@@ -126,7 +156,9 @@ export default function LoginPage() {
                   </button>
                 </div>
                 {errors.password && (
-                  <p className="text-red-600 text-xs">{errors.password.message}</p>
+                  <p className="text-red-600 text-xs">
+                    {errors.password.message}
+                  </p>
                 )}
               </div>
 
@@ -136,9 +168,14 @@ export default function LoginPage() {
                   type="checkbox"
                   disabled={isSubmitting}
                   className="rounded border-slate-300 size-4 accent-indigo-600"
-                  {...register("rememberMe", { onChange: () => setApiError(null) })}
+                  {...register("rememberMe", {
+                    onChange: () => setApiError(null),
+                  })}
                 />
-                <Label htmlFor="rememberMe" className="font-normal text-sm cursor-pointer">
+                <Label
+                  htmlFor="rememberMe"
+                  className="font-normal text-sm cursor-pointer"
+                >
                   Remember me
                 </Label>
               </div>
@@ -166,7 +203,7 @@ export default function LoginPage() {
                 disabled={isSubmitting}
                 className={cn(
                   "w-full h-10 bg-indigo-600 hover:bg-indigo-700 text-white",
-                  isSubmitting && "opacity-70"
+                  isSubmitting && "opacity-70",
                 )}
               >
                 {isSubmitting ? (
@@ -193,5 +230,5 @@ export default function LoginPage() {
         </Card>
       </div>
     </div>
-  )
+  );
 }

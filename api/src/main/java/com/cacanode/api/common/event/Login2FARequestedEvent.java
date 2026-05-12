@@ -6,29 +6,26 @@ import org.springframework.context.ApplicationEvent;
 import java.util.UUID;
 
 @Getter
-public class UserRegisteredEvent extends ApplicationEvent {
+public class Login2FARequestedEvent extends ApplicationEvent {
 
     private UUID userId;
     private UUID tenantId;
     private String email;
     private String fullName;
-    private String companyName;
     private String verificationToken;
 
-    public UserRegisteredEvent(
+    public Login2FARequestedEvent(
             Object source,
             UUID userId,
             UUID tenantId,
             String email,
             String fullName,
-            String companyName,
             String verificationToken) {
         super(source);
         this.userId = userId;
         this.tenantId = tenantId;
         this.email = email;
         this.fullName = fullName;
-        this.companyName = companyName;
         this.verificationToken = verificationToken;
     }
 
