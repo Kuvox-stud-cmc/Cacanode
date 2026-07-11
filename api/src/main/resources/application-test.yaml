@@ -3,6 +3,8 @@ app:
     allowed-origin-patterns:
       - "http://localhost:*"
       - "http://127.0.0.1:*"
+  security:
+    cookie-secure: false
 
 spring:
   config:
@@ -11,7 +13,7 @@ spring:
   devtools:
     add-properties: false
   datasource:
-    url: jdbc:h2:mem:testdb;DB_CLOSE_DELAY=-1
+    url: jdbc:h2:mem:testdb;MODE=PostgreSQL;INIT=CREATE DOMAIN IF NOT EXISTS JSONB AS JSON;DB_CLOSE_DELAY=-1
     username: sa
     password:
     driver-class-name: org.h2.Driver
@@ -41,9 +43,9 @@ openapi:
     version: 1.0.0
 
 jwt:
-  token-key: ${TOKEN_KEY}
-  expiry-mins: ${EXPIRY_MINS:15}
-  expiry-days: ${EXPIRY_DAYS:7}
+  token-key: ${JWT_ACCESS_SECRET:${TOKEN_KEY:test-access-secret}}
+  expiry-mins: ${JWT_ACCESS_TTL_MINUTES:${EXPIRY_MINS:15}}
+  expiry-days: ${JWT_REFRESH_TTL_DAYS:${EXPIRY_DAYS:30}}
 
 grpc:
   server:

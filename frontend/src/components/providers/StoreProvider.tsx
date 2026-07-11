@@ -1,7 +1,7 @@
 // components/providers/StoreProvider.tsx
 'use client'
 
-import { createContext, useContext, useRef, type ReactNode } from 'react'
+import { createContext, useContext, useState, type ReactNode } from 'react'
 import { useStore } from 'zustand'
 import { createAuthStore, type AuthState } from '@/store/authStore'
 import { createChatStore, type ChatState } from '@/store/chatStore'
@@ -20,20 +20,14 @@ interface StoreContextValue {
 const StoreContext = createContext<StoreContextValue | null>(null)
 
 export function StoreProvider({ children }: { children: ReactNode }) {
-  const authRef = useRef<AuthStore | null>(null)
-  const chatRef = useRef<ChatStore | null>(null)
-  const uiRef = useRef<UIStore | null>(null)
-
-  if (!authRef.current) authRef.current = createAuthStore()
-  if (!chatRef.current) chatRef.current = createChatStore()
-  if (!uiRef.current) uiRef.current = createUIStore()
+  const [stores] = useState<StoreContextValue>(() => ({
+    authStore: createAuthStore(),
+    chatStore: createChatStore(),
+    uiStore: createUIStore(),
+  }))
 
   return (
-    <StoreContext.Provider value={{
-      authStore: authRef.current,
-      chatStore: chatRef.current,
-      uiStore: uiRef.current,
-    }}>
+    <StoreContext.Provider value={stores}>
       {children}
     </StoreContext.Provider>
   )

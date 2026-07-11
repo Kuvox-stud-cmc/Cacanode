@@ -52,7 +52,7 @@ export function useApiClient() {
     isRefreshingRef.current = true
 
     try {
-      const refreshResponse = await fetch(`${getApiBase()}/api/auth/refresh`, {
+      const refreshResponse = await fetch(`${getApiBase()}/auth/refresh`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',

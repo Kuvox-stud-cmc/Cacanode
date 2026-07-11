@@ -1,92 +1,115 @@
-"""Application configuration using pydantic-settings.
-
-All configuration is loaded from environment variables with sensible defaults.
-"""
+from functools import lru_cache
+from typing import Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    """Application settings loaded from environment variables.
-
-    Uses pydantic-settings to validate and parse environment variables.
-    Configuration is read from .env file if present.
-    """
-
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
         extra="ignore",
+        case_sensitive=False,
     )
 
-    # ============================================
-    # Application Configuration
-    # ============================================
-    APP_ENV: str = "development"
+    APP_ENV: Literal["development", "test", "staging", "production"] = "development"
+    APP_HOST: str = "0.0.0.0"
     APP_PORT: int = 8000
+    LOG_LEVEL: str = "INFO"
     CORS_ORIGINS: str = "http://localhost:3000"
+    DEFAULT_LOCALE: str = "vi-VN"
+    READINESS_REQUIRE_MODELS: bool = False
 
-    # ============================================
-    # LLM Configuration (Groq - default provider)
-    # ============================================
-    GROQ_API_KEY: str = ""
-    LLM_MODEL: str = "llama-3.3-70b-versatile"
-
-    # ============================================
-    # Embedding Configuration (Voyage AI - default)
-    # ============================================
-    VOYAGE_API_KEY: str = ""
-    EMBED_MODEL: str = "voyage-3"
-
-    # ============================================
-    # Vector Store (Qdrant)
-    # ============================================
-    QDRANT_HOST: str = "localhost"
-    QDRANT_PORT: int = 6333
-
-    # ============================================
-    # Graph Database (Kuzu - embedded)
-    # ============================================
-    KUZU_DATA_PATH: str = "./data/kuzu"
-
-    # ============================================
-    # Cache (Redis)
-    # ============================================
-    REDIS_URL: str = "redis://localhost:6379/0"
-
-    # ============================================
-    # Message Queue (RabbitMQ)
-    # ============================================
-    RABBITMQ_URL: str = "amqp://guest:guest@localhost:5672/"
-
-    # ============================================
-    # Object Storage (SeaweedFS - S3-compatible)
-    # ============================================
-    STORAGE_ENDPOINT: str = "http://localhost:8333"
-    STORAGE_ACCESS_KEY: str = ""
-    STORAGE_SECRET_KEY: str = ""
-    STORAGE_BUCKET: str = "documents"
-
-    # ============================================
-    # JWT Authentication (Shared with Spring Boot)
-    # ============================================
-    JWT_SECRET: str = ""
+    JWT_ACCESS_SECRET: str = "development-only-secret"
     JWT_ALGORITHM: str = "HS256"
+    CLIENT_TOKEN_SIGNING_SECRET: str = "development-only-client-secret"
+    BUSINESS_API_BASE_URL: str = "http://localhost:8080"
 
-    # ============================================
-    # Spring Boot API Integration
-    # ============================================
-    SPRING_BASE_URL: str = "http://localhost:8080"
+    POSTGRES_URL: str = "postgresql://cacanode:change-me@localhost:5432/cacanode"
+    REDIS_URL: str = "redis://localhost:6379/0"
+    RABBITMQ_URL: str = "amqp://rag_user:rag_password@localhost:5672/"
+
+    SEAWEEDFS_MASTER_URL: str = "http://localhost:9333"
+    SEAWEEDFS_FILER_URL: str = "http://localhost:8888"
+    SEAWEEDFS_S3_ENDPOINT: str = "http://localhost:8333"
+    SEAWEEDFS_ACCESS_KEY: str = ""
+    SEAWEEDFS_SECRET_KEY: str = ""
+    SEAWEEDFS_BUCKET: str = "cacanode"
+
+    QDRANT_URL: str = "http://localhost:6333"
+    QDRANT_API_KEY: str = ""
+    QDRANT_COLLECTION: str = "knowledge_units_v1"
+    QDRANT_TENANT_FIELD: str = "tenant_id"
+    QDRANT_KNOWLEDGE_BASE_FIELD: str = "knowledge_base_id"
+    KUZU_DATABASE_PATH: str = "./data/kuzu/cacanode.kuzu"
+    GRAPH_SERVICE_URL: str = "http://localhost:8010"
+
+    LLM_BASE_URL: str = "http://localhost:8001/v1"
+    LLM_INTERNAL_API_KEY: str = "development-only-key"
+    LLM_MODEL_ID: str = ""
+    LLM_ADAPTER_ID: str = ""
+    LLM_TEMPERATURE: float = 0.2
+    LLM_MAX_OUTPUT_TOKENS: int = 1024
+
+    TEXT_EMBEDDING_BASE_URL: str = "http://localhost:8081"
+    TEXT_EMBEDDING_MODEL_ID: str = "google/embeddinggemma-300m"
+    TEXT_EMBEDDING_DIMENSION: int = 768
+    TEXT_EMBEDDING_BATCH_SIZE: int = 32
+
+    WORKER_MODE: Literal["embedded", "dedicated", "disabled"] = "embedded"
+    WORKER_KINDS: str = "document,ocr,asr,vision,audio,video"
+    WORKER_POLL_INTERVAL_SECONDS: float = 2.0
+
+    CLIP_MODEL_ID: str = ""
+    CLAP_MODEL_ID: str = ""
+    WHISPER_MODEL_ID: str = ""
+    OCR_ENGINE: str = "paddleocr"
+    OCR_LANGUAGE: str = "vi"
+    FFMPEG_BINARY: str = "ffmpeg"
+    MODEL_REGISTRY_TOKEN: str = ""
+    MODEL_CACHE_DIR: str = "./data/models"
+    AI_DEVICE: str = "cpu"
+    AI_DTYPE: str = "auto"
+
+    MAX_DOCUMENT_MB: int = 20
+    MAX_IMAGE_MB: int = 20
+    MAX_AUDIO_MB: int = 200
+    MAX_VIDEO_MB: int = 500
+    MALWARE_SCAN_ENABLED: bool = False
+
+    TEXT_TOP_K: int = 20
+    IMAGE_TOP_K: int = 12
+    AUDIO_TOP_K: int = 12
+    GRAPH_MAX_HOPS: int = 3
+    FINAL_CONTEXT_TOP_K: int = 8
+    MIN_RETRIEVAL_CONFIDENCE: float = 0.0
+    ENABLE_RERANKER: bool = True
+    ENABLE_GENERAL_KNOWLEDGE: bool = False
+
+    SSE_HEARTBEAT_SECONDS: int = 15
+    IDEMPOTENCY_TTL_HOURS: int = 24
+    PUBLIC_RATE_LIMIT_PER_MINUTE: int = 120
+    MAX_CONCURRENT_STREAMS_PER_TENANT: int = 50
+
+    OTEL_EXPORTER_OTLP_ENDPOINT: str = ""
+    DISABLE_EXTERNAL_TELEMETRY: bool = True
 
     @property
-    def cors_origins_list(self) -> list[str]:
-        """Parse CORS_ORIGINS string into a list of origins.
+    def cors_origins(self) -> list[str]:
+        return [origin.strip() for origin in self.CORS_ORIGINS.split(",") if origin.strip()]
 
-        Returns:
-            List of allowed CORS origin URLs.
-        """
-        return [origin.strip() for origin in self.CORS_ORIGINS.split(",")]
+    @property
+    def worker_kinds(self) -> tuple[str, ...]:
+        return tuple(kind.strip() for kind in self.WORKER_KINDS.split(",") if kind.strip())
+
+    @property
+    def model_configured(self) -> bool:
+        return bool(self.LLM_MODEL_ID and self.LLM_BASE_URL)
 
 
-# Global settings instance
-settings = Settings()
+@lru_cache
+def get_settings() -> Settings:
+    return Settings()
+
+
+settings = get_settings()

@@ -3,6 +3,8 @@ app:
     allowed-origins:
       - "https://cacanode.com"
       - "https://www.cacanode.com"
+  security:
+    cookie-secure: ${COOKIE_SECURE:true}
 
 spring:
   config:
@@ -27,16 +29,10 @@ spring:
         order_updates: true
   data:
     redis:
-      host: ${REDIS_HOST}
-      port: ${REDIS_PORT:6379}
-      password: ${REDIS_PASSWORD}
+      url: ${REDIS_URL}
       timeout: 2000ms
   rabbitmq:
-    host: ${RABBITMQ_HOST}
-    port: ${RABBITMQ_PORT:5672}
-    username: ${RABBITMQ_USER}
-    password: ${RABBITMQ_PASSWORD}
-    virtual-host: /
+    addresses: ${RABBITMQ_URL}
   sendgrid:
     api-key: ${SENDGRID_API_KEY}
     from-email: ${FROM_EMAIL}
@@ -53,9 +49,9 @@ management:
       show-details: never
 
 jwt:
-  token-key: ${TOKEN_KEY}
-  expiry-mins: ${EXPIRY_MINS:15}
-  expiry-days: ${EXPIRY_DAYS:7}
+  token-key: ${JWT_ACCESS_SECRET:${TOKEN_KEY}}
+  expiry-mins: ${JWT_ACCESS_TTL_MINUTES:${EXPIRY_MINS:15}}
+  expiry-days: ${JWT_REFRESH_TTL_DAYS:${EXPIRY_DAYS:30}}
 
 grpc:
   server:
@@ -66,5 +62,5 @@ grpc:
       private-key: file:${GRPC_KEY_PATH}
   client:
     fastapi-service:
-      address: static://${FASTAPI_HOST:localhost}:50051
+      address: ${AI_API_GRPC_ADDRESS:static://ai-api:50051}
       negotiation-type: tls

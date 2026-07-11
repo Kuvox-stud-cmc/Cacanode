@@ -8,7 +8,7 @@ import com.cacanode.api.common.controller.BaseController;
 import lombok.RequiredArgsConstructor;
 
 @RestController
-@RequestMapping("/api/users")
+@RequestMapping({"/api/v1/users", "/api/users"})
 @RequiredArgsConstructor
 public class UserController extends BaseController {
 

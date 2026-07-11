@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import { Suspense, useState, useEffect, useCallback } from "react"
 import { useSearchParams } from "next/navigation"
 import Link from "next/link"
 import { Mail, ArrowLeft, Loader2, AlertCircle, CheckCircle } from "lucide-react"
@@ -16,7 +16,7 @@ import { resendLogin2FAApi } from "@/lib/auth-api"
 
 const COOLDOWN_SECONDS = 60
 
-export default function CheckLoginEmailPage() {
+function CheckLoginEmailContent() {
   const searchParams = useSearchParams()
   const email = searchParams.get("email") || "your email"
 
@@ -168,5 +168,13 @@ export default function CheckLoginEmailPage() {
         </Card>
       </div>
     </div>
+  )
+}
+
+export default function CheckLoginEmailPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-slate-50" />}>
+      <CheckLoginEmailContent />
+    </Suspense>
   )
 }

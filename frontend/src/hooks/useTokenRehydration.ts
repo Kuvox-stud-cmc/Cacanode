@@ -19,11 +19,9 @@ export function useTokenRehydration(): TokenRehydrationStatus {
 
   useEffect(() => {
     if (accessToken) {
-      setStatus('authenticated')
       return
     }
 
-    setStatus('rehydrating')
     let cancelled = false
 
     refreshApi()
@@ -43,5 +41,6 @@ export function useTokenRehydration(): TokenRehydrationStatus {
     }
   }, [accessToken, setAuth, clearAuth])
 
-  return status
+  if (accessToken) return 'authenticated'
+  return status === 'authenticated' ? 'rehydrating' : status
 }

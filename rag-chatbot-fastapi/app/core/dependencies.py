@@ -3,19 +3,22 @@
 Provides JWT verification and tenant context injection for protected endpoints.
 """
 
+from typing import Annotated, Any
+
 import jwt
 from fastapi import Depends, HTTPException, status
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.core.config import settings
 
 # HTTP Bearer security scheme for JWT tokens
 security_bearer = HTTPBearer()
+BearerCredentials = Annotated[HTTPAuthorizationCredentials, Depends(security_bearer)]
 
 
 async def get_current_tenant(
-    credentials: HTTPAuthorizationCredentials = Depends(security_bearer),
-) -> dict:
+    credentials: BearerCredentials,
+) -> dict[str, Any]:
     """Extract and validate tenant context from JWT token.
 
     Verifies the JWT signature using the shared secret, extracts tenant_id
@@ -36,7 +39,7 @@ async def get_current_tenant(
         # Decode and verify JWT using shared secret
         payload = jwt.decode(
             token,
-            settings.JWT_SECRET,
+            settings.JWT_ACCESS_SECRET,
             algorithms=[settings.JWT_ALGORITHM],
         )
     except jwt.ExpiredSignatureError:
@@ -44,13 +47,13 @@ async def get_current_tenant(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Token has expired",
             headers={"WWW-Authenticate": "Bearer"},
-        )
+        ) from None
     except jwt.InvalidTokenError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid token",
             headers={"WWW-Authenticate": "Bearer"},
-        )
+        ) from None
 
     # Extract tenant_id from payload (camelCase as set by Spring Boot)
     tenant_id = payload.get("tenantId")

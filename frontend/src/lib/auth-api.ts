@@ -6,11 +6,17 @@ import type {
 } from "@/types";
 
 export function getApiBase(): string {
-  const base = process.env.NEXT_PUBLIC_API_URL;
-  if (!base) {
-    throw new Error("NEXT_PUBLIC_API_URL is not set");
+  const canonical = process.env.NEXT_PUBLIC_API_BASE_URL;
+  if (canonical) {
+    return canonical.replace(/\/$/, "");
   }
-  return base.replace(/\/$/, "");
+
+  const legacy = process.env.NEXT_PUBLIC_API_URL;
+  if (legacy) {
+    return `${legacy.replace(/\/$/, "")}/api`;
+  }
+
+  throw new Error("NEXT_PUBLIC_API_BASE_URL is not set");
 }
 
 type ApiErrorBody = {
@@ -39,7 +45,7 @@ export async function refreshApi(): Promise<AuthResponse> {
   if (refreshInFlight) return refreshInFlight;
 
   refreshInFlight = (async () => {
-    const res = await fetch(`${getApiBase()}/api/auth/refresh`, {
+    const res = await fetch(`${getApiBase()}/auth/refresh`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       credentials: "include",
@@ -61,7 +67,7 @@ export async function loginApi(payload: {
   password: string;
   rememberMe: boolean;
 }): Promise<LoginResponse> {
-  const res = await fetch(`${getApiBase()}/api/auth/login`, {
+  const res = await fetch(`${getApiBase()}/auth/login`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     credentials: "include",
@@ -75,7 +81,7 @@ export async function loginApi(payload: {
 }
 
 export async function verifyLogin2FAApi(token: string): Promise<AuthResponse> {
-  const res = await fetch(`${getApiBase()}/api/auth/verify-login-2fa`, {
+  const res = await fetch(`${getApiBase()}/auth/verify-login-2fa`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     credentials: "include",
@@ -91,7 +97,7 @@ export async function verifyLogin2FAApi(token: string): Promise<AuthResponse> {
 export async function resendLogin2FAApi(
   email: string,
 ): Promise<ResendVerificationResponse> {
-  const res = await fetch(`${getApiBase()}/api/auth/resend-login-2fa`, {
+  const res = await fetch(`${getApiBase()}/auth/resend-login-2fa`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     credentials: "include",
@@ -110,7 +116,7 @@ export async function registerApi(payload: {
   email: string;
   password: string;
 }): Promise<RegisterResponse> {
-  const res = await fetch(`${getApiBase()}/api/auth/register`, {
+  const res = await fetch(`${getApiBase()}/auth/register`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     credentials: "include",
@@ -124,7 +130,7 @@ export async function registerApi(payload: {
 }
 
 export async function verifyEmailApi(token: string): Promise<AuthResponse> {
-  const res = await fetch(`${getApiBase()}/api/auth/verify-email`, {
+  const res = await fetch(`${getApiBase()}/auth/verify-email`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     credentials: "include",
@@ -140,7 +146,7 @@ export async function verifyEmailApi(token: string): Promise<AuthResponse> {
 export async function resendVerificationApi(
   email: string,
 ): Promise<ResendVerificationResponse> {
-  const res = await fetch(`${getApiBase()}/api/auth/resend-verification`, {
+  const res = await fetch(`${getApiBase()}/auth/resend-verification`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     credentials: "include",
@@ -154,7 +160,7 @@ export async function resendVerificationApi(
 }
 
 export async function logoutApi(): Promise<void> {
-  const res = await fetch(`${getApiBase()}/api/auth/logout`, {
+  const res = await fetch(`${getApiBase()}/auth/logout`, {
     method: "POST",
     credentials: "include",
   });

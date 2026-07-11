@@ -40,6 +40,7 @@ public class SecurityConfig {
     private String sendgridApiKey;
 
     private static final String[] PUBLIC_ENDPOINTS = {
+            "/api/v1/auth/**",
             "/api/auth/**",
             "/v3/api-docs/**",
             "/swagger-ui/**",

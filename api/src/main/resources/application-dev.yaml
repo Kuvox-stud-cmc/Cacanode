@@ -3,8 +3,10 @@
 app:
   cors:
     allowed-origin-patterns:
-      - "http://localhost:*"
-      - "http://127.0.0.1:*"
+      - ${ALLOWED_ORIGIN_PATTERN_1:http://localhost:*}
+      - ${ALLOWED_ORIGIN_PATTERN_2:http://127.0.0.1:*}
+  security:
+    cookie-secure: ${COOKIE_SECURE:false}
 
 spring:
   config:
@@ -30,16 +32,10 @@ spring:
           batch_size: 20
   data:
     redis:
-      host: ${REDIS_HOST:localhost}
-      port: ${REDIS_PORT:6379}
-      password: ${REDIS_PASSWORD:}
+      url: ${REDIS_URL:redis://localhost:6379/0}
       timeout: 2000ms
   rabbitmq:
-    host: ${RABBITMQ_HOST:localhost}
-    port: ${RABBITMQ_PORT:5672}
-    username: ${RABBITMQ_USER:rag_user}
-    password: ${RABBITMQ_PASSWORD:rag_password}
-    virtual-host: /
+    addresses: ${RABBITMQ_URL:amqp://rag_user:rag_password@localhost:5672/}
   sendgrid:
     api-key: ${SENDGRID_API_KEY}
     from-email: ${FROM_EMAIL}
@@ -66,9 +62,9 @@ openapi:
     version: 1.0.0
 
 jwt:
-  token-key: ${TOKEN_KEY}
-  expiry-mins: ${EXPIRY_MINS:15}
-  expiry-days: ${EXPIRY_DAYS:7}
+  token-key: ${JWT_ACCESS_SECRET:${TOKEN_KEY}}
+  expiry-mins: ${JWT_ACCESS_TTL_MINUTES:${EXPIRY_MINS:15}}
+  expiry-days: ${JWT_REFRESH_TTL_DAYS:${EXPIRY_DAYS:30}}
 
 grpc:
   server:
@@ -77,5 +73,5 @@ grpc:
       enabled: false # no TLS in dev
   client:
     fastapi-service:
-      address: static://localhost:50051 # FastAPI gRPC server port
+      address: ${AI_API_GRPC_ADDRESS:static://localhost:50051}
       negotiation-type: plaintext # no TLS in dev

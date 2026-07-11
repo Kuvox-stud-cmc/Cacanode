@@ -19,17 +19,16 @@ function VerifyEmailContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const setAuth = useAuthStore((s) => s.setAuth)
-  const [status, setStatus] = useState<"loading" | "success" | "error">("loading")
-  const [error, setError] = useState<string>("")
-
   const token = searchParams.get("token")
+  const [status, setStatus] = useState<"loading" | "success" | "error">(
+    token ? "loading" : "error",
+  )
+  const [error, setError] = useState<string>(
+    token ? "" : "No verification token found in the URL.",
+  )
 
   useEffect(() => {
-    if (!token) {
-      setStatus("error")
-      setError("No verification token found in the URL.")
-      return
-    }
+    if (!token) return
 
     verifyEmailApi(token)
       .then((res) => {

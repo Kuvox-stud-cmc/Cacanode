@@ -1,61 +1,62 @@
 .DEFAULT_GOAL := help
 
-PYTHON ?= python
-VENV ?= .venv
+CONDA ?= conda
+CONDA_ENV ?= rag-chatbot
+CONDA_RUN := $(CONDA) run --no-capture-output -n $(CONDA_ENV)
 APP_HOST ?= 0.0.0.0
 APP_PORT ?= 8000
 UVICORN_ARGS ?=
 PYTEST_ARGS ?=
 
 ifeq ($(OS),Windows_NT)
-VENV_PYTHON := $(VENV)/Scripts/python.exe
 REMOVE := powershell -NoProfile -Command Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
 else
-VENV_PYTHON := $(VENV)/bin/python
 REMOVE := rm -rf
 endif
 
-.PHONY: help venv install install-dev setup run dev test check clean clean-all
+.PHONY: help env install install-dev setup run dev test check lint typecheck clean
 
 help:
 	$(info Available targets:)
-	$(info   make setup       Create the virtual environment and install dependencies)
-	$(info   make install     Install runtime dependencies)
+	$(info   make env         Verify the configured Conda environment)
+	$(info   make setup       Install all dependencies into the Conda environment)
+	$(info   make install     Install runtime dependencies into the Conda environment)
 	$(info   make install-dev Install runtime dependencies and pytest)
 	$(info   make run         Run the FastAPI application)
 	$(info   make dev         Run FastAPI with auto-reload)
 	$(info   make test        Run pytest)
+	$(info   make lint        Run Ruff checks)
+	$(info   make typecheck   Run mypy)
 	$(info   make clean       Remove caches and test artifacts)
-	$(info   make clean-all   Also remove the virtual environment)
-	$(info Optional variables: APP_HOST, APP_PORT, UVICORN_ARGS, PYTEST_ARGS)
+	$(info Optional variables: CONDA_ENV, APP_HOST, APP_PORT, UVICORN_ARGS, PYTEST_ARGS)
 
-$(VENV_PYTHON):
-	$(PYTHON) -m venv $(VENV)
+env:
+	$(CONDA_RUN) python --version
 
-venv: $(VENV_PYTHON)
-
-install: venv
-	$(VENV_PYTHON) -m pip install --upgrade pip
-	$(VENV_PYTHON) -m pip install -r requirements.txt
+install: env
+	$(CONDA_RUN) python -m pip install -e .
 
 install-dev: install
-	$(VENV_PYTHON) -m pip install pytest
+	$(CONDA_RUN) python -m pip install -e .[dev]
 
 setup: install-dev
 
-run: venv
-	$(VENV_PYTHON) -m uvicorn app.main:app --host $(APP_HOST) --port $(APP_PORT) $(UVICORN_ARGS)
+run: env
+	$(CONDA_RUN) python -m uvicorn app.main:app --host $(APP_HOST) --port $(APP_PORT) $(UVICORN_ARGS)
 
-dev: venv
-	$(VENV_PYTHON) -m uvicorn app.main:app --host $(APP_HOST) --port $(APP_PORT) --reload $(UVICORN_ARGS)
+dev: env
+	$(CONDA_RUN) python -m uvicorn app.main:app --host $(APP_HOST) --port $(APP_PORT) --reload $(UVICORN_ARGS)
 
-test: venv
-	$(VENV_PYTHON) -m pytest $(PYTEST_ARGS)
+test: env
+	$(CONDA_RUN) python -m pytest $(PYTEST_ARGS)
 
 check: test
 
+lint: env
+	$(CONDA_RUN) python -m ruff check app tests
+
+typecheck: env
+	$(CONDA_RUN) python -m mypy app
+
 clean:
 	$(REMOVE) .pytest_cache .mypy_cache htmlcov .coverage
-
-clean-all: clean
-	$(REMOVE) $(VENV)

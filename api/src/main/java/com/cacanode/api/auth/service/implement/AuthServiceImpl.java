@@ -65,6 +65,9 @@ public class AuthServiceImpl implements AuthService {
     @Value("${spring.sendgrid.login-2fa-expiry-minutes:15}")
     private Integer login2FAExpiryMinutes;
 
+    @Value("${app.security.cookie-secure:false}")
+    private boolean cookieSecure;
+
     private final TenantModuleApi tenantModuleApi;
     private final RefreshTokenRepository refreshTokenRepository;
     private final UserSuspensionStateRepository userSuspensionStateRepository;
@@ -281,8 +284,8 @@ public class AuthServiceImpl implements AuthService {
                 : Duration.ofSeconds(-1);
         ResponseCookie cookie = ResponseCookie.from("refresh_token", refreshToken)
                 .httpOnly(true)
-                .secure(true)
-                .path("/api/auth")
+                .secure(cookieSecure)
+                .path("/api")
                 .maxAge(maxAge)
                 .sameSite("Strict")
                 .build();
@@ -294,9 +297,9 @@ public class AuthServiceImpl implements AuthService {
     public void clearRefreshTokenCookie(HttpServletResponse response) {
         ResponseCookie cookie = ResponseCookie.from("refresh_token", "")
                 .httpOnly(true)
-                .secure(true)
+                .secure(cookieSecure)
                 .sameSite("Strict")
-                .path("/api/auth")
+                .path("/api")
                 .maxAge(0) // ← 0 deletes the cookie
                 .build();
 

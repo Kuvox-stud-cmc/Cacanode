@@ -41,10 +41,10 @@ run-prod:
 	$(MVNW) -Pprod spring-boot:run $(MAVEN_ARGS)
 
 test:
-	$(MVNW) -Ptest test $(MAVEN_ARGS)
+	$(MVNW) -Ptest -Dspring.profiles.active=test test $(MAVEN_ARGS)
 
 verify:
-	$(MVNW) -Ptest verify $(MAVEN_ARGS)
+	$(MVNW) -Ptest -Dspring.profiles.active=test verify $(MAVEN_ARGS)
 
 package:
 	$(MVNW) -Pprod clean package $(MAVEN_ARGS)

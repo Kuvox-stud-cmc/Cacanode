@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { Suspense, useEffect, useState } from "react"
 import { useSearchParams, useRouter } from "next/navigation"
 import Link from "next/link"
 import { AlertCircle, CheckCircle, Loader2 } from "lucide-react"
@@ -15,21 +15,21 @@ import {
 import { useAuthStore } from "@/components/providers/StoreProvider"
 import { verifyLogin2FAApi } from "@/lib/auth-api"
 
-export default function VerifyLoginPage() {
+function VerifyLoginContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const token = searchParams.get("token")
   const setAuth = useAuthStore((s) => s.setAuth)
 
-  const [status, setStatus] = useState<"loading" | "success" | "error">("loading")
-  const [errorMessage, setErrorMessage] = useState("")
+  const [status, setStatus] = useState<"loading" | "success" | "error">(
+    token ? "loading" : "error",
+  )
+  const [errorMessage, setErrorMessage] = useState(
+    token ? "" : "Invalid or missing verification token",
+  )
 
   useEffect(() => {
-    if (!token) {
-      setStatus("error")
-      setErrorMessage("Invalid or missing verification token")
-      return
-    }
+    if (!token) return
 
     const verify = async () => {
       try {
@@ -114,5 +114,13 @@ export default function VerifyLoginPage() {
         </Card>
       </div>
     </div>
+  )
+}
+
+export default function VerifyLoginPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-slate-50" />}>
+      <VerifyLoginContent />
+    </Suspense>
   )
 }
