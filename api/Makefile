@@ -1,17 +1,18 @@
 .DEFAULT_GOAL := help
 
-PROFILE ?= dev
-MAVEN_ARGS ?=
-
-ifneq (,$(wildcard .env))
-include .env
-export
-endif
+PYTHON ?= python
+VENV ?= .venv
+APP_HOST ?= 0.0.0.0
+APP_PORT ?= 8000
+UVICORN_ARGS ?=
+PYTEST_ARGS ?=
 
 ifeq ($(OS),Windows_NT)
-MVNW := .\mvnw.cmd
+VENV_PYTHON := $(VENV)/Scripts/python.exe
+REMOVE := powershell -NoProfile -Command Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
 else
-MVNW := ./mvnw
+VENV_PYTHON := $(VENV)/bin/python
+REMOVE := rm -rf
 endif
 
 .PHONY: help deps run run-dev run-prod test verify package clean
