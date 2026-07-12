@@ -48,20 +48,4 @@ public class Tenant extends BaseEntity {
     @Column(name = "max_storage_mb", nullable = false)
     private int maxStorageMb = 5120;
 
-
-    // LLM config
-    @Column(name = "llm_provider", nullable = false, length = 50)
-    private String llmProvider = "groq";
-
-    @Column(name = "llm_model", nullable = false, length = 100)
-    private String llmModel = "llama-3.3-70b-versatile";
-
-    @Column(name = "embed_provider", nullable = false, length = 50)
-    private String embedProvider = "voyageai";
-
-    @Column(name = "embed_model", nullable = false, length = 100)
-    private String embedModel = "voyage-3";
-
-    @Column(name = "api_key_enc")
-    private String apiKeyEnc;
 }

@@ -44,10 +44,6 @@ public class TenantModuleApiImpl implements TenantModuleApi {
                 tenant.setPlan(TenantPlan.TRIAL);
                 tenant.setStatus(TenantStatus.TRIAL);
                 tenant.setTrialEndsAt(LocalDateTime.now().plusDays(14));
-                tenant.setLlmProvider("groq");
-                tenant.setLlmModel("llama-3.3-70b-versatile");
-                tenant.setEmbedProvider("voyageai");
-                tenant.setEmbedModel("voyage-3");
                 tenant.setMaxDocuments(30);
                 tenant.setMaxMessages(1000);
                 tenant.setMaxStorageMb(1024);
