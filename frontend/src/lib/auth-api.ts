@@ -19,6 +19,14 @@ export function getApiBase(): string {
   throw new Error("NEXT_PUBLIC_API_BASE_URL is not set");
 }
 
+export function getAiApiBase(): string {
+  const aiBase = process.env.NEXT_PUBLIC_AI_API_BASE_URL;
+  if (aiBase) {
+    return aiBase.replace(/\/$/, "");
+  }
+  return getApiBase();
+}
+
 type ApiErrorBody = {
   message?: string | string[];
 };

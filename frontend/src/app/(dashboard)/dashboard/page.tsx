@@ -33,14 +33,20 @@ const iconMap: Record<string, React.ElementType> = {
 
 function StatusBadge({ status }: { status: string }) {
   const classes: Record<string, string> = {
-    pending: "bg-yellow-100 text-yellow-800",
-    processing: "bg-blue-100 text-blue-800",
-    completed: "bg-green-100 text-green-800",
-    failed: "bg-red-100 text-red-800",
+    PENDING: "bg-yellow-100 text-yellow-800",
+    PROCESSING: "bg-blue-100 text-blue-800",
+    COMPLETED: "bg-green-100 text-green-800",
+    FAILED: "bg-red-100 text-red-800",
+  };
+  const labels: Record<string, string> = {
+    PENDING: "Pending",
+    PROCESSING: "Indexing",
+    COMPLETED: "Completed",
+    FAILED: "Failed",
   };
   return (
     <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${classes[status] ?? ""}`}>
-      {status}
+      {labels[status] ?? status}
     </span>
   );
 }

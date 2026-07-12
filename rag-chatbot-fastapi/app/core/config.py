@@ -48,6 +48,9 @@ class Settings(BaseSettings):
     LLM_ADAPTER_ID: str = ""
     LLM_TEMPERATURE: float = 0.2
     LLM_MAX_OUTPUT_TOKENS: int = 1024
+    LLM_TIMEOUT_SECONDS: float = 90.0
+    LLM_USE_OLLAMA_NATIVE_CHAT: bool = True
+    LLM_DISABLE_THINKING: bool = True
 
     TEXT_EMBEDDING_BASE_URL: str = "http://localhost:8081"
     TEXT_EMBEDDING_MODEL_ID: str = "google/embeddinggemma-300m"
@@ -80,7 +83,7 @@ class Settings(BaseSettings):
     AUDIO_TOP_K: int = 12
     GRAPH_MAX_HOPS: int = 3
     FINAL_CONTEXT_TOP_K: int = 8
-    MIN_RETRIEVAL_CONFIDENCE: float = 0.0
+    MIN_RETRIEVAL_CONFIDENCE: float = 0.35
     ENABLE_RERANKER: bool = True
     ENABLE_GENERAL_KNOWLEDGE: bool = False
 

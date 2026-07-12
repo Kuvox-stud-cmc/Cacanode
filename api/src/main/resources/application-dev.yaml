@@ -8,6 +8,12 @@ app:
   security:
     cookie-secure: ${COOKIE_SECURE:false}
     login-2fa-bypass-emails: ${LOGIN_2FA_BYPASS_EMAILS:admin@cacanode.local}
+  seaweedfs:
+    s3-endpoint: ${SEAWEEDFS_S3_ENDPOINT:http://localhost:8333}
+    bucket: ${SEAWEEDFS_BUCKET:cacanode}
+    access-key: ${SEAWEEDFS_ACCESS_KEY:}
+    secret-key: ${SEAWEEDFS_SECRET_KEY:}
+    region: ${SEAWEEDFS_REGION:us-east-1}
 
 spring:
   config:
@@ -39,6 +45,8 @@ spring:
       timeout: 2000ms
   rabbitmq:
     addresses: ${RABBITMQ_URL:amqp://rag_user:rag_password@localhost:5672/}
+    publisher-confirm-type: correlated
+    publisher-returns: true
   sendgrid:
     api-key: ${SENDGRID_API_KEY}
     from-email: ${FROM_EMAIL}

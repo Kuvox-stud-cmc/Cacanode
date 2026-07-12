@@ -12,11 +12,17 @@ x-ai-environment: &ai-environment
   SEAWEEDFS_FILER_URL: http://seaweedfs-filer:8888
   SEAWEEDFS_S3_ENDPOINT: http://seaweedfs-s3:8333
   SEAWEEDFS_BUCKET: ${SEAWEEDFS_BUCKET:-cacanode}
-  LLM_BASE_URL: ${LLM_BASE_URL:-http://llm-server:8000/v1}
-  LLM_INTERNAL_API_KEY: ${LLM_INTERNAL_API_KEY:-change-me}
-  LLM_MODEL_ID: ${LLM_MODEL_ID:-}
-  TEXT_EMBEDDING_BASE_URL: ${TEXT_EMBEDDING_BASE_URL:-http://embedding-service:8080}
-  TEXT_EMBEDDING_MODEL_ID: ${TEXT_EMBEDDING_MODEL_ID:-google/embeddinggemma-300m}
+  LLM_BASE_URL: ${LLM_BASE_URL:-http://ollama:11434/v1}
+  LLM_INTERNAL_API_KEY: ${LLM_INTERNAL_API_KEY:-ollama}
+  LLM_MODEL_ID: ${LLM_MODEL_ID:-gemma4:12b}
+  LLM_MAX_OUTPUT_TOKENS: ${LLM_MAX_OUTPUT_TOKENS:-128}
+  LLM_TIMEOUT_SECONDS: ${LLM_TIMEOUT_SECONDS:-90}
+  LLM_USE_OLLAMA_NATIVE_CHAT: ${LLM_USE_OLLAMA_NATIVE_CHAT:-true}
+  LLM_DISABLE_THINKING: ${LLM_DISABLE_THINKING:-true}
+  TEXT_EMBEDDING_BASE_URL: ${TEXT_EMBEDDING_BASE_URL:-http://ollama:11434}
+  TEXT_EMBEDDING_MODEL_ID: ${TEXT_EMBEDDING_MODEL_ID:-embeddinggemma}
+  TEXT_EMBEDDING_DIMENSION: ${TEXT_EMBEDDING_DIMENSION:-768}
+  MIN_RETRIEVAL_CONFIDENCE: ${MIN_RETRIEVAL_CONFIDENCE:-0.35}
 
 x-worker: &worker
   build:
@@ -28,6 +34,8 @@ x-worker: &worker
     WORKER_MODE: dedicated
   depends_on:
     rabbitmq:
+      condition: service_healthy
+    ollama:
       condition: service_healthy
   volumes:
     - kuzu_data:/data/kuzu
@@ -51,6 +59,9 @@ services:
       context: ./frontend
       args:
         NEXT_PUBLIC_API_BASE_URL: ${PUBLIC_API_BASE_URL:-http://localhost/api/v1}
+        NEXT_PUBLIC_AI_API_BASE_URL: ${PUBLIC_AI_API_BASE_URL:-}
+        NEXT_PUBLIC_DEMO_CHATBOT_ID: ${DEMO_CHATBOT_ID:-00000000-0000-0000-0000-000000000005}
+        NEXT_PUBLIC_DEMO_KNOWLEDGE_BASE_ID: ${DEMO_KNOWLEDGE_BASE_ID:-00000000-0000-0000-0000-000000000004}
         NEXT_PUBLIC_WIDGET_URL: ${PUBLIC_WIDGET_URL:-http://localhost/widget/v1/cacanode-chat.js}
         NEXT_PUBLIC_DEFAULT_LOCALE: ${DEFAULT_LOCALE:-vi-VN}
     restart: unless-stopped
@@ -113,6 +124,8 @@ services:
         condition: service_healthy
       qdrant:
         condition: service_started
+      ollama:
+        condition: service_healthy
 
   graph-service:
     build:
@@ -150,11 +163,26 @@ services:
     <<: *worker
     command: ["python", "-m", "app.workers.runner", "video"]
 
+  ollama:
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    environment:
+      OLLAMA_HOST: 0.0.0.0:11434
+    ports:
+      - "${OLLAMA_PORT:-11434}:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
   llm-server:
     image: vllm/vllm-openai:latest
     profiles: [gpu]
     restart: unless-stopped
-    command: ["--model", "${LLM_MODEL_ID:-configure-a-model}", "--api-key", "${LLM_INTERNAL_API_KEY:-change-me}"]
+    command: ["--model", "${VLLM_MODEL_ID:-configure-a-hugging-face-model}", "--api-key", "${VLLM_API_KEY:-change-me}"]
     environment:
       HUGGING_FACE_HUB_TOKEN: ${MODEL_REGISTRY_TOKEN:-}
     volumes:
@@ -171,7 +199,7 @@ services:
     image: ghcr.io/huggingface/text-embeddings-inference:latest
     profiles: [gpu]
     restart: unless-stopped
-    command: ["--model-id", "${TEXT_EMBEDDING_MODEL_ID:-google/embeddinggemma-300m}"]
+    command: ["--model-id", "${TEI_MODEL_ID:-google/embeddinggemma-300m}"]
     volumes:
       - model_cache:/data
     deploy:
@@ -284,6 +312,7 @@ volumes:
   redis_data:
   rabbitmq_data:
   qdrant_data:
+  ollama_data:
   kuzu_data:
   model_cache:
   seaweedfs_master:

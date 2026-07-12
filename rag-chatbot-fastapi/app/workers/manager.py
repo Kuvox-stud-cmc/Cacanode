@@ -3,6 +3,7 @@ import logging
 from dataclasses import dataclass
 
 from app.core.config import Settings
+from app.workers.document import DocumentWorker
 
 logger = logging.getLogger(__name__)
 
@@ -17,7 +18,7 @@ class WorkerState:
 
 
 class WorkerManager:
-    """Runs worker lifecycles without acknowledging unimplemented jobs."""
+    """Runs worker lifecycles."""
 
     def __init__(self, settings: Settings, kinds: tuple[str, ...] | None = None):
         selected = kinds or settings.worker_kinds
@@ -50,6 +51,29 @@ class WorkerManager:
             state.running = False
 
     async def _run(self, state: WorkerState) -> None:
+        if state.kind == "document":
+            state.capability = "ingestion"
+            logger.info("Worker %s started", state.kind)
+            try:
+                while not self._stop.is_set():
+                    worker = DocumentWorker(self._settings)
+                    try:
+                        await worker.run(self._stop)
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception:
+                        logger.exception("Worker %s crashed; retrying", state.kind)
+                        try:
+                            await asyncio.wait_for(
+                                self._stop.wait(),
+                                timeout=self._settings.WORKER_POLL_INTERVAL_SECONDS,
+                            )
+                        except TimeoutError:
+                            continue
+            finally:
+                logger.info("Worker %s stopped", state.kind)
+            return
+
         logger.info("Worker %s started in scaffold mode", state.kind)
         while not self._stop.is_set():
             try:

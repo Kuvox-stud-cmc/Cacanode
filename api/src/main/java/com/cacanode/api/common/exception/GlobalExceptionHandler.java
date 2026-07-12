@@ -2,6 +2,7 @@ package com.cacanode.api.common.exception;
 
 import com.cacanode.api.common.exception.custom.BadRequestException;
 import com.cacanode.api.common.exception.custom.ConflictException;
+import com.cacanode.api.common.exception.custom.InternalServerErrorException;
 import com.cacanode.api.common.exception.custom.ResourceNotFoundException;
 import com.cacanode.api.common.exception.custom.UnauthorizedException;
 import lombok.extern.slf4j.Slf4j;
@@ -105,6 +106,22 @@ public class GlobalExceptionHandler {
                 .status(HttpStatus.CONFLICT.value())
                 .path(request.getDescription(false).replace("uri=", ""))
                 .error(HttpStatus.CONFLICT.getReasonPhrase())
+                .message(e.getMessage())
+                .build();
+    }
+
+    // 500 - expected internal failures
+    @ExceptionHandler(InternalServerErrorException.class)
+    @ResponseStatus(HttpStatus.INTERNAL_SERVER_ERROR)
+    public ErrorResponse handleInternalServerErrorException(
+            InternalServerErrorException e, WebRequest request
+    ) {
+        log.error("Internal server error: {}", e.getMessage());
+        return ErrorResponse.builder()
+                .timestamp(LocalDateTime.now())
+                .status(HttpStatus.INTERNAL_SERVER_ERROR.value())
+                .path(request.getDescription(false).replace("uri=", ""))
+                .error(HttpStatus.INTERNAL_SERVER_ERROR.getReasonPhrase())
                 .message(e.getMessage())
                 .build();
     }

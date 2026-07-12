@@ -1,6 +1,7 @@
 "use client"
 
 import {
+  useEffect,
   useRef,
   useState,
   type ChangeEvent,
@@ -9,19 +10,20 @@ import {
 } from "react"
 import Image from "next/image"
 import Link from "next/link"
+import toast from "react-hot-toast"
 import {
   ArrowUp,
   FileText,
   Loader2,
   Paperclip,
-  Plus,
   Sparkles,
-  Type,
+  Square,
   Upload,
   X,
 } from "lucide-react"
 import { AppShell } from "@/components/app/AppShell"
 import { useTokenRehydration } from "@/hooks/useTokenRehydration"
+import { useApiClient } from "@/hooks/useApiClient"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -32,32 +34,78 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { cn } from "@/lib/utils"
+import { publicConfig } from "@/lib/public-config"
+import {
+  fileTypeFromName,
+  getDocumentStatusApi,
+  isTerminalDocumentStatus,
+  listDocumentsApi,
+  uploadDocumentApi,
+} from "@/lib/documents-api"
+import { createChatSessionApi, submitChatMessageApi } from "@/lib/chat-api"
+import type { ChatCitation, Document, DocumentStatus } from "@/types"
 
-type FileSource = {
-  id: string
-  kind: "file"
-  name: string
-  size: number
-  fileType: string
+const PLAYGROUND_STATE_KEY = `cacanode.chat.playground.${publicConfig.demoKnowledgeBaseId}`
+
+type SourceStatus = DocumentStatus | "UPLOADING"
+
+type SourceDocument = Omit<Document, "status"> & {
+  localId: string
+  status: SourceStatus
 }
 
-type TextSource = {
+type ChatMessage = {
   id: string
-  kind: "text"
-  name: string
-  text: string
-}
-
-type PlaygroundSource = FileSource | TextSource
-
-type UserMessage = {
-  id: string
-  role: "user"
+  role: "user" | "assistant"
   content: string
+  citations?: ChatCitation[]
+  loading?: boolean
+  error?: boolean
+}
+
+type PersistedPlaygroundState = {
+  messages: ChatMessage[]
+  sources: SourceDocument[]
+}
+
+function readPersistedPlaygroundState(): PersistedPlaygroundState {
+  if (typeof window === "undefined") {
+    return { messages: [], sources: [] }
+  }
+
+  try {
+    const raw = window.sessionStorage.getItem(PLAYGROUND_STATE_KEY)
+    if (!raw) return { messages: [], sources: [] }
+
+    const restored = JSON.parse(raw) as Partial<PersistedPlaygroundState>
+    if ("sessionId" in restored) {
+      window.sessionStorage.setItem(
+        PLAYGROUND_STATE_KEY,
+        JSON.stringify({
+          messages: Array.isArray(restored.messages) ? restored.messages : [],
+          sources: Array.isArray(restored.sources) ? restored.sources : [],
+        } satisfies PersistedPlaygroundState),
+      )
+    }
+    return {
+      messages: Array.isArray(restored.messages) ? restored.messages : [],
+      sources: Array.isArray(restored.sources) ? restored.sources : [],
+    }
+  } catch {
+    window.sessionStorage.removeItem(PLAYGROUND_STATE_KEY)
+    return { messages: [], sources: [] }
+  }
 }
 
 function makeId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2)}`
+}
+
+function sourceFromDocument(document: Document): SourceDocument {
+  return {
+    ...document,
+    localId: document.id,
+  }
 }
 
 function formatBytes(bytes: number): string {
@@ -66,16 +114,150 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
+function statusLabel(status: SourceStatus): string {
+  const labels: Record<SourceStatus, string> = {
+    UPLOADING: "Uploading",
+    PENDING: "Pending",
+    PROCESSING: "Indexing",
+    COMPLETED: "Ready",
+    FAILED: "Failed",
+  }
+  return labels[status]
+}
+
+function statusClass(status: SourceStatus): string {
+  const classes: Record<SourceStatus, string> = {
+    UPLOADING: "bg-slate-100 text-slate-600",
+    PENDING: "bg-amber-100 text-amber-800",
+    PROCESSING: "bg-blue-100 text-blue-800",
+    COMPLETED: "bg-emerald-100 text-emerald-800",
+    FAILED: "bg-red-100 text-red-800",
+  }
+  return classes[status]
+}
+
+function isSupportedFile(file: File): boolean {
+  const lower = file.name.toLowerCase()
+  return lower.endsWith(".txt") || lower.endsWith(".pdf")
+}
+
 function Playground({ authenticated }: { authenticated: boolean }) {
+  const { request } = useApiClient()
   const fileInputRef = useRef<HTMLInputElement>(null)
   const suppressRestoredComposerFocus = useRef(false)
+  const canPersistStateRef = useRef(false)
+  const activeChatAbortRef = useRef<AbortController | null>(null)
   const [message, setMessage] = useState("")
-  const [messages, setMessages] = useState<UserMessage[]>([])
-  const [sources, setSources] = useState<PlaygroundSource[]>([])
+  const [messages, setMessages] = useState<ChatMessage[]>(
+    () => readPersistedPlaygroundState().messages,
+  )
+  const [sources, setSources] = useState<SourceDocument[]>(
+    () => readPersistedPlaygroundState().sources,
+  )
   const [sourceMenuOpen, setSourceMenuOpen] = useState(false)
   const [authDialogOpen, setAuthDialogOpen] = useState(false)
-  const [pasteDialogOpen, setPasteDialogOpen] = useState(false)
-  const [pastedText, setPastedText] = useState("")
+  const [sessionId, setSessionId] = useState<string | null>(null)
+  const [sending, setSending] = useState(false)
+
+  const hasCompletedSource = sources.some((source) => source.status === "COMPLETED")
+  const hasIndexingSource = sources.some(
+    (source) =>
+      source.status === "UPLOADING" ||
+      source.status === "PENDING" ||
+      source.status === "PROCESSING",
+  )
+
+  useEffect(() => {
+    if (!authenticated) return
+    canPersistStateRef.current = true
+
+    let cancelled = false
+    const loadExistingSources = async () => {
+      try {
+        const documents = await listDocumentsApi(request, publicConfig.demoKnowledgeBaseId)
+        if (cancelled) return
+        setSources((current) => {
+          const byId = new Map(current.map((source) => [source.id, source]))
+          for (const document of documents) {
+            byId.set(document.id, {
+              ...sourceFromDocument(document),
+              ...byId.get(document.id),
+              status: document.status,
+              chunkCount: document.chunkCount,
+              errorMessage: document.errorMessage,
+            })
+          }
+          return Array.from(byId.values()).sort((a, b) =>
+            b.uploadedAt.localeCompare(a.uploadedAt),
+          )
+        })
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "Unable to load documents")
+      }
+    }
+
+    void loadExistingSources()
+
+    return () => {
+      cancelled = true
+    }
+  }, [authenticated, request])
+
+  useEffect(() => {
+    return () => {
+      activeChatAbortRef.current?.abort()
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!authenticated || !canPersistStateRef.current) return
+    window.sessionStorage.setItem(
+      PLAYGROUND_STATE_KEY,
+      JSON.stringify({ messages, sources } satisfies PersistedPlaygroundState),
+    )
+  }, [authenticated, messages, sources])
+
+  useEffect(() => {
+    if (!authenticated) return
+    const pollable = sources.filter(
+      (source) =>
+        source.status !== "UPLOADING" &&
+        !isTerminalDocumentStatus(source.status),
+    )
+    if (pollable.length === 0) return
+
+    let cancelled = false
+    const poll = async () => {
+      const updates = await Promise.allSettled(
+        pollable.map((source) => getDocumentStatusApi(request, source.id)),
+      )
+      if (cancelled) return
+      setSources((current) =>
+        current.map((source) => {
+          const index = pollable.findIndex((item) => item.id === source.id)
+          if (index < 0) return source
+          const result = updates[index]
+          if (!result || result.status !== "fulfilled") return source
+          return {
+            ...source,
+            status: result.value.status,
+            chunkCount: result.value.chunkCount,
+            errorMessage: result.value.errorMessage,
+          }
+        }),
+      )
+    }
+
+    const timer = window.setInterval(() => {
+      void poll()
+    }, 1800)
+    void poll()
+
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+    }
+  }, [authenticated, request, sources])
 
   function requireAuthentication(): boolean {
     if (authenticated) return false
@@ -102,22 +284,118 @@ function Playground({ authenticated }: { authenticated: boolean }) {
     setAuthDialogOpen(open)
   }
 
-  function submitMessage(event?: FormEvent) {
+  async function ensureSession(): Promise<string> {
+    if (sessionId) return sessionId
+    return createSession()
+  }
+
+  async function createSession(): Promise<string> {
+    const session = await createChatSessionApi(request, {
+      chatbot_id: publicConfig.demoChatbotId,
+      knowledge_base_id: publicConfig.demoKnowledgeBaseId,
+      locale: publicConfig.defaultLocale,
+    })
+    setSessionId(session.id)
+    return session.id
+  }
+
+  async function submitMessage(event?: FormEvent) {
     event?.preventDefault()
     if (requireAuthentication()) return
     const content = message.trim()
-    if (!content) return
+    if (!content || sending) return
+    if (!hasCompletedSource) {
+      toast.error(
+        hasIndexingSource
+          ? "Wait for at least one document to finish indexing."
+          : "Upload a TXT or PDF source before asking a question.",
+      )
+      return
+    }
+
+    const assistantId = makeId()
     setMessages((current) => [
       ...current,
       { id: makeId(), role: "user", content },
+      { id: assistantId, role: "assistant", content: "Thinking...", loading: true },
     ])
     setMessage("")
+    setSending(true)
+
+    const abortController = new AbortController()
+    activeChatAbortRef.current = abortController
+
+    try {
+      const activeSessionId = await ensureSession()
+      let response
+      try {
+        response = await submitChatMessageApi(
+          request,
+          activeSessionId,
+          content,
+          abortController.signal,
+        )
+      } catch (error) {
+        if (error instanceof Error && error.message === "Chat session was not found.") {
+          setSessionId(null)
+          const replacementSessionId = await createSession()
+          response = await submitChatMessageApi(
+            request,
+            replacementSessionId,
+            content,
+            abortController.signal,
+          )
+        } else {
+          throw error
+        }
+      }
+      setMessages((current) =>
+        current.map((item) =>
+          item.id === assistantId
+            ? {
+                id: assistantId,
+                role: "assistant",
+                content: response.content,
+                citations: response.citations,
+              }
+            : item,
+        ),
+      )
+    } catch (error) {
+      const aborted = abortController.signal.aborted
+      const errorMessage = aborted
+        ? "Canceled."
+        : error instanceof Error
+          ? error.message
+          : "Unable to answer."
+      setMessages((current) =>
+        current.map((item) =>
+          item.id === assistantId
+            ? {
+                id: assistantId,
+                role: "assistant",
+                content: errorMessage,
+                error: !aborted,
+              }
+            : item,
+        ),
+      )
+    } finally {
+      if (activeChatAbortRef.current === abortController) {
+        activeChatAbortRef.current = null
+      }
+      setSending(false)
+    }
+  }
+
+  function cancelMessage() {
+    activeChatAbortRef.current?.abort()
   }
 
   function handleComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault()
-      submitMessage()
+      void submitMessage()
     }
   }
 
@@ -127,43 +405,71 @@ function Playground({ authenticated }: { authenticated: boolean }) {
     fileInputRef.current?.click()
   }
 
+  async function uploadFiles(files: File[]) {
+    for (const file of files) {
+      if (!isSupportedFile(file)) {
+        toast.error(`${file.name} is not supported. Upload TXT or PDF files.`)
+        continue
+      }
+
+      const localId = makeId()
+      const pendingSource: SourceDocument = {
+        id: localId,
+        localId,
+        fileName: file.name,
+        fileType: fileTypeFromName(file.name),
+        fileSizeBytes: file.size,
+        jobId: localId,
+        knowledgeBaseId: publicConfig.demoKnowledgeBaseId,
+        status: "UPLOADING",
+        uploadedAt: new Date().toISOString(),
+      }
+      setSources((current) => [...current, pendingSource])
+
+      try {
+        const uploaded = await uploadDocumentApi(
+          request,
+          file,
+          publicConfig.demoKnowledgeBaseId,
+        )
+        setSources((current) =>
+          current.map((source) =>
+            source.localId === localId
+              ? {
+                  ...source,
+                  id: uploaded.id,
+                  jobId: uploaded.jobId,
+                  fileName: uploaded.fileName,
+                  status: uploaded.status,
+                }
+              : source,
+          ),
+        )
+      } catch (error) {
+        const errorMessage =
+          error instanceof Error ? error.message : "Upload failed"
+        setSources((current) =>
+          current.map((source) =>
+            source.localId === localId
+              ? { ...source, status: "FAILED", errorMessage }
+              : source,
+          ),
+        )
+        toast.error(errorMessage)
+      }
+    }
+  }
+
   function handleFiles(event: ChangeEvent<HTMLInputElement>) {
     const selectedFiles = Array.from(event.target.files ?? [])
-    if (selectedFiles.length === 0) return
-    setSources((current) => [
-      ...current,
-      ...selectedFiles.map((file): FileSource => ({
-        id: makeId(),
-        kind: "file",
-        name: file.name,
-        size: file.size,
-        fileType: file.type || "Unknown type",
-      })),
-    ])
+    if (selectedFiles.length > 0) {
+      void uploadFiles(selectedFiles)
+    }
     event.target.value = ""
   }
 
-  function choosePasteText() {
-    if (requireAuthentication()) return
-    setSourceMenuOpen(false)
-    setPasteDialogOpen(true)
-  }
-
-  function addPastedText() {
-    const text = pastedText.trim()
-    if (!text) return
-    setSources((current) => [
-      ...current,
-      {
-        id: makeId(),
-        kind: "text",
-        name: `Pasted text ${current.filter((source) => source.kind === "text").length + 1}`,
-        text,
-      },
-    ])
-    setPastedText("")
-    setPasteDialogOpen(false)
-  }
+  const sendDisabled =
+    authenticated && (!message.trim() || !hasCompletedSource || sending)
 
   return (
     <div
@@ -200,7 +506,7 @@ function Playground({ authenticated }: { authenticated: boolean }) {
                 Chat with your documents
               </h2>
               <p className="mt-2 text-sm leading-6 text-slate-500 sm:text-base">
-                Add a file or paste text, then ask questions about your source material.
+                Upload a TXT or text-based PDF, wait for indexing, then ask questions with citations.
               </p>
               {!authenticated && (
                 <p className="mt-4 rounded-full bg-slate-100 px-3 py-1.5 text-xs font-medium text-slate-600">
@@ -211,9 +517,50 @@ function Playground({ authenticated }: { authenticated: boolean }) {
           ) : (
             <div className="flex flex-1 flex-col justify-end gap-5 py-4">
               {messages.map((item) => (
-                <div key={item.id} className="flex justify-end">
-                  <div className="max-w-[85%] whitespace-pre-wrap break-words rounded-2xl rounded-br-md bg-indigo-600 px-4 py-3 text-sm leading-6 text-white sm:max-w-[75%]">
-                    {item.content}
+                <div
+                  key={item.id}
+                  className={cn("flex", item.role === "user" ? "justify-end" : "justify-start")}
+                >
+                  <div
+                    className={cn(
+                      "max-w-[85%] whitespace-pre-wrap break-words rounded-2xl px-4 py-3 text-sm leading-6 sm:max-w-[75%]",
+                      item.role === "user"
+                        ? "rounded-br-md bg-indigo-600 text-white"
+                        : item.error
+                          ? "rounded-bl-md bg-red-50 text-red-700"
+                          : "rounded-bl-md bg-slate-100 text-slate-900",
+                    )}
+                  >
+                    {item.loading ? (
+                      <span className="inline-flex items-center gap-2">
+                        <Loader2 className="size-3.5 animate-spin" />
+                        {item.content}
+                      </span>
+                    ) : (
+                      item.content
+                    )}
+                    {item.citations && item.citations.length > 0 && (
+                      <div className="mt-3 space-y-2 border-t border-slate-200 pt-3">
+                        {item.citations.map((citation) => (
+                          <div
+                            key={`${citation.id}-${citation.document_id}-${citation.chunk_index}`}
+                            className="rounded-lg border border-slate-200 bg-white p-2 text-xs text-slate-600"
+                          >
+                            <div className="mb-1 flex items-center justify-between gap-2">
+                              <span className="font-semibold text-slate-800">
+                                [{citation.id}] {citation.source_name}
+                              </span>
+                              <span>{citation.score.toFixed(2)}</span>
+                            </div>
+                            <p className="text-slate-500">
+                              {citation.page_number ? `Page ${citation.page_number} · ` : ""}
+                              Chunk {citation.chunk_index}
+                            </p>
+                            <p className="mt-1 line-clamp-3">{citation.snippet}</p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </div>
               ))}
@@ -228,24 +575,43 @@ function Playground({ authenticated }: { authenticated: boolean }) {
             <div className="mb-2 flex gap-2 overflow-x-auto pb-1">
               {sources.map((source) => (
                 <div
-                  key={source.id}
-                  className="flex min-w-0 max-w-64 shrink-0 items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 py-2 pl-2.5 pr-1.5"
-                  title={source.kind === "file" ? `${source.name} · ${source.fileType}` : source.text}
+                  key={source.localId}
+                  className="flex min-w-0 max-w-72 shrink-0 items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 py-2 pl-2.5 pr-1.5"
+                  title={source.errorMessage ?? source.fileName}
                 >
                   <div className="grid size-8 shrink-0 place-items-center rounded-md bg-white text-indigo-600 shadow-sm">
-                    {source.kind === "file" ? <FileText className="size-4" /> : <Type className="size-4" />}
+                    {source.status === "UPLOADING" || source.status === "PROCESSING" ? (
+                      <Loader2 className="size-4 animate-spin" />
+                    ) : (
+                      <FileText className="size-4" />
+                    )}
                   </div>
                   <div className="min-w-0">
-                    <p className="truncate text-xs font-medium text-slate-800">{source.name}</p>
-                    <p className="truncate text-[11px] text-slate-500">
-                      {source.kind === "file" ? formatBytes(source.size) : `${source.text.length} characters`}
+                    <p className="truncate text-xs font-medium text-slate-800">
+                      {source.fileName}
                     </p>
+                    <p className="truncate text-[11px] text-slate-500">
+                      {formatBytes(source.fileSizeBytes)}
+                      {source.chunkCount ? ` · ${source.chunkCount} chunks` : ""}
+                    </p>
+                    <span
+                      className={cn(
+                        "mt-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-medium",
+                        statusClass(source.status),
+                      )}
+                    >
+                      {statusLabel(source.status)}
+                    </span>
                   </div>
                   <button
                     type="button"
-                    onClick={() => setSources((current) => current.filter((item) => item.id !== source.id))}
+                    onClick={() =>
+                      setSources((current) =>
+                        current.filter((item) => item.localId !== source.localId),
+                      )
+                    }
                     className="ml-1 rounded-md p-1 text-slate-400 hover:bg-slate-200 hover:text-slate-700"
-                    aria-label={`Remove ${source.name}`}
+                    aria-label={`Remove ${source.fileName}`}
                   >
                     <X className="size-3.5" />
                   </button>
@@ -262,7 +628,11 @@ function Playground({ authenticated }: { authenticated: boolean }) {
               onChange={(event) => authenticated && setMessage(event.target.value)}
               onKeyDown={handleComposerKeyDown}
               rows={2}
-              placeholder="Ask a question about your sources..."
+              placeholder={
+                hasCompletedSource
+                  ? "Ask a question about your indexed sources..."
+                  : "Upload and index a source before chatting..."
+              }
               className="block max-h-36 min-h-14 w-full resize-none bg-transparent px-2 py-1.5 text-sm leading-6 text-slate-900 outline-none placeholder:text-slate-400"
               aria-label="Message"
             />
@@ -270,8 +640,12 @@ function Playground({ authenticated }: { authenticated: boolean }) {
               <div className="relative">
                 <button
                   type="button"
+                  disabled={sending}
                   onClick={() => setSourceMenuOpen((open) => !open)}
-                  className="flex h-9 items-center gap-1.5 rounded-lg px-2.5 text-sm text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+                  className={cn(
+                    "flex h-9 items-center gap-1.5 rounded-lg px-2.5 text-sm text-slate-600 hover:bg-slate-100 hover:text-slate-900",
+                    sending && "cursor-not-allowed opacity-50",
+                  )}
                   aria-expanded={sourceMenuOpen}
                 >
                   <Paperclip className="size-4" />
@@ -279,31 +653,53 @@ function Playground({ authenticated }: { authenticated: boolean }) {
                 </button>
                 {sourceMenuOpen && (
                   <div className="absolute bottom-11 left-0 z-20 w-44 rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl">
-                    <button type="button" onClick={chooseUpload} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-100">
-                      <Upload className="size-4" /> Upload file
-                    </button>
-                    <button type="button" onClick={choosePasteText} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-100">
-                      <Type className="size-4" /> Paste text
+                    <button
+                      type="button"
+                      onClick={chooseUpload}
+                      className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-100"
+                    >
+                      <Upload className="size-4" /> Upload TXT/PDF
                     </button>
                   </div>
                 )}
-                <input ref={fileInputRef} type="file" multiple className="hidden" onChange={handleFiles} />
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  multiple
+                  accept=".txt,.pdf,text/plain,application/pdf"
+                  className="hidden"
+                  onChange={handleFiles}
+                />
               </div>
+              {sending && (
+                <button
+                  type="button"
+                  onClick={cancelMessage}
+                  className="h-9 rounded-lg px-3 text-sm font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+                >
+                  Cancel
+                </button>
+              )}
               <button
-                type="submit"
-                disabled={authenticated && !message.trim()}
+                type={sending ? "button" : "submit"}
+                disabled={!sending && sendDisabled}
+                onClick={sending ? cancelMessage : undefined}
                 className={cn(
-                  "grid size-9 shrink-0 place-items-center rounded-lg bg-indigo-600 text-white transition-colors hover:bg-indigo-700",
-                  authenticated && !message.trim() && "cursor-not-allowed bg-slate-200 text-slate-400 hover:bg-slate-200",
+                  "grid size-9 shrink-0 place-items-center rounded-lg text-white transition-colors",
+                  sending
+                    ? "bg-slate-900 hover:bg-slate-700"
+                    : "bg-indigo-600 hover:bg-indigo-700",
+                  !sending && sendDisabled &&
+                    "cursor-not-allowed bg-slate-200 text-slate-400 hover:bg-slate-200",
                 )}
-                aria-label="Send message"
+                aria-label={sending ? "Cancel response" : "Send message"}
               >
-                <ArrowUp className="size-4" />
+                {sending ? <Square className="size-3.5 fill-current" /> : <ArrowUp className="size-4" />}
               </button>
             </div>
           </div>
           <p className="mt-2 text-center text-[11px] text-slate-400">
-            Sources and messages stay in this browser tab and are not uploaded.
+            Files are uploaded to CacaNode and indexed before answers are generated.
           </p>
         </form>
       </div>
@@ -333,29 +729,6 @@ function Playground({ authenticated }: { authenticated: boolean }) {
               render={<Link href="/login?next=%2F" />}
             >
               Sign in
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={pasteDialogOpen} onOpenChange={setPasteDialogOpen}>
-        <DialogContent className="sm:max-w-lg">
-          <DialogHeader>
-            <DialogTitle>Paste text</DialogTitle>
-            <DialogDescription>Add text to use as a local source for this conversation.</DialogDescription>
-          </DialogHeader>
-          <textarea
-            value={pastedText}
-            onChange={(event) => setPastedText(event.target.value)}
-            rows={9}
-            autoFocus
-            placeholder="Paste your source text here..."
-            className="w-full resize-y rounded-lg border border-slate-300 p-3 text-sm leading-6 outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
-          />
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setPasteDialogOpen(false)}>Cancel</Button>
-            <Button disabled={!pastedText.trim()} onClick={addPastedText} className="bg-indigo-600 text-white hover:bg-indigo-700">
-              <Plus className="size-4" /> Add source
             </Button>
           </DialogFooter>
         </DialogContent>

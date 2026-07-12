@@ -2,10 +2,32 @@ export interface Document {
   id: string;
   fileName: string;
   fileType: string;
-  status: "pending" | "processing" | "completed" | "failed";
+  status: DocumentStatus;
   fileSizeBytes: number;
   jobId: string;
+  knowledgeBaseId: string;
+  chunkCount?: number | null;
+  errorMessage?: string | null;
   uploadedAt: string;
+}
+
+export type DocumentStatus = "PENDING" | "PROCESSING" | "COMPLETED" | "FAILED";
+
+export interface DocumentUploadResponse {
+  id: string;
+  jobId: string;
+  fileName: string;
+  status: DocumentStatus;
+}
+
+export interface DocumentStatusResponse {
+  id: string;
+  jobId: string;
+  fileName: string;
+  knowledgeBaseId: string;
+  status: DocumentStatus;
+  chunkCount?: number | null;
+  errorMessage?: string | null;
 }
 
 export interface User {
@@ -60,6 +82,31 @@ export interface Message {
   content: string;
   timestamp: string;
   isStreaming?: boolean;
+  citations?: ChatCitation[];
+}
+
+export interface ChatSessionResponse {
+  id: string;
+  chatbot_id: string;
+  knowledge_base_id: string;
+  tenant_id: string;
+  locale: string;
+}
+
+export interface ChatCitation {
+  id: string;
+  document_id: string;
+  source_name: string;
+  page_number: number | null;
+  chunk_index: number;
+  score: number;
+  snippet: string;
+}
+
+export interface AssistantMessageResponse {
+  role: "assistant";
+  content: string;
+  citations: ChatCitation[];
 }
 
 export interface StatsCard {

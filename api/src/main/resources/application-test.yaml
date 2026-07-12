@@ -5,6 +5,12 @@ app:
       - "http://127.0.0.1:*"
   security:
     cookie-secure: false
+  seaweedfs:
+    s3-endpoint: http://localhost:8333
+    bucket: cacanode
+    access-key:
+    secret-key:
+    region: us-east-1
 
 spring:
   config:
@@ -29,6 +35,11 @@ spring:
     from-email: test@test.com
     template-id: test-template
     verification-link: http://localhost:3000/verify
+  rabbitmq:
+    addresses: amqp://guest:guest@localhost:5672/
+    listener:
+      simple:
+        auto-startup: false
 
 springdoc:
   api-docs:
@@ -51,7 +62,7 @@ jwt:
 
 grpc:
   server:
-    port: 9091                          # different port to avoid conflicts
+    port: -1
     security:
       enabled: false
   client:

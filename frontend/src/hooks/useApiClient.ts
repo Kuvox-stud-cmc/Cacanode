@@ -27,16 +27,21 @@ export function useApiClient() {
     options: RequestInit = {}
   ): Promise<Response> => {
 
-    const makeRequest = (token: string | null) =>
-      fetch(endpoint, {
+    const makeRequest = (token: string | null) => {
+      const headers = new Headers(options.headers)
+      if (!(options.body instanceof FormData) && !headers.has('Content-Type')) {
+        headers.set('Content-Type', 'application/json')
+      }
+      if (token) {
+        headers.set('Authorization', `Bearer ${token}`)
+      }
+
+      return fetch(endpoint, {
         ...options,
-        headers: {
-          'Content-Type': 'application/json',
-          ...options.headers,
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
+        headers,
         credentials: 'include',
       })
+    }
 
     let response = await makeRequest(accessToken)
 

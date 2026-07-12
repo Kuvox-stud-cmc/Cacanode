@@ -8,4 +8,5 @@ import java.util.UUID;
 
 public interface KnowledgeBaseRepository extends JpaRepository<KnowledgeBase, UUID> {
     Optional<KnowledgeBase> findByTenantIdAndSlug(UUID tenantId, String slug);
+    Optional<KnowledgeBase> findByIdAndTenantId(UUID id, UUID tenantId);
 }
