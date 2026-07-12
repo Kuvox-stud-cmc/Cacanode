@@ -20,9 +20,7 @@ class Settings(BaseSettings):
     DEFAULT_LOCALE: str = "vi-VN"
     READINESS_REQUIRE_MODELS: bool = False
 
-    JWT_ACCESS_SECRET: str = "development-only-secret"
-    JWT_ALGORITHM: str = "HS256"
-    CLIENT_TOKEN_SIGNING_SECRET: str = "development-only-client-secret"
+    TOKEN_KEY: str = "development-only-secret"
     BUSINESS_API_BASE_URL: str = "http://localhost:8080"
 
     POSTGRES_URL: str = "postgresql://cacanode:change-me@localhost:5432/cacanode"

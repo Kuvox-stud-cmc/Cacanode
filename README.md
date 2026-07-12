@@ -1414,6 +1414,7 @@ Logs are structured JSON and include `request_id`, `tenant_id`, `chatbot_id`, an
 ## Configuration
 
 Create `.env` from `.env.example`. Production values are provided by the deployment secret store.
+Authentication uses the existing HS256 JWT setup: Spring signs access and verification tokens with `TOKEN_KEY`; refresh tokens remain opaque server-stored values, and `EXPIRY_DAYS` controls their cookie/storage lifetime.
 
 ```dotenv
 # Runtime
@@ -1424,13 +1425,9 @@ ADMIN_WEB_URL=http://localhost:5173
 DEFAULT_LOCALE=vi-VN
 
 # Authentication
-JWT_ACCESS_SECRET=change-me
-JWT_REFRESH_SECRET=change-me
-JWT_ACCESS_TTL_MINUTES=15
-JWT_REFRESH_TTL_DAYS=30
-CLIENT_TOKEN_SIGNING_SECRET=change-me
-CLIENT_TOKEN_MAX_TTL_SECONDS=900
-INTEGRATION_KEY_PEPPER=change-me
+TOKEN_KEY=change-me
+EXPIRY_MINS=15
+EXPIRY_DAYS=30
 
 # PostgreSQL
 POSTGRES_HOST=postgres

@@ -39,8 +39,8 @@ async def get_current_tenant(
         # Decode and verify JWT using shared secret
         payload = jwt.decode(
             token,
-            settings.JWT_ACCESS_SECRET,
-            algorithms=[settings.JWT_ALGORITHM],
+            settings.TOKEN_KEY,
+            algorithms=["HS256"],
         )
     except jwt.ExpiredSignatureError:
         raise HTTPException(

@@ -62,9 +62,9 @@ openapi:
     version: 1.0.0
 
 jwt:
-  token-key: ${JWT_ACCESS_SECRET:${TOKEN_KEY}}
-  expiry-mins: ${JWT_ACCESS_TTL_MINUTES:${EXPIRY_MINS:15}}
-  expiry-days: ${JWT_REFRESH_TTL_DAYS:${EXPIRY_DAYS:30}}
+  token-key: ${TOKEN_KEY}
+  expiry-mins: ${EXPIRY_MINS:15}
+  expiry-days: ${EXPIRY_DAYS:30}
 
 grpc:
   server:
