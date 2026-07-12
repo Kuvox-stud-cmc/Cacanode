@@ -1,11 +1,9 @@
-x-ai-environment: &ai-environment
+x-local-environment: &local-environment
   APP_ENV: ${APP_ENV:-development}
-  JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:-change-me-access}
-  CLIENT_TOKEN_SIGNING_SECRET: ${CLIENT_TOKEN_SIGNING_SECRET:-change-me-client-token}
-  BUSINESS_API_BASE_URL: http://business-api:8080
+  LOG_LEVEL: ${LOG_LEVEL:-INFO}
   POSTGRES_URL: postgresql://${POSTGRES_USER:-cacanode}:${POSTGRES_PASSWORD:-change-me}@postgres:5432/${POSTGRES_DB:-cacanode}
   REDIS_URL: redis://redis:6379/0
-  RABBITMQ_URL: amqp://rag_user:rag_password@rabbitmq:5672/
+  RABBITMQ_URL: amqp://${RABBITMQ_DEFAULT_USER:-rag_user}:${RABBITMQ_DEFAULT_PASS:-rag_password}@rabbitmq:5672/
   QDRANT_URL: http://qdrant:6333
   KUZU_DATABASE_PATH: /data/kuzu/cacanode.kuzu
   GRAPH_SERVICE_URL: http://graph-service:8010
@@ -13,174 +11,8 @@ x-ai-environment: &ai-environment
   SEAWEEDFS_FILER_URL: http://seaweedfs-filer:8888
   SEAWEEDFS_S3_ENDPOINT: http://seaweedfs-s3:8333
   SEAWEEDFS_BUCKET: ${SEAWEEDFS_BUCKET:-cacanode}
-  LLM_BASE_URL: ${LLM_BASE_URL:-http://llm-server:8000/v1}
-  LLM_INTERNAL_API_KEY: ${LLM_INTERNAL_API_KEY:-change-me}
-  LLM_MODEL_ID: ${LLM_MODEL_ID:-}
-  TEXT_EMBEDDING_BASE_URL: ${TEXT_EMBEDDING_BASE_URL:-http://embedding-service:8080}
-  TEXT_EMBEDDING_MODEL_ID: ${TEXT_EMBEDDING_MODEL_ID:-google/embeddinggemma-300m}
-
-x-worker: &worker
-  build:
-    context: ./rag-chatbot-fastapi
-  profiles: [workers]
-  restart: unless-stopped
-  environment:
-    <<: *ai-environment
-    WORKER_MODE: dedicated
-  depends_on:
-    rabbitmq:
-      condition: service_healthy
-  volumes:
-    - kuzu_data:/data/kuzu
-    - model_cache:/models
 
 services:
-  gateway:
-    image: nginx:1.27-alpine
-    restart: unless-stopped
-    ports:
-      - "80:80"
-    volumes:
-      - ./gateway/nginx.conf:/etc/nginx/nginx.conf:ro
-    depends_on:
-      - admin-web
-      - business-api
-      - ai-api
-
-  admin-web:
-    build:
-      context: ./frontend
-      args:
-        NEXT_PUBLIC_API_BASE_URL: ${PUBLIC_API_BASE_URL:-http://localhost/api/v1}
-        NEXT_PUBLIC_WIDGET_URL: ${PUBLIC_WIDGET_URL:-http://localhost/widget/v1/cacanode-chat.js}
-        NEXT_PUBLIC_DEFAULT_LOCALE: ${DEFAULT_LOCALE:-vi-VN}
-    restart: unless-stopped
-    expose:
-      - "3000"
-
-  business-api:
-    build:
-      context: .
-      dockerfile: api/Dockerfile
-    restart: unless-stopped
-    environment:
-      SPRING_PROFILES_ACTIVE: dev
-      SERVER_PORT: 8080
-      POSTGRES_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-cacanode}
-      POSTGRES_USER: ${POSTGRES_USER:-cacanode}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
-      REDIS_URL: redis://redis:6379/0
-      RABBITMQ_URL: amqp://rag_user:rag_password@rabbitmq:5672/
-      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:-change-me-access}
-      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-change-me-refresh}
-      JWT_ACCESS_TTL_MINUTES: ${JWT_ACCESS_TTL_MINUTES:-15}
-      JWT_REFRESH_TTL_DAYS: ${JWT_REFRESH_TTL_DAYS:-30}
-      AI_API_GRPC_ADDRESS: static://ai-api:50051
-      SENDGRID_API_KEY: ${SENDGRID_API_KEY:-}
-      FROM_EMAIL: ${FROM_EMAIL:-no-reply@cacanode.local}
-      TEMPLATE_ID: ${TEMPLATE_ID:-}
-    expose:
-      - "8080"
-      - "9090"
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      rabbitmq:
-        condition: service_healthy
-
-  ai-api:
-    build:
-      context: ./rag-chatbot-fastapi
-    restart: unless-stopped
-    environment:
-      <<: *ai-environment
-      WORKER_MODE: ${WORKER_MODE:-embedded}
-      READINESS_REQUIRE_MODELS: ${READINESS_REQUIRE_MODELS:-false}
-    expose:
-      - "8000"
-    volumes:
-      - kuzu_data:/data/kuzu
-      - model_cache:/models
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      rabbitmq:
-        condition: service_healthy
-      qdrant:
-        condition: service_started
-
-  graph-service:
-    build:
-      context: ./rag-chatbot-fastapi
-    restart: unless-stopped
-    command: ["python", "-m", "uvicorn", "app.graph_main:app", "--host", "0.0.0.0", "--port", "8010"]
-    environment:
-      <<: *ai-environment
-    expose:
-      - "8010"
-    volumes:
-      - kuzu_data:/data/kuzu
-
-  document-worker:
-    <<: *worker
-    command: ["python", "-m", "app.workers.runner", "document"]
-
-  ocr-worker:
-    <<: *worker
-    command: ["python", "-m", "app.workers.runner", "ocr"]
-
-  asr-worker:
-    <<: *worker
-    command: ["python", "-m", "app.workers.runner", "asr"]
-
-  vision-worker:
-    <<: *worker
-    command: ["python", "-m", "app.workers.runner", "vision"]
-
-  audio-worker:
-    <<: *worker
-    command: ["python", "-m", "app.workers.runner", "audio"]
-
-  video-worker:
-    <<: *worker
-    command: ["python", "-m", "app.workers.runner", "video"]
-
-  llm-server:
-    image: vllm/vllm-openai:latest
-    profiles: [gpu]
-    restart: unless-stopped
-    command: ["--model", "${LLM_MODEL_ID:-configure-a-model}", "--api-key", "${LLM_INTERNAL_API_KEY:-change-me}"]
-    environment:
-      HUGGING_FACE_HUB_TOKEN: ${MODEL_REGISTRY_TOKEN:-}
-    volumes:
-      - model_cache:/root/.cache/huggingface
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
-
-  embedding-service:
-    image: ghcr.io/huggingface/text-embeddings-inference:latest
-    profiles: [gpu]
-    restart: unless-stopped
-    command: ["--model-id", "${TEXT_EMBEDDING_MODEL_ID:-google/embeddinggemma-300m}"]
-    volumes:
-      - model_cache:/data
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
-
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
@@ -189,7 +21,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-cacanode}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -202,7 +34,7 @@ services:
     image: redis:7-alpine
     restart: unless-stopped
     ports:
-      - "6379:6379"
+      - "${REDIS_PORT:-6379}:6379"
     volumes:
       - redis_data:/data
     healthcheck:
@@ -215,11 +47,11 @@ services:
     image: rabbitmq:3-management-alpine
     restart: unless-stopped
     environment:
-      RABBITMQ_DEFAULT_USER: rag_user
-      RABBITMQ_DEFAULT_PASS: rag_password
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER:-rag_user}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS:-rag_password}
     ports:
-      - "5672:5672"
-      - "15672:15672"
+      - "${RABBITMQ_PORT:-5672}:5672"
+      - "${RABBITMQ_MANAGEMENT_PORT:-15672}:15672"
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
     healthcheck:
@@ -232,18 +64,30 @@ services:
     image: qdrant/qdrant:latest
     restart: unless-stopped
     ports:
-      - "6333:6333"
-      - "6334:6334"
+      - "${QDRANT_HTTP_PORT:-6333}:6333"
+      - "${QDRANT_GRPC_PORT:-6334}:6334"
     volumes:
       - qdrant_data:/qdrant/storage
+
+  graph-service:
+    build:
+      context: ./rag-chatbot-fastapi
+    restart: unless-stopped
+    command: ["python", "-m", "uvicorn", "app.graph_main:app", "--host", "0.0.0.0", "--port", "8010"]
+    environment:
+      <<: *local-environment
+    ports:
+      - "${GRAPH_SERVICE_PORT:-8010}:8010"
+    volumes:
+      - kuzu_data:/data/kuzu
 
   seaweedfs-master:
     image: chrislusf/seaweedfs:latest
     restart: unless-stopped
     command: master -mdir=/data
     ports:
-      - "9333:9333"
-      - "19333:19333"
+      - "${SEAWEEDFS_MASTER_PORT:-9333}:9333"
+      - "${SEAWEEDFS_MASTER_GRPC_PORT:-19333}:19333"
     volumes:
       - seaweedfs_master:/data
 
@@ -252,7 +96,7 @@ services:
     restart: unless-stopped
     command: volume -mserver=seaweedfs-master:9333 -dir=/data -port=8080
     ports:
-      - "8123:8080"
+      - "${SEAWEEDFS_VOLUME_PORT:-8123}:8080"
     volumes:
       - seaweedfs_volume:/data
     depends_on:
@@ -263,18 +107,19 @@ services:
     restart: unless-stopped
     command: filer -master=seaweedfs-master:9333
     ports:
-      - "8888:8888"
+      - "${SEAWEEDFS_FILER_PORT:-8888}:8888"
     volumes:
       - seaweedfs_filer:/data
     depends_on:
       - seaweedfs-master
+      - seaweedfs-volume
 
   seaweedfs-s3:
     image: chrislusf/seaweedfs:latest
     restart: unless-stopped
     command: s3 -filer=seaweedfs-filer:8888
     ports:
-      - "8333:8333"
+      - "${SEAWEEDFS_S3_PORT:-8333}:8333"
     depends_on:
       - seaweedfs-filer
 
@@ -284,7 +129,6 @@ volumes:
   rabbitmq_data:
   qdrant_data:
   kuzu_data:
-  model_cache:
   seaweedfs_master:
   seaweedfs_volume:
   seaweedfs_filer:

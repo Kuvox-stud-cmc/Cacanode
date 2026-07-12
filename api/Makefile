@@ -6,21 +6,25 @@ APP_HOST ?= 0.0.0.0
 APP_PORT ?= 8000
 UVICORN_ARGS ?=
 PYTEST_ARGS ?=
+PROFILE ?= dev
 
 ifeq ($(OS),Windows_NT)
+MVNW ?= ./mvnw.cmd
 VENV_PYTHON := $(VENV)/Scripts/python.exe
 REMOVE := powershell -NoProfile -Command Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
 else
+MVNW ?= sh ./mvnw
 VENV_PYTHON := $(VENV)/bin/python
 REMOVE := rm -rf
 endif
 
-.PHONY: help deps run run-dev run-prod test verify package clean
+.PHONY: help deps run dev run-dev run-prod test verify package clean
 
 help:
 	$(info Available targets:)
 	$(info   make deps       Download Maven dependencies for offline use)
 	$(info   make run        Run Spring Boot with PROFILE, default: dev)
+	$(info   make dev        Run Spring Boot with the dev profile)
 	$(info   make run-dev    Run Spring Boot with the dev profile)
 	$(info   make run-prod   Run Spring Boot with the prod profile)
 	$(info   make test       Run tests with the test profile)
@@ -34,6 +38,8 @@ deps:
 
 run:
 	$(MVNW) -P$(PROFILE) spring-boot:run $(MAVEN_ARGS)
+
+dev: run-dev
 
 run-dev:
 	$(MVNW) -Pdev spring-boot:run $(MAVEN_ARGS)

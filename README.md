@@ -1529,26 +1529,44 @@ No environment variable accepts a tenant-supplied model-provider key.
 - Sufficient GPU memory for the selected Gemma checkpoint.
 - Sufficient disk space for model weights, raw sources, and derived media.
 
-### Start the platform
+### Start local development dependencies
 
 ```bash
-cp .env.example .env
 docker compose up -d --build
 ```
 
-The default development mode starts all worker lifecycles inside `ai-api`. To run dedicated worker containers instead:
+This starts PostgreSQL, Redis, RabbitMQ, Qdrant, SeaweedFS, and the local Kuzu graph service. The FastAPI app is run on the host for development:
 
 ```bash
-WORKER_MODE=disabled docker compose --profile workers up -d --build
+cd rag-chatbot-fastapi
+cp .env.example .env
+make dev
+```
+
+The default `make dev` mode starts all worker lifecycles inside the FastAPI process with `WORKER_MODE=embedded`.
+
+### Start the container platform
+
+Use the production Compose file when you want the application containers as well as the backing services:
+
+```bash
+cp .env.example .env
+docker compose -f docker-compose.prod.yml up -d --build
+```
+
+To run dedicated worker containers instead of embedded FastAPI workers:
+
+```bash
+WORKER_MODE=disabled docker compose -f docker-compose.prod.yml --profile workers up -d --build
 ```
 
 Model services are optional because local hardware may not support the configured checkpoints. Start them only after setting valid model IDs:
 
 ```bash
-docker compose --profile gpu up -d llm-server embedding-service
+docker compose -f docker-compose.prod.yml --profile gpu up -d llm-server embedding-service
 ```
 
-The Compose deployment exposes these logical services:
+The production Compose deployment exposes these logical services:
 
 ```text
 gateway
@@ -1577,6 +1595,13 @@ seaweedfs-filer
 
 ```bash
 docker compose ps
+curl -fsS http://localhost:8010/health/ready
+```
+
+For the container platform, use:
+
+```bash
+docker compose -f docker-compose.prod.yml ps
 curl -fsS http://localhost/health/live
 curl -fsS http://localhost/health/ready
 ```
@@ -1584,13 +1609,15 @@ curl -fsS http://localhost/health/ready
 ### View logs
 
 ```bash
-docker compose logs -f gateway business-api ai-api llm-server
+docker compose logs -f postgres redis rabbitmq qdrant graph-service
+docker compose -f docker-compose.prod.yml logs -f gateway business-api ai-api llm-server
 ```
 
 ### Stop the platform
 
 ```bash
 docker compose down
+docker compose -f docker-compose.prod.yml down
 ```
 
 Use `docker compose down -v` only when intentionally deleting local databases, queues, vectors, graph data, and object-storage volumes.
