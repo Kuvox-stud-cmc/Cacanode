@@ -5,6 +5,7 @@ app:
       - "https://www.cacanode.com"
   security:
     cookie-secure: ${COOKIE_SECURE:true}
+    login-2fa-bypass-emails: ${LOGIN_2FA_BYPASS_EMAILS:}
 
 spring:
   config:
@@ -12,6 +13,10 @@ spring:
       on-profile: prod
   devtools:
     add-properties: false
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    validate-on-migrate: true
   datasource:
     url: ${POSTGRES_URL}
     username: ${POSTGRES_USER}

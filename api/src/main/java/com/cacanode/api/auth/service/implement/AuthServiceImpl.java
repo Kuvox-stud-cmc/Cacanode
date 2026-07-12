@@ -68,6 +68,9 @@ public class AuthServiceImpl implements AuthService {
     @Value("${app.security.cookie-secure:false}")
     private boolean cookieSecure;
 
+    @Value("${app.security.login-2fa-bypass-emails:}")
+    private String login2FABypassEmails;
+
     private final TenantModuleApi tenantModuleApi;
     private final RefreshTokenRepository refreshTokenRepository;
     private final UserSuspensionStateRepository userSuspensionStateRepository;
@@ -148,6 +151,18 @@ public class AuthServiceImpl implements AuthService {
         if (suspensionState != null) {
             throw new UnauthorizedException(
                     "Account suspended due to verification abuse. Please contact " + supportEmail + " for assistance.");
+        }
+
+        if (isLogin2FABypassed(result.getEmail())) {
+            UserAuthDto user = tenantModuleApi.findUserById(result.getUserId());
+            if (user == null) {
+                throw new UnauthorizedException("User not found");
+            }
+
+            log.info("Login 2FA bypassed for configured dev account: userId={}, email={}",
+                    result.getUserId(), result.getEmail());
+
+            return issueAuthTokens(user, res, req.isRememberMe());
         }
 
         // 5. Generate 2FA token
@@ -321,41 +336,7 @@ public class AuthServiceImpl implements AuthService {
 
         log.info("User email verified and activated: userId={}, email={}", userId, user.getEmail());
 
-        // 3. Generate access and refresh tokens
-        String accessToken = jwtService.generateAccessToken(
-                user.getUserId(),
-                user.getTenantId(),
-                user.getEmail(),
-                user.getRole());
-        String refreshTokenValue = jwtService.generateRefreshToken();
-
-        // 4. Persist refresh token - auth module owns refresh_tokens table
-        RefreshToken refreshToken = new RefreshToken();
-        refreshToken.setUserId(user.getUserId());
-        refreshToken.setTenantId(user.getTenantId());
-        refreshToken.setTokenHash(jwtService.hashToken(refreshTokenValue));
-        refreshToken.setExpiresAt(LocalDateTime.now().plusDays(refreshTokenExpiryTime));
-        refreshToken.setRevoked(false);
-        refreshToken.setPersistent(true);
-        refreshTokenRepository.save(refreshToken);
-
-        // 5. Set refresh token in HttpOnly cookie
-        setRefreshTokenCookie(res, refreshTokenValue, true);
-
-        // 6. Return response with tokens
-        return AuthResponse.builder()
-                .accessToken(accessToken)
-                .tokenType("Bearer")
-                .expiresIn(jwtService.getAccessTokenExpirySeconds())
-                .user(AuthResponse.UserInfo.builder()
-                        .userId(user.getUserId().toString())
-                        .tenantId(user.getTenantId().toString())
-                        .email(user.getEmail())
-                        .fullName(user.getFullName())
-                        .role(user.getRole())
-                        .plan(user.getPlan())
-                        .build())
-                .build();
+        return issueAuthTokens(user, res, true);
     }
 
     @Override
@@ -547,10 +528,26 @@ public class AuthServiceImpl implements AuthService {
 
         log.info("Login 2FA verified: userId={}, email={}", userId, email);
 
-        // 10. Delete existing refresh tokens for the user
-        deleteRefreshTokensByUserId(userId);
+        return issueAuthTokens(user, res, true);
+    }
 
-        // 11. Generate tokens
+    private boolean isLogin2FABypassed(String email) {
+        if (login2FABypassEmails == null || login2FABypassEmails.isBlank()) {
+            return false;
+        }
+
+        for (String allowedEmail : login2FABypassEmails.split(",")) {
+            if (allowedEmail.trim().equalsIgnoreCase(email)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private AuthResponse issueAuthTokens(UserAuthDto user, HttpServletResponse res, boolean persistent) {
+        deleteRefreshTokensByUserId(user.getUserId());
+
         String accessToken = jwtService.generateAccessToken(
                 user.getUserId(),
                 user.getTenantId(),
@@ -565,13 +562,11 @@ public class AuthServiceImpl implements AuthService {
         refreshToken.setTokenHash(jwtService.hashToken(refreshTokenValue));
         refreshToken.setExpiresAt(LocalDateTime.now().plusDays(refreshTokenExpiryTime));
         refreshToken.setRevoked(false);
-        refreshToken.setPersistent(true);
+        refreshToken.setPersistent(persistent);
         refreshTokenRepository.save(refreshToken);
 
-        // 13. Set refresh token in HttpOnly cookie
-        setRefreshTokenCookie(res, refreshTokenValue, true);
+        setRefreshTokenCookie(res, refreshTokenValue, persistent);
 
-        // 14. Return response with tokens
         return AuthResponse.builder()
                 .accessToken(accessToken)
                 .tokenType("Bearer")

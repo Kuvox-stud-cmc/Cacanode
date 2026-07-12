@@ -12,6 +12,8 @@ spring:
       on-profile: test
   devtools:
     add-properties: false
+  flyway:
+    enabled: false
   datasource:
     url: jdbc:h2:mem:testdb;MODE=PostgreSQL;INIT=CREATE DOMAIN IF NOT EXISTS JSONB AS JSON;DB_CLOSE_DELAY=-1
     username: sa

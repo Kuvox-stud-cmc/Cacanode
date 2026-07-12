@@ -7,6 +7,7 @@ app:
       - ${ALLOWED_ORIGIN_PATTERN_2:http://127.0.0.1:*}
   security:
     cookie-secure: ${COOKIE_SECURE:false}
+    login-2fa-bypass-emails: ${LOGIN_2FA_BYPASS_EMAILS:admin@cacanode.local}
 
 spring:
   config:
@@ -15,7 +16,9 @@ spring:
   devtools:
     add-properties: true
   flyway:
-    enabled: false
+    enabled: true
+    locations: classpath:db/migration
+    validate-on-migrate: true
   datasource:
     url: ${POSTGRES_URL}
     username: ${POSTGRES_USER}
@@ -23,7 +26,7 @@ spring:
   jpa:
     show-sql: true
     hibernate:
-      ddl-auto: update
+      ddl-auto: validate
     properties:
       hibernate:
         dialect: org.hibernate.dialect.PostgreSQLDialect
