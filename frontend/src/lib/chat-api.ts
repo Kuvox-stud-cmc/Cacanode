@@ -1,4 +1,8 @@
-import type { AssistantMessageResponse, ChatSessionResponse } from "@/types";
+import type {
+  AssistantMessageResponse,
+  ChatHistoryMessageResponse,
+  ChatSessionResponse,
+} from "@/types";
 import { getAiApiBase } from "@/lib/auth-api";
 import { readJsonOrThrow } from "@/lib/api-error";
 import type { ApiRequest } from "@/lib/documents-api";
@@ -52,4 +56,12 @@ export async function submitChatMessageApi(
     clearTimeout(timeout);
     signal?.removeEventListener("abort", abortFromCaller);
   }
+}
+
+export async function getChatMessagesApi(
+  request: ApiRequest,
+  sessionId: string,
+): Promise<ChatHistoryMessageResponse[]> {
+  const res = await request(`${getAiApiBase()}/chat/sessions/${sessionId}/messages`);
+  return readJsonOrThrow<ChatHistoryMessageResponse[]>(res);
 }

@@ -8,7 +8,7 @@ import {
   type DragEvent,
 } from "react";
 import toast from "react-hot-toast";
-import type { Document, DocumentStatus } from "@/types";
+import type { Document, DocumentStatus, TenantWorkspace } from "@/types";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -30,7 +30,7 @@ import {
   listDocumentsApi,
   uploadDocumentApi,
 } from "@/lib/documents-api";
-import { publicConfig } from "@/lib/public-config";
+import { getTenantWorkspaceApi } from "@/lib/workspace-api";
 
 type DashboardDocument = Document & {
   localId?: string;
@@ -114,18 +114,23 @@ export default function DocumentsPage() {
   const { request } = useApiClient();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [documents, setDocuments] = useState<DashboardDocument[]>([]);
+  const [workspace, setWorkspace] = useState<TenantWorkspace | null>(null);
   const [loading, setLoading] = useState(true);
   const [isDragging, setIsDragging] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
-    listDocumentsApi(request, publicConfig.demoKnowledgeBaseId)
-      .then((items) => {
-        if (!cancelled) setDocuments(items);
+    getTenantWorkspaceApi(request)
+      .then(async (tenantWorkspace) => {
+        const items = await listDocumentsApi(request, tenantWorkspace.knowledgeBase.id);
+        if (!cancelled) {
+          setWorkspace(tenantWorkspace);
+          setDocuments(items);
+        }
       })
       .catch((error) => {
         if (!cancelled) {
-          toast.error(error instanceof Error ? error.message : "Unable to load documents");
+          toast.error(error instanceof Error ? error.message : "Unable to load workspace");
         }
       })
       .finally(() => {
@@ -177,6 +182,11 @@ export default function DocumentsPage() {
   }, [documents, request]);
 
   async function uploadFiles(files: File[]) {
+    if (!workspace) {
+      toast.error("Workspace is still loading.");
+      return;
+    }
+
     for (const file of files) {
       if (!isSupportedFile(file)) {
         toast.error(`${file.name} is not supported. Upload TXT or PDF files.`);
@@ -193,7 +203,7 @@ export default function DocumentsPage() {
         uploadState: "UPLOADING",
         fileSizeBytes: file.size,
         jobId: localId,
-        knowledgeBaseId: publicConfig.demoKnowledgeBaseId,
+        knowledgeBaseId: workspace.knowledgeBase.id,
         uploadedAt: new Date().toISOString(),
       };
       setDocuments((current) => [uploading, ...current]);
@@ -202,7 +212,7 @@ export default function DocumentsPage() {
         const uploaded = await uploadDocumentApi(
           request,
           file,
-          publicConfig.demoKnowledgeBaseId,
+          workspace.knowledgeBase.id,
         );
         setDocuments((current) =>
           current.map((document) =>
@@ -257,6 +267,7 @@ export default function DocumentsPage() {
         <Button
           className="gap-1.5 bg-indigo-600 text-white hover:bg-indigo-700"
           size="sm"
+          disabled={!workspace || loading}
           onClick={() => fileInputRef.current?.click()}
         >
           <Upload className="h-4 w-4" />

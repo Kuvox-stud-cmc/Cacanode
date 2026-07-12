@@ -40,3 +40,10 @@ class AssistantMessage:
     content: str
     citations: list[Citation] = field(default_factory=list)
 
+
+@dataclass(frozen=True, slots=True)
+class ChatMessage:
+    role: str
+    content: str
+    citations: list[Citation] = field(default_factory=list)
+    sequence_number: int | None = None

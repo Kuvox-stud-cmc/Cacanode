@@ -6,13 +6,19 @@ from pydantic import BaseModel, Field
 from app.core.config import settings
 from app.core.dependencies import get_current_tenant
 from app.core.errors import ApiError, ErrorEnvelope
-from app.infrastructure.model_gateway import OpenAICompatibleChatModel
+from app.infrastructure.model_gateway import create_chat_model
 from app.ingestion.embedding import OllamaEmbeddingClient
 from app.rag.chat_service import RagChatService
-from app.rag.errors import ChatModelTimeoutError, ChatSessionNotFoundError
-from app.rag.models import AssistantMessage, ChatSession, Citation
+from app.rag.errors import (
+    ChatModelProviderError,
+    ChatModelTimeoutError,
+    ChatSessionNotFoundError,
+    ChatSessionStoreUnavailableError,
+    ChatWorkspaceNotFoundError,
+)
+from app.rag.models import AssistantMessage, ChatMessage, ChatSession, Citation
 from app.rag.retrieval import QdrantVectorRetriever
-from app.rag.sessions import InMemoryChatSessionStore
+from app.rag.sessions import PostgresChatSessionStore
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 _chat_service: RagChatService | None = None
@@ -85,12 +91,20 @@ class AssistantMessageResponse(BaseModel):
         )
 
 
-def not_implemented(capability: str) -> None:
-    raise ApiError(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        code="NOT_IMPLEMENTED",
-        message=f"{capability} is scaffolded but not implemented.",
-    )
+class ChatMessageResponse(BaseModel):
+    role: str
+    content: str
+    citations: list[CitationResponse] = Field(default_factory=list)
+    sequence_number: int | None = None
+
+    @classmethod
+    def from_message(cls, message: ChatMessage) -> "ChatMessageResponse":
+        return cls(
+            role=message.role,
+            content=message.content,
+            citations=[CitationResponse.from_citation(item) for item in message.citations],
+            sequence_number=message.sequence_number,
+        )
 
 
 def get_chat_service() -> RagChatService:
@@ -98,10 +112,10 @@ def get_chat_service() -> RagChatService:
     if _chat_service is None:
         _chat_service = RagChatService(
             settings=settings,
-            sessions=InMemoryChatSessionStore(),
+            sessions=PostgresChatSessionStore(settings.POSTGRES_URL),
             embedder=OllamaEmbeddingClient(settings),
             retriever=QdrantVectorRetriever(settings),
-            chat_model=OpenAICompatibleChatModel(settings),
+            chat_model=create_chat_model(settings),
         )
     return _chat_service
 
@@ -122,13 +136,26 @@ async def create_session(
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ) -> ChatSessionResponse:
     del idempotency_key
-    session = chat_service.create_session(
-        tenant_id=str(tenant["tenant_id"]),
-        user_id=str(tenant["user_id"]),
-        chatbot_id=request.chatbot_id,
-        knowledge_base_id=request.knowledge_base_id,
-        locale=request.locale,
-    )
+    try:
+        session = chat_service.create_session(
+            tenant_id=str(tenant["tenant_id"]),
+            user_id=str(tenant["user_id"]),
+            chatbot_id=request.chatbot_id,
+            knowledge_base_id=request.knowledge_base_id,
+            locale=request.locale,
+        )
+    except ChatWorkspaceNotFoundError as exc:
+        raise ApiError(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code="WORKSPACE_NOT_FOUND",
+            message="Chat workspace was not found.",
+        ) from exc
+    except ChatSessionStoreUnavailableError as exc:
+        raise ApiError(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            code="CHAT_SESSION_STORE_UNAVAILABLE",
+            message="Chat session storage is unavailable.",
+        ) from exc
     return ChatSessionResponse.from_session(session)
 
 
@@ -138,6 +165,7 @@ async def create_session(
     responses={
         401: {"model": ErrorEnvelope},
         404: {"model": ErrorEnvelope},
+        502: {"model": ErrorEnvelope},
         504: {"model": ErrorEnvelope},
     },
 )
@@ -162,22 +190,82 @@ async def submit_message(
             code="SESSION_NOT_FOUND",
             message="Chat session was not found.",
         ) from exc
+    except ChatSessionStoreUnavailableError as exc:
+        raise ApiError(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            code="CHAT_SESSION_STORE_UNAVAILABLE",
+            message="Chat session storage is unavailable.",
+        ) from exc
     except ChatModelTimeoutError as exc:
         raise ApiError(
             status_code=status.HTTP_504_GATEWAY_TIMEOUT,
             code="MODEL_TIMEOUT",
             message="The model took too long to answer. Try a shorter question or retry.",
         ) from exc
+    except ChatModelProviderError as exc:
+        raise ApiError(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            code="MODEL_PROVIDER_ERROR",
+            message="The model provider could not complete the request.",
+        ) from exc
     return AssistantMessageResponse.from_message(message)
 
 
-@router.get("/sessions/{session_id}/messages", responses={501: {"model": ErrorEnvelope}})
-async def history(session_id: str, limit: int = 50, after: str | None = None) -> None:
-    del session_id, limit, after
-    not_implemented("Chat history")
+@router.get(
+    "/sessions/{session_id}/messages",
+    response_model=list[ChatMessageResponse],
+    responses={401: {"model": ErrorEnvelope}, 404: {"model": ErrorEnvelope}},
+)
+async def history(
+    session_id: str,
+    limit: int = 50,
+    after: int | None = None,
+    tenant: dict[str, Any] = current_tenant_dependency,
+    chat_service: RagChatService = chat_service_dependency,
+) -> list[ChatMessageResponse]:
+    try:
+        messages = chat_service.list_messages(
+            tenant_id=str(tenant["tenant_id"]),
+            session_id=session_id,
+            limit=limit,
+            after=after,
+        )
+    except ChatSessionNotFoundError as exc:
+        raise ApiError(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code="SESSION_NOT_FOUND",
+            message="Chat session was not found.",
+        ) from exc
+    except ChatSessionStoreUnavailableError as exc:
+        raise ApiError(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            code="CHAT_SESSION_STORE_UNAVAILABLE",
+            message="Chat session storage is unavailable.",
+        ) from exc
+    return [ChatMessageResponse.from_message(message) for message in messages]
 
 
-@router.delete("/sessions/{session_id}", responses={501: {"model": ErrorEnvelope}})
-async def delete_session(session_id: str) -> None:
-    del session_id
-    not_implemented("Chat session deletion")
+@router.delete(
+    "/sessions/{session_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses={401: {"model": ErrorEnvelope}, 404: {"model": ErrorEnvelope}},
+)
+async def delete_session(
+    session_id: str,
+    tenant: dict[str, Any] = current_tenant_dependency,
+    chat_service: RagChatService = chat_service_dependency,
+) -> None:
+    try:
+        chat_service.close_session(tenant_id=str(tenant["tenant_id"]), session_id=session_id)
+    except ChatSessionNotFoundError as exc:
+        raise ApiError(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code="SESSION_NOT_FOUND",
+            message="Chat session was not found.",
+        ) from exc
+    except ChatSessionStoreUnavailableError as exc:
+        raise ApiError(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            code="CHAT_SESSION_STORE_UNAVAILABLE",
+            message="Chat session storage is unavailable.",
+        ) from exc

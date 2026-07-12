@@ -34,7 +34,6 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { cn } from "@/lib/utils"
-import { publicConfig } from "@/lib/public-config"
 import {
   fileTypeFromName,
   getDocumentStatusApi,
@@ -42,10 +41,13 @@ import {
   listDocumentsApi,
   uploadDocumentApi,
 } from "@/lib/documents-api"
-import { createChatSessionApi, submitChatMessageApi } from "@/lib/chat-api"
-import type { ChatCitation, Document, DocumentStatus } from "@/types"
-
-const PLAYGROUND_STATE_KEY = `cacanode.chat.playground.${publicConfig.demoKnowledgeBaseId}`
+import {
+  createChatSessionApi,
+  getChatMessagesApi,
+  submitChatMessageApi,
+} from "@/lib/chat-api"
+import { getTenantWorkspaceApi } from "@/lib/workspace-api"
+import type { ChatCitation, Document, DocumentStatus, TenantWorkspace } from "@/types"
 
 type SourceStatus = DocumentStatus | "UPLOADING"
 
@@ -64,36 +66,42 @@ type ChatMessage = {
 }
 
 type PersistedPlaygroundState = {
+  sessionId: string | null
   messages: ChatMessage[]
   sources: SourceDocument[]
 }
 
-function readPersistedPlaygroundState(): PersistedPlaygroundState {
+function playgroundStateKey(workspace: TenantWorkspace): string {
+  return [
+    "cacanode.chat.playground",
+    workspace.tenantId,
+    workspace.knowledgeBase.id,
+    workspace.chatbot.id,
+  ].join(".")
+}
+
+function emptyPlaygroundState(): PersistedPlaygroundState {
+  return { sessionId: null, messages: [], sources: [] }
+}
+
+function readPersistedPlaygroundState(key: string): PersistedPlaygroundState {
   if (typeof window === "undefined") {
-    return { messages: [], sources: [] }
+    return emptyPlaygroundState()
   }
 
   try {
-    const raw = window.sessionStorage.getItem(PLAYGROUND_STATE_KEY)
-    if (!raw) return { messages: [], sources: [] }
+    const raw = window.sessionStorage.getItem(key)
+    if (!raw) return emptyPlaygroundState()
 
     const restored = JSON.parse(raw) as Partial<PersistedPlaygroundState>
-    if ("sessionId" in restored) {
-      window.sessionStorage.setItem(
-        PLAYGROUND_STATE_KEY,
-        JSON.stringify({
-          messages: Array.isArray(restored.messages) ? restored.messages : [],
-          sources: Array.isArray(restored.sources) ? restored.sources : [],
-        } satisfies PersistedPlaygroundState),
-      )
-    }
     return {
+      sessionId: typeof restored.sessionId === "string" ? restored.sessionId : null,
       messages: Array.isArray(restored.messages) ? restored.messages : [],
       sources: Array.isArray(restored.sources) ? restored.sources : [],
     }
   } catch {
-    window.sessionStorage.removeItem(PLAYGROUND_STATE_KEY)
-    return { messages: [], sources: [] }
+    window.sessionStorage.removeItem(key)
+    return emptyPlaygroundState()
   }
 }
 
@@ -147,13 +155,10 @@ function Playground({ authenticated }: { authenticated: boolean }) {
   const suppressRestoredComposerFocus = useRef(false)
   const canPersistStateRef = useRef(false)
   const activeChatAbortRef = useRef<AbortController | null>(null)
+  const [workspace, setWorkspace] = useState<TenantWorkspace | null>(null)
   const [message, setMessage] = useState("")
-  const [messages, setMessages] = useState<ChatMessage[]>(
-    () => readPersistedPlaygroundState().messages,
-  )
-  const [sources, setSources] = useState<SourceDocument[]>(
-    () => readPersistedPlaygroundState().sources,
-  )
+  const [messages, setMessages] = useState<ChatMessage[]>([])
+  const [sources, setSources] = useState<SourceDocument[]>([])
   const [sourceMenuOpen, setSourceMenuOpen] = useState(false)
   const [authDialogOpen, setAuthDialogOpen] = useState(false)
   const [sessionId, setSessionId] = useState<string | null>(null)
@@ -169,12 +174,37 @@ function Playground({ authenticated }: { authenticated: boolean }) {
 
   useEffect(() => {
     if (!authenticated) return
-    canPersistStateRef.current = true
+    canPersistStateRef.current = false
+
+    let cancelled = false
+    getTenantWorkspaceApi(request)
+      .then((tenantWorkspace) => {
+        if (cancelled) return
+        const restored = readPersistedPlaygroundState(playgroundStateKey(tenantWorkspace))
+        setWorkspace(tenantWorkspace)
+        setSessionId(restored.sessionId)
+        setMessages(restored.messages)
+        setSources(restored.sources)
+        canPersistStateRef.current = true
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          toast.error(error instanceof Error ? error.message : "Unable to load workspace")
+        }
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [authenticated, request])
+
+  useEffect(() => {
+    if (!authenticated || !workspace) return
 
     let cancelled = false
     const loadExistingSources = async () => {
       try {
-        const documents = await listDocumentsApi(request, publicConfig.demoKnowledgeBaseId)
+        const documents = await listDocumentsApi(request, workspace.knowledgeBase.id)
         if (cancelled) return
         setSources((current) => {
           const byId = new Map(current.map((source) => [source.id, source]))
@@ -201,7 +231,39 @@ function Playground({ authenticated }: { authenticated: boolean }) {
     return () => {
       cancelled = true
     }
-  }, [authenticated, request])
+  }, [authenticated, request, workspace])
+
+  useEffect(() => {
+    if (!authenticated || !workspace || !sessionId) return
+
+    let cancelled = false
+    getChatMessagesApi(request, sessionId)
+      .then((history) => {
+        if (cancelled || history.length === 0) return
+        setMessages(
+          history
+            .filter((item) => item.role === "user" || item.role === "assistant")
+            .map((item) => ({
+              id: `${sessionId}-${item.sequence_number ?? makeId()}`,
+              role: item.role as "user" | "assistant",
+              content: item.content,
+              citations: item.citations,
+            })),
+        )
+      })
+      .catch((error) => {
+        if (cancelled) return
+        if (error instanceof Error && error.message === "Chat session was not found.") {
+          setSessionId(null)
+          return
+        }
+        toast.error(error instanceof Error ? error.message : "Unable to load chat history")
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [authenticated, request, sessionId, workspace])
 
   useEffect(() => {
     return () => {
@@ -210,12 +272,12 @@ function Playground({ authenticated }: { authenticated: boolean }) {
   }, [])
 
   useEffect(() => {
-    if (!authenticated || !canPersistStateRef.current) return
+    if (!authenticated || !workspace || !canPersistStateRef.current) return
     window.sessionStorage.setItem(
-      PLAYGROUND_STATE_KEY,
-      JSON.stringify({ messages, sources } satisfies PersistedPlaygroundState),
+      playgroundStateKey(workspace),
+      JSON.stringify({ sessionId, messages, sources } satisfies PersistedPlaygroundState),
     )
-  }, [authenticated, messages, sources])
+  }, [authenticated, messages, sessionId, sources, workspace])
 
   useEffect(() => {
     if (!authenticated) return
@@ -290,10 +352,13 @@ function Playground({ authenticated }: { authenticated: boolean }) {
   }
 
   async function createSession(): Promise<string> {
+    if (!workspace) {
+      throw new Error("Workspace is still loading.")
+    }
     const session = await createChatSessionApi(request, {
-      chatbot_id: publicConfig.demoChatbotId,
-      knowledge_base_id: publicConfig.demoKnowledgeBaseId,
-      locale: publicConfig.defaultLocale,
+      chatbot_id: workspace.chatbot.id,
+      knowledge_base_id: workspace.knowledgeBase.id,
+      locale: workspace.chatbot.defaultLocale || workspace.knowledgeBase.defaultLocale,
     })
     setSessionId(session.id)
     return session.id
@@ -406,6 +471,11 @@ function Playground({ authenticated }: { authenticated: boolean }) {
   }
 
   async function uploadFiles(files: File[]) {
+    if (!workspace) {
+      toast.error("Workspace is still loading.")
+      return
+    }
+
     for (const file of files) {
       if (!isSupportedFile(file)) {
         toast.error(`${file.name} is not supported. Upload TXT or PDF files.`)
@@ -420,7 +490,7 @@ function Playground({ authenticated }: { authenticated: boolean }) {
         fileType: fileTypeFromName(file.name),
         fileSizeBytes: file.size,
         jobId: localId,
-        knowledgeBaseId: publicConfig.demoKnowledgeBaseId,
+        knowledgeBaseId: workspace.knowledgeBase.id,
         status: "UPLOADING",
         uploadedAt: new Date().toISOString(),
       }
@@ -430,7 +500,7 @@ function Playground({ authenticated }: { authenticated: boolean }) {
         const uploaded = await uploadDocumentApi(
           request,
           file,
-          publicConfig.demoKnowledgeBaseId,
+          workspace.knowledgeBase.id,
         )
         setSources((current) =>
           current.map((source) =>
@@ -469,7 +539,7 @@ function Playground({ authenticated }: { authenticated: boolean }) {
   }
 
   const sendDisabled =
-    authenticated && (!message.trim() || !hasCompletedSource || sending)
+    authenticated && (!workspace || !message.trim() || !hasCompletedSource || sending)
 
   return (
     <div

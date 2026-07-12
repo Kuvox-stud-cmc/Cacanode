@@ -11,6 +11,11 @@ app:
     access-key:
     secret-key:
     region: us-east-1
+  email:
+    from-email: test@test.com
+    from-name: CacaNode Test
+    verification-link: http://localhost:3000/verify
+    login-2fa-link: http://localhost:3000/verify-login
 
 spring:
   config:
@@ -35,6 +40,9 @@ spring:
     from-email: test@test.com
     template-id: test-template
     verification-link: http://localhost:3000/verify
+    login-2fa-link: http://localhost:3000/verify-login
+  brevo:
+    api-key: test-brevo-key
   rabbitmq:
     addresses: amqp://guest:guest@localhost:5672/
     listener:

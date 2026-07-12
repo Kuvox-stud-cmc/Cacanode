@@ -5,15 +5,20 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from prometheus_client import REGISTRY
 
 from app.core.config import Settings
 from app.ingestion.embedding import OllamaEmbeddingClient
 from app.ingestion.errors import TransientIngestionError
 from app.rag.chat_service import NO_INFORMATION_RESPONSE, RagChatService
-from app.rag.errors import ChatSessionNotFoundError
+from app.rag.errors import ChatModelTimeoutError, ChatSessionNotFoundError
 from app.rag.models import RetrievedChunk
 from app.rag.retrieval import QdrantVectorRetriever
 from app.rag.sessions import InMemoryChatSessionStore
+
+
+def metric_value(name: str, labels: dict[str, str]) -> float:
+    return REGISTRY.get_sample_value(name, labels) or 0.0
 
 
 class FakeOllamaResponse:
@@ -50,8 +55,11 @@ async def test_embedding_adapter_embeds_queries(monkeypatch: pytest.MonkeyPatch)
     FakeOllamaClient.payload = {"embeddings": [[1, 2, 3]]}
     monkeypatch.setattr("app.ingestion.embedding.httpx.AsyncClient", FakeOllamaClient)
     embedder = OllamaEmbeddingClient(Settings(TEXT_EMBEDDING_DIMENSION=3))
+    labels = {"operation": "query", "provider": "ollama", "outcome": "success"}
+    before = metric_value("cacanode_ai_embedding_seconds_count", labels)
 
     assert await embedder.embed_query("hello") == [1.0, 2.0, 3.0]
+    assert metric_value("cacanode_ai_embedding_seconds_count", labels) == before + 1
 
 
 @pytest.mark.asyncio
@@ -99,6 +107,8 @@ async def test_qdrant_retriever_filters_by_tenant_and_knowledge_base() -> None:
         ),
         client=client,  # type: ignore[arg-type]
     )
+    labels = {"provider": "qdrant", "outcome": "success"}
+    before = metric_value("cacanode_ai_retrieval_seconds_count", labels)
 
     chunks = await retriever.retrieve(
         tenant_id="tenant-1",
@@ -115,6 +125,7 @@ async def test_qdrant_retriever_filters_by_tenant_and_knowledge_base() -> None:
     assert conditions == {"tenant_id": "tenant-1", "knowledge_base_id": "kb-1"}
     assert client.kwargs["collection_name"] == "chunks"
     assert client.kwargs["score_threshold"] == 0.35
+    assert metric_value("cacanode_ai_retrieval_seconds_count", labels) == before + 1
 
 
 class FakeEmbedder:
@@ -150,6 +161,9 @@ class FakeRetriever:
 
 
 class FakeChatModel:
+    provider = "test-provider"
+    model = "test-model"
+
     def __init__(self) -> None:
         self.calls: list[Sequence[dict[str, object]]] = []
 
@@ -158,13 +172,23 @@ class FakeChatModel:
         return "Sản phẩm được đổi trong 7 ngày [S1]."
 
 
+class TimeoutChatModel(FakeChatModel):
+    provider = "timeout-provider"
+    model = "timeout-model"
+
+    async def complete(self, messages: Sequence[dict[str, object]]) -> str:
+        self.calls.append(messages)
+        raise ChatModelTimeoutError("Model generation timed out")
+
+
 def make_service(
     *,
     chunks: list[RetrievedChunk],
     settings: Settings | None = None,
+    model: FakeChatModel | None = None,
 ) -> tuple[RagChatService, InMemoryChatSessionStore, FakeRetriever, FakeChatModel]:
     retriever = FakeRetriever(chunks)
-    model = FakeChatModel()
+    model = model or FakeChatModel()
     service = RagChatService(
         settings=settings
         or Settings(TEXT_TOP_K=8, FINAL_CONTEXT_TOP_K=5, MIN_RETRIEVAL_CONFIDENCE=0.35),
@@ -234,6 +258,101 @@ async def test_chat_service_generates_grounded_answer_with_citations() -> None:
     assert message.citations[0].snippet == "Sản phẩm được đổi trong 7 ngày."
     assert retriever.calls[0]["tenant_id"] == "tenant-1"
     assert "Sản phẩm được đổi trong 7 ngày." in str(model.calls[0][1]["content"])
+
+
+@pytest.mark.asyncio
+async def test_chat_service_records_rag_timing_metrics_on_success() -> None:
+    labels = {"provider": "test-provider", "outcome": "success"}
+    before = {
+        stage: metric_value(
+            "cacanode_ai_rag_answer_seconds_count",
+            {"stage": stage, **labels},
+        )
+        for stage in ("embedding", "retrieval", "llm", "total")
+    }
+    service, _, _, _ = make_service(
+        chunks=[
+            RetrievedChunk(
+                document_id="doc-1",
+                source_name="policy.txt",
+                page_number=1,
+                chunk_index=0,
+                text="Sản phẩm được đổi trong 7 ngày.",
+                score=0.91,
+            )
+        ]
+    )
+    session = service.create_session(
+        tenant_id="tenant-1",
+        user_id="user-1",
+        chatbot_id="bot-1",
+        knowledge_base_id="kb-1",
+        locale="vi-VN",
+    )
+
+    await service.submit_message(
+        tenant_id="tenant-1",
+        session_id=session.id,
+        content="Chinh sach doi tra?",
+    )
+
+    for stage, count in before.items():
+        assert (
+            metric_value(
+                "cacanode_ai_rag_answer_seconds_count",
+                {"stage": stage, **labels},
+            )
+            == count + 1
+        )
+
+
+@pytest.mark.asyncio
+async def test_chat_service_records_rag_timeout_metrics() -> None:
+    labels = {"provider": "timeout-provider", "outcome": "timeout"}
+    before_total = metric_value(
+        "cacanode_ai_rag_answer_seconds_count",
+        {"stage": "total", **labels},
+    )
+    before_llm = metric_value(
+        "cacanode_ai_rag_answer_seconds_count",
+        {"stage": "llm", **labels},
+    )
+    service, _, _, _ = make_service(
+        chunks=[
+            RetrievedChunk(
+                document_id="doc-1",
+                source_name="policy.txt",
+                page_number=1,
+                chunk_index=0,
+                text="Sản phẩm được đổi trong 7 ngày.",
+                score=0.91,
+            )
+        ],
+        model=TimeoutChatModel(),
+    )
+    session = service.create_session(
+        tenant_id="tenant-1",
+        user_id="user-1",
+        chatbot_id="bot-1",
+        knowledge_base_id="kb-1",
+        locale="vi-VN",
+    )
+
+    with pytest.raises(ChatModelTimeoutError):
+        await service.submit_message(
+            tenant_id="tenant-1",
+            session_id=session.id,
+            content="Chinh sach doi tra?",
+        )
+
+    assert (
+        metric_value("cacanode_ai_rag_answer_seconds_count", {"stage": "total", **labels})
+        == before_total + 1
+    )
+    assert (
+        metric_value("cacanode_ai_rag_answer_seconds_count", {"stage": "llm", **labels})
+        == before_llm + 1
+    )
 
 
 @pytest.mark.asyncio

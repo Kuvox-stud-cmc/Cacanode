@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import time
 from collections.abc import Sequence
 from typing import Any
 
 from qdrant_client import AsyncQdrantClient, models
 
 from app.core.config import Settings
+from app.core.metrics import AI_RETRIEVAL_SECONDS
 from app.rag.models import RetrievedChunk
 
 
@@ -29,27 +31,38 @@ class QdrantVectorRetriever:
         limit: int,
         score_threshold: float,
     ) -> list[RetrievedChunk]:
-        response = await self._client.query_points(
-            collection_name=self._collection,
-            query=list(query_vector),
-            query_filter=models.Filter(
-                must=[
-                    models.FieldCondition(
-                        key=self._tenant_field,
-                        match=models.MatchValue(value=tenant_id),
-                    ),
-                    models.FieldCondition(
-                        key=self._knowledge_base_field,
-                        match=models.MatchValue(value=knowledge_base_id),
-                    ),
-                ]
-            ),
-            limit=limit,
-            with_payload=True,
-            with_vectors=False,
-            score_threshold=score_threshold if score_threshold > 0 else None,
-        )
-        return [chunk for point in response.points if (chunk := self._chunk_from_point(point))]
+        started_at = time.perf_counter()
+        outcome = "success"
+        try:
+            response = await self._client.query_points(
+                collection_name=self._collection,
+                query=list(query_vector),
+                query_filter=models.Filter(
+                    must=[
+                        models.FieldCondition(
+                            key=self._tenant_field,
+                            match=models.MatchValue(value=tenant_id),
+                        ),
+                        models.FieldCondition(
+                            key=self._knowledge_base_field,
+                            match=models.MatchValue(value=knowledge_base_id),
+                        ),
+                    ]
+                ),
+                limit=limit,
+                with_payload=True,
+                with_vectors=False,
+                score_threshold=score_threshold if score_threshold > 0 else None,
+            )
+            return [chunk for point in response.points if (chunk := self._chunk_from_point(point))]
+        except Exception:
+            outcome = "error"
+            raise
+        finally:
+            AI_RETRIEVAL_SECONDS.labels(
+                provider="qdrant",
+                outcome=outcome,
+            ).observe(time.perf_counter() - started_at)
 
     def _chunk_from_point(self, point: Any) -> RetrievedChunk | None:
         payload = point.payload or {}
@@ -69,4 +82,3 @@ class QdrantVectorRetriever:
             text=str(text),
             score=float(point.score),
         )
-

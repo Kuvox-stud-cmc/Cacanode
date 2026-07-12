@@ -1,65 +1,39 @@
 package com.cacanode.api.notification.service;
 
-import java.io.IOException;
-
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
-import com.sendgrid.Method;
-import com.sendgrid.Request;
-import com.sendgrid.Response;
-import com.sendgrid.SendGrid;
-import com.sendgrid.helpers.mail.Mail;
-import com.sendgrid.helpers.mail.objects.Content;
-import com.sendgrid.helpers.mail.objects.Email;
-
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j(topic = "EMAIL-SERVICE")
 @Service
-@RequiredArgsConstructor
 public class EmailService {
 
-    private final SendGrid sendGrid;
+    private final EmailProvider primaryProvider;
+    private final EmailProvider fallbackProvider;
+    private final String verificationLink;
+    private final String login2FALink;
 
-    @Value("${spring.sendgrid.from-email}")
-    private String fromEmail;
-
-    @Value("${spring.sendgrid.verification-link}")
-    private String verificationLink;
-
-    @Value("${spring.sendgrid.login-2fa-link:http://localhost:3000/verify-login}")
-    private String login2FALink;
+    public EmailService(
+            @Qualifier("sendGridEmailProvider") EmailProvider primaryProvider,
+            @Qualifier("brevoEmailProvider") EmailProvider fallbackProvider,
+            @Value("${app.email.verification-link}") String verificationLink,
+            @Value("${app.email.login-2fa-link:http://localhost:3000/verify-login}") String login2FALink) {
+        this.primaryProvider = primaryProvider;
+        this.fallbackProvider = fallbackProvider;
+        this.verificationLink = verificationLink;
+        this.login2FALink = login2FALink;
+    }
 
     public void sendWelcomeEmail(String toEmail, String fullName, String companyName, String verificationToken) {
-        Email from = new Email(fromEmail, "CacaNode");
-        Email to = new Email(toEmail);
-
-        String subject = "Welcome to CacaNode — Confirm your email";
-        String htmlContent = buildWelcomeEmailHtml(fullName, companyName, verificationToken);
-
-        Content content = new Content("text/html", htmlContent);
-        Mail mail = new Mail(from, subject, to, content);
-
-        try {
-            Request request = new Request();
-            request.setMethod(Method.POST);
-            request.setEndpoint("mail/send");
-            request.setBody(mail.build());
-
-            Response response = sendGrid.api(request);
-
-            if (response.getStatusCode() >= 200 && response.getStatusCode() < 300) {
-                log.info("Welcome email sent to: {}", toEmail);
-            } else {
-                log.error("Failed to send welcome email to: {} — status: {} body: {}",
-                        toEmail, response.getStatusCode(), response.getBody());
-            }
-
-        } catch (IOException e) {
-            log.error("Exception sending welcome email to: {} — {}", toEmail, e.getMessage());
-        }
+        EmailMessage message = new EmailMessage(
+                toEmail,
+                fullName,
+                "Welcome to CacaNode - Confirm your email",
+                buildWelcomeEmailHtml(fullName, companyName, verificationToken)
+        );
+        sendWithFallback(message);
     }
 
     private String buildWelcomeEmailHtml(
@@ -108,33 +82,43 @@ public class EmailService {
     }
 
     public void sendLogin2FAEmail(String toEmail, String fullName, String verificationToken) {
-        Email from = new Email(fromEmail, "CacaNode");
-        Email to = new Email(toEmail);
+        EmailMessage message = new EmailMessage(
+                toEmail,
+                fullName,
+                "Login Verification - CacaNode",
+                buildLogin2FAEmailHtml(fullName, verificationToken)
+        );
+        sendWithFallback(message);
+    }
 
-        String subject = "Login Verification - CacaNode";
-        log.info("User login full name: {}", fullName);
-        String htmlContent = buildLogin2FAEmailHtml(fullName, verificationToken);
-
-        Content content = new Content("text/html", htmlContent);
-        Mail mail = new Mail(from, subject, to, content);
-
+    private void sendWithFallback(EmailMessage message) {
         try {
-            Request request = new Request();
-            request.setMethod(Method.POST);
-            request.setEndpoint("mail/send");
-            request.setBody(mail.build());
+            primaryProvider.send(message);
+            log.info("Email sent to {} via {}", message.toEmail(), primaryProvider.providerName());
+            return;
+        } catch (EmailDeliveryException primaryFailure) {
+            log.warn(
+                    "{} failed to send email to {}. Trying {}. Reason: {}",
+                    primaryProvider.providerName(),
+                    message.toEmail(),
+                    fallbackProvider.providerName(),
+                    primaryFailure.getMessage()
+            );
 
-            Response response = sendGrid.api(request);
-
-            if (response.getStatusCode() >= 200 && response.getStatusCode() < 300) {
-                log.info("Login 2FA email sent to: {}", toEmail);
-            } else {
-                log.error("Failed to send login 2FA email to: {} — status: {} body: {}",
-                        toEmail, response.getStatusCode(), response.getBody());
+            try {
+                fallbackProvider.send(message);
+                log.info("Email sent to {} via {}", message.toEmail(), fallbackProvider.providerName());
+            } catch (EmailDeliveryException fallbackFailure) {
+                EmailDeliveryException deliveryFailure = new EmailDeliveryException(
+                        "Email delivery failed with %s and %s".formatted(
+                                primaryProvider.providerName(),
+                                fallbackProvider.providerName()
+                        ),
+                        fallbackFailure
+                );
+                deliveryFailure.addSuppressed(primaryFailure);
+                throw deliveryFailure;
             }
-
-        } catch (IOException e) {
-            log.error("Exception sending login 2FA email to: {} — {}", toEmail, e.getMessage());
         }
     }
 

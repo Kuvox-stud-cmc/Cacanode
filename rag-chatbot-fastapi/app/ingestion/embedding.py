@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import time
 from collections.abc import Sequence
 from typing import Any
 
 import httpx
 
 from app.core.config import Settings
+from app.core.metrics import AI_EMBEDDING_SECONDS
 from app.ingestion.errors import PermanentIngestionError, TransientIngestionError
 
 
@@ -17,15 +19,39 @@ class OllamaEmbeddingClient:
         self._expected_dimension = settings.TEXT_EMBEDDING_DIMENSION
 
     async def embed_documents(self, texts: Sequence[str]) -> list[list[float]]:
-        embeddings: list[list[float]] = []
-        for start in range(0, len(texts), self._batch_size):
-            batch = texts[start : start + self._batch_size]
-            embeddings.extend(await self._embed_batch(batch))
-        return embeddings
+        started_at = time.perf_counter()
+        outcome = "success"
+        try:
+            embeddings: list[list[float]] = []
+            for start in range(0, len(texts), self._batch_size):
+                batch = texts[start : start + self._batch_size]
+                embeddings.extend(await self._embed_batch(batch))
+            return embeddings
+        except Exception:
+            outcome = "error"
+            raise
+        finally:
+            AI_EMBEDDING_SECONDS.labels(
+                operation="documents",
+                provider="ollama",
+                outcome=outcome,
+            ).observe(time.perf_counter() - started_at)
 
     async def embed_query(self, text: str) -> list[float]:
-        embeddings = await self._embed_batch([text])
-        return embeddings[0]
+        started_at = time.perf_counter()
+        outcome = "success"
+        try:
+            embeddings = await self._embed_batch([text])
+            return embeddings[0]
+        except Exception:
+            outcome = "error"
+            raise
+        finally:
+            AI_EMBEDDING_SECONDS.labels(
+                operation="query",
+                provider="ollama",
+                outcome=outcome,
+            ).observe(time.perf_counter() - started_at)
 
     async def _embed_batch(self, texts: Sequence[str]) -> list[list[float]]:
         try:

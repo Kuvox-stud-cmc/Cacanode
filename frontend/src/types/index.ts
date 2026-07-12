@@ -56,6 +56,22 @@ export interface AuthResponse {
   user: AuthUser;
 }
 
+export interface TenantWorkspace {
+  tenantId: string;
+  knowledgeBase: {
+    id: string;
+    name: string;
+    slug: string;
+    defaultLocale: string;
+  };
+  chatbot: {
+    id: string;
+    displayName: string;
+    defaultLocale: string;
+    welcomeMessage: string;
+  };
+}
+
 export interface RegisterResponse {
   message: string;
   email: string;
@@ -107,6 +123,13 @@ export interface AssistantMessageResponse {
   role: "assistant";
   content: string;
   citations: ChatCitation[];
+}
+
+export interface ChatHistoryMessageResponse {
+  role: "user" | "assistant" | "system";
+  content: string;
+  citations: ChatCitation[];
+  sequence_number?: number | null;
 }
 
 export interface StatsCard {

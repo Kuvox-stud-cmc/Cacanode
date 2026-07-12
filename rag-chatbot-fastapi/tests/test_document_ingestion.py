@@ -7,6 +7,7 @@ from typing import Any, cast
 from uuid import UUID, uuid4
 
 import pytest
+from prometheus_client import REGISTRY
 
 from app.core.config import Settings
 from app.ingestion.chunking import DeterministicChunker
@@ -17,6 +18,10 @@ from app.ingestion.extraction import DocumentTextExtractor, ExtractedPage
 from app.ingestion.vector_store import QdrantChunkStore
 from app.workers import document as document_worker
 from app.workers.document import DocumentWorker
+
+
+def metric_value(name: str, labels: dict[str, str]) -> float:
+    return REGISTRY.get_sample_value(name, labels) or 0.0
 
 
 def event_payload(**overrides: object) -> dict[str, object]:
@@ -174,10 +179,13 @@ async def test_embedding_adapter_parses_ollama_embed_response(
     embedder = OllamaEmbeddingClient(
         Settings(TEXT_EMBEDDING_DIMENSION=3, TEXT_EMBEDDING_BATCH_SIZE=10)
     )
+    labels = {"operation": "documents", "provider": "ollama", "outcome": "success"}
+    before = metric_value("cacanode_ai_embedding_seconds_count", labels)
 
     embeddings = await embedder.embed_documents(["a", "b"])
 
     assert embeddings == [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]
+    assert metric_value("cacanode_ai_embedding_seconds_count", labels) == before + 1
 
 
 @pytest.mark.asyncio

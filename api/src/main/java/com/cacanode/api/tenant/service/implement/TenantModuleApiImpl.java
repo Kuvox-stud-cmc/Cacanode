@@ -12,6 +12,7 @@ import com.cacanode.api.tenant.model.Tenant;
 import com.cacanode.api.tenant.model.User;
 import com.cacanode.api.tenant.repository.TenantRepository;
 import com.cacanode.api.tenant.repository.UserRepository;
+import com.cacanode.api.tenant.service.TenantWorkspaceService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -32,6 +33,7 @@ public class TenantModuleApiImpl implements TenantModuleApi {
         private final PasswordEncoder passwordEncoder;
         private final TenantRepository tenantRepository;
         private final UserRepository userRepository;
+        private final TenantWorkspaceService tenantWorkspaceService;
 
         @Override
         @Transactional
@@ -48,6 +50,7 @@ public class TenantModuleApiImpl implements TenantModuleApi {
                 tenant.setMaxMessages(1000);
                 tenant.setMaxStorageMb(1024);
                 tenantRepository.save(tenant);
+                tenantWorkspaceService.provisionDefaultWorkspace(tenant);
 
                 // 2. Create admin user - tenant module owns users table
                 User user = new User();

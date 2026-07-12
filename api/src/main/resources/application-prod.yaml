@@ -12,6 +12,11 @@ app:
     access-key: ${SEAWEEDFS_ACCESS_KEY:}
     secret-key: ${SEAWEEDFS_SECRET_KEY:}
     region: ${SEAWEEDFS_REGION:us-east-1}
+  email:
+    from-email: ${FROM_EMAIL}
+    from-name: ${FROM_NAME:CacaNode}
+    verification-link: ${VERIFICATION_LINK}
+    login-2fa-link: ${LOGIN_2FA_LINK:https://cacanode.com/verify-login}
 
 spring:
   config:
@@ -51,6 +56,13 @@ spring:
     from-email: ${FROM_EMAIL}
     template-id: ${TEMPLATE_ID}
     verification-link: ${VERIFICATION_LINK}
+    login-2fa-link: ${LOGIN_2FA_LINK:https://cacanode.com/verify-login}
+    support-email: ${SUPPORT_EMAIL:support@cacanode.com}
+    verification-resend-cooldown-seconds: ${VERIFICATION_RESEND_COOLDOWN_SECONDS:60}
+    max-verification-resend-attempts: ${MAX_VERIFICATION_RESEND_ATTEMPTS:5}
+    login-2fa-expiry-minutes: ${LOGIN_2FA_EXPIRY_MINUTES:15}
+  brevo:
+    api-key: ${BREVO_API_KEY:}
 
 management:
   endpoints:
