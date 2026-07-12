@@ -14,11 +14,18 @@ import {
 } from "@/components/ui/card"
 import { useAuthStore } from "@/components/providers/StoreProvider"
 import { verifyLogin2FAApi } from "@/lib/auth-api"
+import {
+  consumeAuthDestination,
+  rememberAuthDestination,
+  safeInternalPath,
+  withNext,
+} from "@/lib/auth-redirect"
 
 function VerifyLoginContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const token = searchParams.get("token")
+  const next = safeInternalPath(searchParams.get("next"))
   const setAuth = useAuthStore((s) => s.setAuth)
 
   const [status, setStatus] = useState<"loading" | "success" | "error">(
@@ -31,6 +38,8 @@ function VerifyLoginContent() {
   useEffect(() => {
     if (!token) return
 
+    rememberAuthDestination(next)
+
     const verify = async () => {
       try {
         const res = await verifyLogin2FAApi(token)
@@ -38,7 +47,7 @@ function VerifyLoginContent() {
         setStatus("success")
         // Redirect to dashboard after a short delay
         setTimeout(() => {
-          router.push("/dashboard")
+          router.push(consumeAuthDestination())
         }, 1500)
       } catch (e) {
         const msg = e instanceof Error ? e.message : "Failed to verify login"
@@ -48,7 +57,7 @@ function VerifyLoginContent() {
     }
 
     verify()
-  }, [token, router, setAuth])
+  }, [token, next, router, setAuth])
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-slate-50 px-4 py-8">
@@ -84,7 +93,7 @@ function VerifyLoginContent() {
                 </div>
                 <CardTitle>Login verified!</CardTitle>
                 <CardDescription>
-                  Redirecting you to your dashboard...
+                  Redirecting you now...
                 </CardDescription>
               </>
             )}
@@ -104,7 +113,7 @@ function VerifyLoginContent() {
 
           <CardContent className="space-y-4">
             {status === "error" && (
-              <Link href="/login">
+              <Link href={withNext("/login", next)}>
                 <Button variant="outline" className="w-full">
                   Back to login
                 </Button>

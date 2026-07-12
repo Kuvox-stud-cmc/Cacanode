@@ -1,11 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { AlertCircle, Eye, EyeOff, Loader2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -20,6 +20,12 @@ import {
 import { useAuthStore } from "@/components/providers/StoreProvider";
 import { loginApi } from "@/lib/auth-api";
 import { cn } from "@/lib/utils";
+import {
+  consumeAuthDestination,
+  rememberAuthDestination,
+  safeInternalPath,
+  withNext,
+} from "@/lib/auth-redirect";
 
 const loginSchema = z.object({
   email: z.string().min(1, "Email is required").email("Invalid email address"),
@@ -29,11 +35,17 @@ const loginSchema = z.object({
 
 type LoginForm = z.infer<typeof loginSchema>;
 
-export default function LoginPage() {
+function LoginContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const next = safeInternalPath(searchParams.get("next"));
   const setAuth = useAuthStore((s) => s.setAuth);
   const [showPassword, setShowPassword] = useState(false);
   const [apiError, setApiError] = useState<string | null>(null);
+
+  useEffect(() => {
+    rememberAuthDestination(next);
+  }, [next]);
 
   const {
     register,
@@ -61,7 +73,10 @@ export default function LoginPage() {
       if ("requires2FA" in res && res.requires2FA) {
         // Redirect to check-login-email page for 2FA
         router.push(
-          `/check-login-email?email=${encodeURIComponent(res.email)}`,
+          withNext(
+            `/check-login-email?email=${encodeURIComponent(res.email)}`,
+            next,
+          ),
         );
         return;
       }
@@ -69,7 +84,7 @@ export default function LoginPage() {
       // Direct login (AuthResponse)
       if ("accessToken" in res && "user" in res) {
         setAuth(res.user, res.accessToken, res.user.tenantId);
-        router.push("/dashboard");
+        router.push(consumeAuthDestination());
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Invalid email or password";
@@ -220,7 +235,7 @@ export default function LoginPage() {
             <p className="text-center text-sm text-slate-500 mt-4">
               Don&apos;t have an account?{" "}
               <Link
-                href="/register"
+                href={withNext("/register", next)}
                 className="text-indigo-600 hover:underline font-medium"
               >
                 Create one
@@ -230,5 +245,13 @@ export default function LoginPage() {
         </Card>
       </div>
     </div>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-slate-50" />}>
+      <LoginContent />
+    </Suspense>
   );
 }

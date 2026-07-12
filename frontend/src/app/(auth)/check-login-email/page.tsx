@@ -13,17 +13,27 @@ import {
   CardDescription,
 } from "@/components/ui/card"
 import { resendLogin2FAApi } from "@/lib/auth-api"
+import {
+  rememberAuthDestination,
+  safeInternalPath,
+  withNext,
+} from "@/lib/auth-redirect"
 
 const COOLDOWN_SECONDS = 60
 
 function CheckLoginEmailContent() {
   const searchParams = useSearchParams()
   const email = searchParams.get("email") || "your email"
+  const next = safeInternalPath(searchParams.get("next"))
 
   const [countdown, setCountdown] = useState(COOLDOWN_SECONDS)
   const [isResending, setIsResending] = useState(false)
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null)
   const [isSuspended, setIsSuspended] = useState(false)
+
+  useEffect(() => {
+    rememberAuthDestination(next)
+  }, [next])
 
   useEffect(() => {
     if (countdown > 0) {
@@ -74,7 +84,7 @@ function CheckLoginEmailContent() {
               <p className="text-sm text-slate-600 text-center">
                 {message?.text || "Please contact support for assistance."}
               </p>
-              <Link href="/login">
+              <Link href={withNext("/login", next)}>
                 <Button variant="outline" className="w-full">
                   <ArrowLeft className="w-4 h-4 mr-2" />
                   Back to login
@@ -158,7 +168,7 @@ function CheckLoginEmailContent() {
               )}
             </Button>
 
-            <Link href="/login">
+            <Link href={withNext("/login", next)}>
               <Button variant="outline" className="w-full">
                 <ArrowLeft className="w-4 h-4 mr-2" />
                 Back to login

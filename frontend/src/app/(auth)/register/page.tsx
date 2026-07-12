@@ -1,11 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { AlertCircle, Eye, EyeOff, Loader2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -19,6 +19,11 @@ import {
 } from "@/components/ui/card";
 import { registerApi } from "@/lib/auth-api";
 import { cn } from "@/lib/utils";
+import {
+  rememberAuthDestination,
+  safeInternalPath,
+  withNext,
+} from "@/lib/auth-redirect";
 
 const registerSchema = z
   .object({
@@ -38,11 +43,17 @@ const registerSchema = z
 
 type RegisterForm = z.infer<typeof registerSchema>;
 
-export default function RegisterPage() {
+function RegisterContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const next = safeInternalPath(searchParams.get("next"));
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
   const [apiError, setApiError] = useState<string | null>(null);
+
+  useEffect(() => {
+    rememberAuthDestination(next);
+  }, [next]);
 
   const {
     register,
@@ -70,7 +81,9 @@ export default function RegisterPage() {
         email: data.email,
         password: data.password,
       });
-      router.push(`/check-email?email=${encodeURIComponent(data.email)}`);
+      router.push(
+        withNext(`/check-email?email=${encodeURIComponent(data.email)}`, next),
+      );
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Something went wrong";
       setApiError(msg);
@@ -262,7 +275,7 @@ export default function RegisterPage() {
             <p className="text-center text-sm text-slate-500 mt-4">
               Already have an account?{" "}
               <Link
-                href="/login"
+                href={withNext("/login", next)}
                 className="text-indigo-600 hover:underline font-medium"
               >
                 Sign in
@@ -272,5 +285,13 @@ export default function RegisterPage() {
         </Card>
       </div>
     </div>
+  );
+}
+
+export default function RegisterPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-slate-50" />}>
+      <RegisterContent />
+    </Suspense>
   );
 }

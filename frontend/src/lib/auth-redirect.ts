@@ -1,0 +1,51 @@
+const AUTH_DESTINATION_KEY = "cacanode:auth-destination"
+
+export function safeInternalPath(value: string | null | undefined): string | null {
+  if (!value || !value.startsWith("/") || value.startsWith("//")) return null
+
+  try {
+    const url = new URL(value, "http://cacanode.local")
+    if (url.origin !== "http://cacanode.local") return null
+    return `${url.pathname}${url.search}${url.hash}`
+  } catch {
+    return null
+  }
+}
+
+export function rememberAuthDestination(value: string | null | undefined): string | null {
+  const destination = safeInternalPath(value)
+  if (destination && typeof window !== "undefined") {
+    window.localStorage.setItem(AUTH_DESTINATION_KEY, destination)
+  }
+  return destination
+}
+
+export function getAuthDestination(
+  value?: string | null,
+  fallback = "/dashboard",
+): string {
+  const requested = rememberAuthDestination(value)
+  if (requested) return requested
+
+  if (typeof window !== "undefined") {
+    const stored = safeInternalPath(window.localStorage.getItem(AUTH_DESTINATION_KEY))
+    if (stored) return stored
+  }
+
+  return fallback
+}
+
+export function consumeAuthDestination(fallback = "/dashboard"): string {
+  const destination = getAuthDestination(null, fallback)
+  if (typeof window !== "undefined") {
+    window.localStorage.removeItem(AUTH_DESTINATION_KEY)
+  }
+  return destination
+}
+
+export function withNext(path: string, destination: string | null): string {
+  const safeDestination = safeInternalPath(destination)
+  if (!safeDestination) return path
+  const separator = path.includes("?") ? "&" : "?"
+  return `${path}${separator}next=${encodeURIComponent(safeDestination)}`
+}

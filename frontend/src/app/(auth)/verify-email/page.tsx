@@ -14,12 +14,19 @@ import {
 } from "@/components/ui/card"
 import { useAuthStore } from "@/components/providers/StoreProvider"
 import { verifyEmailApi } from "@/lib/auth-api"
+import {
+  consumeAuthDestination,
+  rememberAuthDestination,
+  safeInternalPath,
+  withNext,
+} from "@/lib/auth-redirect"
 
 function VerifyEmailContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const setAuth = useAuthStore((s) => s.setAuth)
   const token = searchParams.get("token")
+  const next = safeInternalPath(searchParams.get("next"))
   const [status, setStatus] = useState<"loading" | "success" | "error">(
     token ? "loading" : "error",
   )
@@ -30,20 +37,22 @@ function VerifyEmailContent() {
   useEffect(() => {
     if (!token) return
 
+    rememberAuthDestination(next)
+
     verifyEmailApi(token)
       .then((res) => {
         setAuth(res.user, res.accessToken, res.user.tenantId)
         setStatus("success")
         // Redirect to dashboard after a brief delay
         setTimeout(() => {
-          router.push("/dashboard")
+          router.push(consumeAuthDestination())
         }, 1500)
       })
       .catch((e) => {
         setStatus("error")
         setError(e instanceof Error ? e.message : "Verification failed. Please try again.")
       })
-  }, [token, router, setAuth])
+  }, [token, next, router, setAuth])
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-slate-50 px-4 py-8">
@@ -78,7 +87,7 @@ function VerifyEmailContent() {
                 </div>
                 <CardTitle>Email verified!</CardTitle>
                 <CardDescription>
-                  Your account has been activated. Redirecting to dashboard...
+                  Your account has been activated. Redirecting you now...
                 </CardDescription>
               </>
             )}
@@ -95,10 +104,10 @@ function VerifyEmailContent() {
           <CardContent>
             {status === "error" && (
               <div className="flex flex-col gap-3">
-                <Link href="/login">
+                <Link href={withNext("/login", next)}>
                   <Button className="w-full">Go to login</Button>
                 </Link>
-                <Link href="/register">
+                <Link href={withNext("/register", next)}>
                   <Button variant="outline" className="w-full">
                     Create new account
                   </Button>
