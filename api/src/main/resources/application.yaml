@@ -6,13 +6,6 @@ spring:
     name: cacanode-api
   profiles:
     active: ${SPRING_PROFILES_ACTIVE:dev}
-  # net.devh grpc-spring-boot-starter 3.1.x targets Spring Security 5/6; Spring Boot 4 uses Security 7
-  # where AccessDecisionManager was removed → GrpcServerSecurityAutoConfiguration cannot load.
-  # gRPC auth is off in yaml (grpc.server.security.enabled: false); exclude broken autoconfig.
-  autoconfigure:
-    exclude:
-      - net.devh.boot.grpc.server.autoconfigure.GrpcServerSecurityAutoConfiguration
-
 management:
   endpoints:
     web:
@@ -23,3 +16,8 @@ logging:
   level:
     root: INFO
     web: INFO
+
+app:
+  rate-limit:
+    enabled: ${PUBLIC_RATE_LIMIT_ENABLED:true}
+    public-requests-per-minute: ${PUBLIC_RATE_LIMIT_PER_MINUTE:120}

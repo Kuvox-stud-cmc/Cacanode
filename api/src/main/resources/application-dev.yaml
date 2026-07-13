@@ -89,13 +89,3 @@ jwt:
   token-key: ${TOKEN_KEY}
   expiry-mins: ${EXPIRY_MINS:15}
   expiry-days: ${EXPIRY_DAYS:30}
-
-grpc:
-  server:
-    port: 9090 # Spring Boot gRPC server port
-    security:
-      enabled: false # no TLS in dev
-  client:
-    fastapi-service:
-      address: ${AI_API_GRPC_ADDRESS:static://localhost:50051}
-      negotiation-type: plaintext # no TLS in dev

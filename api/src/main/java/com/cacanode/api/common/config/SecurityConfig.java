@@ -1,6 +1,7 @@
 package com.cacanode.api.common.config;
 
 import com.cacanode.api.auth.filter.JwtAuthFilter;
+import com.cacanode.api.common.filter.PublicRateLimitFilter;
 import com.cacanode.api.common.security.AppUserDetailsService;
 import com.sendgrid.SendGrid;
 import lombok.RequiredArgsConstructor;
@@ -35,6 +36,7 @@ import java.util.List;
 public class SecurityConfig {
 
     private final JwtAuthFilter jwtAuthFilter;                  // auth module
+    private final PublicRateLimitFilter publicRateLimitFilter;
     private final AppUserDetailsService userDetailsService;     // common interface
     private final CorsProperties corsProperties;
 
@@ -70,6 +72,7 @@ public class SecurityConfig {
                 .sessionCreationPolicy(STATELESS)
             )
             .authenticationProvider(authenticationProvider())
+            .addFilterBefore(publicRateLimitFilter, UsernamePasswordAuthenticationFilter.class)
             .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();

@@ -24,6 +24,7 @@ x-ai-environment: &ai-environment
   TEXT_EMBEDDING_MODEL_ID: ${TEXT_EMBEDDING_MODEL_ID:-embeddinggemma}
   TEXT_EMBEDDING_DIMENSION: ${TEXT_EMBEDDING_DIMENSION:-768}
   MIN_RETRIEVAL_CONFIDENCE: ${MIN_RETRIEVAL_CONFIDENCE:-0.35}
+  PUBLIC_RATE_LIMIT_PER_MINUTE: ${PUBLIC_RATE_LIMIT_PER_MINUTE:-120}
 
 x-worker: &worker
   build:
@@ -88,15 +89,13 @@ services:
       WEBHOOK_ENCRYPTION_KEY: ${WEBHOOK_ENCRYPTION_KEY:-change-me-webhook-key}
       EXPIRY_MINS: ${EXPIRY_MINS:-15}
       EXPIRY_DAYS: ${EXPIRY_DAYS:-30}
-      AI_API_GRPC_ADDRESS: static://ai-api:50051
-      GRPC_CERT_PATH: ${GRPC_CERT_PATH:-/run/secrets/grpc/tls.crt}
-      GRPC_KEY_PATH: ${GRPC_KEY_PATH:-/run/secrets/grpc/tls.key}
+      PUBLIC_RATE_LIMIT_ENABLED: ${PUBLIC_RATE_LIMIT_ENABLED:-true}
+      PUBLIC_RATE_LIMIT_PER_MINUTE: ${PUBLIC_RATE_LIMIT_PER_MINUTE:-120}
       SENDGRID_API_KEY: ${SENDGRID_API_KEY:-}
       FROM_EMAIL: ${FROM_EMAIL:-no-reply@cacanode.local}
       TEMPLATE_ID: ${TEMPLATE_ID:-}
     expose:
       - "8080"
-      - "9090"
     depends_on:
       postgres:
         condition: service_healthy

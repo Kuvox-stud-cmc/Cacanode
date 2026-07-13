@@ -1,4 +1,6 @@
 app:
+  rate-limit:
+    enabled: false
   cors:
     allowed-origin-patterns:
       - "http://localhost:*"
@@ -68,13 +70,3 @@ jwt:
   token-key: ${TOKEN_KEY:test-access-secret}
   expiry-mins: ${EXPIRY_MINS:15}
   expiry-days: ${EXPIRY_DAYS:30}
-
-grpc:
-  server:
-    port: -1
-    security:
-      enabled: false
-  client:
-    fastapi-service:
-      address: static://localhost:50051
-      negotiation-type: plaintext

@@ -122,20 +122,6 @@
 			<optional>true</optional>
 		</dependency>
 
-		<!--	gRPC server + client	-->
-		<dependency>
-			<groupId>net.devh</groupId>
-			<artifactId>grpc-spring-boot-starter</artifactId>
-			<version>3.1.0.RELEASE</version>
-		</dependency>
-
-		<!--	Protobuf	-->
-		<dependency>
-			<groupId>com.google.protobuf</groupId>
-			<artifactId>protobuf-java</artifactId>
-			<version>4.30.2</version>
-		</dependency>
-
 		<!--	SendGrid	-->
 		<dependency>
 			<groupId>com.sendgrid</groupId>
@@ -313,25 +299,6 @@
 									<artifactId>lombok</artifactId>
 								</path>
 							</annotationProcessorPaths>
-						</configuration>
-					</execution>
-				</executions>
-			</plugin>
-			<plugin>
-				<groupId>com.github.os72</groupId>
-				<artifactId>protoc-jar-maven-plugin</artifactId>
-				<version>3.11.4</version>
-				<executions>
-					<execution>
-						<phase>generate-sources</phase>
-						<goals>
-							<goal>run</goal>
-						</goals>
-						<configuration>
-							<protocVersion>3.25.1</protocVersion>
-							<inputDirectories>
-								<include>src/main/proto</include>
-							</inputDirectories>
 						</configuration>
 					</execution>
 				</executions>

@@ -83,15 +83,3 @@ jwt:
   token-key: ${TOKEN_KEY}
   expiry-mins: ${EXPIRY_MINS:15}
   expiry-days: ${EXPIRY_DAYS:30}
-
-grpc:
-  server:
-    port: 9090
-    security:
-      enabled: true                     # TLS in prod
-      certificate-chain: file:${GRPC_CERT_PATH}
-      private-key: file:${GRPC_KEY_PATH}
-  client:
-    fastapi-service:
-      address: ${AI_API_GRPC_ADDRESS:static://ai-api:50051}
-      negotiation-type: tls
