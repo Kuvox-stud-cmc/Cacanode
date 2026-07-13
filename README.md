@@ -436,6 +436,11 @@ class GraphRetrieverPort(Protocol):
 
 Every upload is validated by extension, MIME type, file signature, configured size limit, and malware-scanning policy before processing.
 
+The delivered digital-ingestion path accepts `.pdf`, `.docx`, `.txt`, `.md`, `.markdown`,
+`.html`, `.htm`, `.xlsx`, and `.csv` files up to 20 MB. PDF input must contain extractable
+text. Scanned-only PDFs, encrypted files, legacy `.doc`/`.xls` files, and malformed or unsafe
+Office archives are rejected; image, audio, video, and OCR ingestion remain outside this path.
+
 ---
 
 ## Document and Media Ingestion

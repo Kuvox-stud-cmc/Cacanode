@@ -54,6 +54,14 @@ class Settings(BaseSettings):
     QDRANT_KNOWLEDGE_BASE_FIELD: str = "knowledge_base_id"
     KUZU_DATABASE_PATH: str = "./data/kuzu/cacanode.kuzu"
     GRAPH_SERVICE_URL: str = "http://localhost:8010"
+    GRAPH_INTERNAL_TOKEN: str = "development-graph-token"
+    INGESTION_INTERNAL_TOKEN: str = "development-ingestion-token"
+    GRAPH_TIMEOUT_SECONDS: float = 30.0
+    GRAPH_EXTRACTION_BATCH_SIZE: int = 12
+    PARSER_VERSION: str = "digital-v1"
+    CHUNKER_VERSION: str = "structural-v1"
+    SPREADSHEET_MAX_ROWS: int = 250_000
+    SPREADSHEET_MAX_COLUMNS: int = 2_000
 
     LLM_PROVIDER: Literal["ollama", "openai"] = "ollama"
     LLM_BASE_URL: str = "http://localhost:8001/v1"

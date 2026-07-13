@@ -20,6 +20,9 @@ app:
     invitation-link: ${INVITATION_LINK:https://cacanode.com/accept-invitation}
   integrations:
     token-pepper: ${INTEGRATION_TOKEN_PEPPER}
+  ai:
+    base-url: ${AI_API_BASE_URL:http://ai-api:8000}
+    ingestion-token: ${INGESTION_INTERNAL_TOKEN}
   webhooks:
     encryption-key: ${WEBHOOK_ENCRYPTION_KEY}
     allow-private-networks: false

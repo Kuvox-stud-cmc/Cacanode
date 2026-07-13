@@ -9,6 +9,8 @@ x-ai-environment: &ai-environment
   QDRANT_URL: http://qdrant:6333
   KUZU_DATABASE_PATH: /data/kuzu/cacanode.kuzu
   GRAPH_SERVICE_URL: http://graph-service:8010
+  GRAPH_INTERNAL_TOKEN: ${GRAPH_INTERNAL_TOKEN:?GRAPH_INTERNAL_TOKEN is required}
+  INGESTION_INTERNAL_TOKEN: ${INGESTION_INTERNAL_TOKEN:?INGESTION_INTERNAL_TOKEN is required}
   SEAWEEDFS_MASTER_URL: http://seaweedfs-master:9333
   SEAWEEDFS_FILER_URL: http://seaweedfs-filer:8888
   SEAWEEDFS_S3_ENDPOINT: http://seaweedfs-s3:8333
@@ -86,6 +88,8 @@ services:
       COOKIE_SECURE: ${COOKIE_SECURE:-true}
       TOKEN_KEY: ${TOKEN_KEY:-change-me-access}
       INTEGRATION_TOKEN_PEPPER: ${INTEGRATION_TOKEN_PEPPER:-change-me-integration-pepper}
+      AI_API_BASE_URL: http://ai-api:8000
+      INGESTION_INTERNAL_TOKEN: ${INGESTION_INTERNAL_TOKEN:?INGESTION_INTERNAL_TOKEN is required}
       WEBHOOK_ENCRYPTION_KEY: ${WEBHOOK_ENCRYPTION_KEY:-change-me-webhook-key}
       EXPIRY_MINS: ${EXPIRY_MINS:-15}
       EXPIRY_DAYS: ${EXPIRY_DAYS:-30}

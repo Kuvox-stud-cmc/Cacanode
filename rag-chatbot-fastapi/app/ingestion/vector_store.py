@@ -39,9 +39,12 @@ class QdrantChunkStore:
 
         try:
             await self.ensure_collection(dimension)
+            await self.delete_source(event)
             points = [
                 models.PointStruct(
-                    id=self.point_id(str(event.document_id), chunk.chunk_index),
+                    id=self.point_id(
+                        str(event.document_id), chunk.unit_id or str(chunk.chunk_index)
+                    ),
                     vector=list(embedding),
                     payload=self._payload(event, chunk),
                 )
@@ -53,6 +56,36 @@ class QdrantChunkStore:
         except Exception as exc:
             raise TransientIngestionError(
                 f"Unable to upsert document chunks into Qdrant: {exc}"
+            ) from exc
+
+    async def delete_source(self, event: DocumentIngestRequestedEvent) -> None:
+        await self.delete_source_ids(str(event.tenant_id), str(event.document_id))
+
+    async def delete_source_ids(self, tenant_id: str, document_id: str) -> None:
+        try:
+            if not await self._client.collection_exists(self._collection):
+                return
+            await self._client.delete(
+                collection_name=self._collection,
+                points_selector=models.FilterSelector(
+                    filter=models.Filter(
+                        must=[
+                            models.FieldCondition(
+                                key=self._tenant_field,
+                                match=models.MatchValue(value=tenant_id),
+                            ),
+                            models.FieldCondition(
+                                key="document_id",
+                                match=models.MatchValue(value=document_id),
+                            ),
+                        ]
+                    )
+                ),
+                wait=True,
+            )
+        except Exception as exc:
+            raise TransientIngestionError(
+                f"Unable to delete existing document vectors: {exc}"
             ) from exc
 
     async def ensure_collection(self, dimension: int) -> None:
@@ -87,10 +120,22 @@ class QdrantChunkStore:
             "source_name": event.file_name,
             "page_number": chunk.page_number,
             "chunk_index": chunk.chunk_index,
+            "unit_id": chunk.unit_id,
+            "modality": chunk.modality,
+            "section_path": list(chunk.section_path),
+            "block_type": chunk.block_type,
+            "heading_context": chunk.heading_context,
+            "sheet_name": chunk.sheet_name,
+            "cell_range": chunk.cell_range,
+            "table_id": chunk.table_id,
+            "source_start": chunk.source_start,
+            "source_end": chunk.source_end,
+            "parser_version": chunk.parser_version,
+            "chunker_version": chunk.chunker_version,
             "text": chunk.text,
             "content_hash": chunk.content_hash,
         }
 
     @staticmethod
-    def point_id(document_id: str, chunk_index: int) -> str:
-        return str(uuid5(NAMESPACE_URL, f"{document_id}:{chunk_index}"))
+    def point_id(document_id: str, unit_identity: int | str) -> str:
+        return str(uuid5(NAMESPACE_URL, f"{document_id}:{unit_identity}"))

@@ -9,6 +9,7 @@ from typing import Any, Protocol
 
 from app.core.config import Settings
 from app.core.metrics import AI_RAG_ANSWER_SECONDS
+from app.rag.calculation import SpreadsheetCalculationCoordinator
 from app.rag.errors import ChatModelTimeoutError, ChatSessionNotFoundError
 from app.rag.models import AssistantMessage, ChatMessage, ChatSession, Citation, RetrievedChunk
 from app.rag.sessions import ChatSessionStore
@@ -50,12 +51,14 @@ class RagChatService:
         embedder: QueryEmbedder,
         retriever: VectorRetriever,
         chat_model: ChatModel,
+        calculations: SpreadsheetCalculationCoordinator | None = None,
     ):
         self._settings = settings
         self._sessions = sessions
         self._embedder = embedder
         self._retriever = retriever
         self._chat_model = chat_model
+        self._calculations = calculations
 
     def create_session(
         self,
@@ -235,17 +238,24 @@ class RagChatService:
             retrieval_started_at = time.perf_counter()
             retrieval_outcome = "success"
             try:
+                set_query = getattr(self._retriever, "set_query", None)
+                if set_query is not None:
+                    set_query(content)
                 if session.channel in {"WIDGET", "CUSTOM_API"}:
                     visible_ids = self._sessions.customer_visible_document_ids(
                         tenant_id=tenant_id, knowledge_base_id=session.knowledge_base_id
                     )
-                    chunks = [] if not visible_ids else await self._retriever.retrieve(
-                        tenant_id=tenant_id,
-                        knowledge_base_id=session.knowledge_base_id,
-                        query_vector=query_vector,
-                        limit=self._settings.TEXT_TOP_K,
-                        score_threshold=self._settings.MIN_RETRIEVAL_CONFIDENCE,
-                        document_ids=visible_ids,
+                    chunks = (
+                        []
+                        if not visible_ids
+                        else await self._retriever.retrieve(
+                            tenant_id=tenant_id,
+                            knowledge_base_id=session.knowledge_base_id,
+                            query_vector=query_vector,
+                            limit=self._settings.TEXT_TOP_K,
+                            score_threshold=self._settings.MIN_RETRIEVAL_CONFIDENCE,
+                            document_ids=visible_ids,
+                        )
                     )
                 else:
                     chunks = await self._retriever.retrieve(
@@ -268,6 +278,22 @@ class RagChatService:
                 ).observe(retrieval_seconds)
 
             selected = chunks[: min(self._settings.FINAL_CONTEXT_TOP_K, 5)]
+            calculation_text: str | None = None
+            if self._calculations is not None:
+                calculation = await self._calculations.prepare(
+                    tenant_id=tenant_id,
+                    knowledge_base_id=session.knowledge_base_id,
+                    question=content,
+                    chunks=chunks,
+                )
+                if calculation is not None:
+                    if calculation.clarification:
+                        message = AssistantMessage(
+                            role="assistant", content=calculation.clarification
+                        )
+                        self._sessions.add_assistant_message(session.id, message)
+                        return message
+                    calculation_text = calculation.text
             chunk_count = len(selected)
             is_external = session.channel in {"WIDGET", "CUSTOM_API"}
             if not selected and not is_external:
@@ -291,6 +317,7 @@ class RagChatService:
                                 tenant_id=tenant_id,
                                 limit=20,
                             ),
+                            calculation_context=calculation_text,
                         )
                         if is_external
                         else self._prompt_messages(
@@ -298,6 +325,7 @@ class RagChatService:
                             locale=session.locale,
                             chunks=selected,
                             citations=citations,
+                            calculation_context=calculation_text,
                         )
                     )
                 ).strip()
@@ -318,9 +346,7 @@ class RagChatService:
                 ).observe(llm_seconds)
 
             answer, action = (
-                self._parse_external_answer(raw_answer)
-                if is_external
-                else (raw_answer, None)
+                self._parse_external_answer(raw_answer) if is_external else (raw_answer, None)
             )
             message = AssistantMessage(
                 role="assistant", content=answer, citations=citations, action=action
@@ -376,6 +402,7 @@ class RagChatService:
         locale: str,
         chunks: list[RetrievedChunk],
         citations: list[Citation],
+        calculation_context: str | None = None,
     ) -> list[dict[str, object]]:
         sources = "\n\n".join(
             f"[{citation.id}] {chunk.source_name}"
@@ -396,7 +423,11 @@ class RagChatService:
             },
             {
                 "role": "user",
-                "content": f"Sources:\n{sources}\n\nQuestion:\n{question}",
+                "content": (
+                    f"Sources:\n{sources}\n\n"
+                    f"{calculation_context + chr(10) + chr(10) if calculation_context else ''}"
+                    f"Question:\n{question}"
+                ),
             },
         ]
 
@@ -408,14 +439,18 @@ class RagChatService:
         chunks: list[RetrievedChunk],
         citations: list[Citation],
         history: list[ChatMessage],
+        calculation_context: str | None = None,
     ) -> list[dict[str, object]]:
-        sources = "\n\n".join(
-            f"[{citation.id}] {chunk.source_name}\n{chunk.text}"
-            for chunk, citation in zip(chunks, citations, strict=True)
-        ) or "No relevant tenant sources were found."
-        transcript = "\n".join(
-            f"{message.role}: {message.content}" for message in history[-20:]
-        )[-8000:]
+        sources = (
+            "\n\n".join(
+                f"[{citation.id}] {chunk.source_name}\n{chunk.text}"
+                for chunk, citation in zip(chunks, citations, strict=True)
+            )
+            or "No relevant tenant sources were found."
+        )
+        transcript = "\n".join(f"{message.role}: {message.content}" for message in history[-20:])[
+            -8000:
+        ]
         return [
             {
                 "role": "system",
@@ -435,6 +470,7 @@ class RagChatService:
                 "role": "user",
                 "content": (
                     f"Conversation:\n{transcript}\n\nSources:\n{sources}\n\n"
+                    f"{calculation_context + chr(10) + chr(10) if calculation_context else ''}"
                     f"Latest customer message:\n{question}\n\n"
                     'JSON shape: {"answer":"...","ticketDraft":null} or '
                     '{"answer":"...","ticketDraft":{"title":"...","description":"..."}}'
@@ -442,9 +478,7 @@ class RagChatService:
             },
         ]
 
-    def _parse_external_answer(
-        self, raw_answer: str
-    ) -> tuple[str, dict[str, Any] | None]:
+    def _parse_external_answer(self, raw_answer: str) -> tuple[str, dict[str, Any] | None]:
         cleaned = raw_answer.strip()
         if cleaned.startswith("```"):
             cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", cleaned, flags=re.IGNORECASE)
@@ -476,6 +510,13 @@ class RagChatService:
                 chunk_index=chunk.chunk_index,
                 score=chunk.score,
                 snippet=self._snippet(chunk.text),
+                unit_id=chunk.unit_id,
+                modality=chunk.modality,
+                section_path=chunk.section_path,
+                block_type=chunk.block_type,
+                sheet_name=chunk.sheet_name,
+                cell_range=chunk.cell_range,
+                table_id=chunk.table_id,
             )
             for index, chunk in enumerate(chunks, start=1)
         ]

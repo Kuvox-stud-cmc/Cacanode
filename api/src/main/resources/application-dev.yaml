@@ -22,6 +22,9 @@ app:
     invitation-link: ${INVITATION_LINK:http://localhost:3000/accept-invitation}
   integrations:
     token-pepper: ${INTEGRATION_TOKEN_PEPPER:development-integration-token-pepper}
+  ai:
+    base-url: ${AI_API_BASE_URL:http://localhost:8000}
+    ingestion-token: ${INGESTION_INTERNAL_TOKEN:development-ingestion-token}
   webhooks:
     encryption-key: ${WEBHOOK_ENCRYPTION_KEY:development-webhook-encryption-key}
     allow-private-networks: true

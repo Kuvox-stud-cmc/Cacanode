@@ -27,6 +27,13 @@ class RetrievedChunk:
     chunk_index: int
     text: str
     score: float
+    unit_id: str | None = None
+    modality: str | None = None
+    section_path: tuple[str, ...] = ()
+    block_type: str | None = None
+    sheet_name: str | None = None
+    cell_range: str | None = None
+    table_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,6 +45,13 @@ class Citation:
     chunk_index: int
     score: float
     snippet: str
+    unit_id: str | None = None
+    modality: str | None = None
+    section_path: tuple[str, ...] = ()
+    block_type: str | None = None
+    sheet_name: str | None = None
+    cell_range: str | None = None
+    table_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

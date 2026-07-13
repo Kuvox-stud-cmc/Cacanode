@@ -9,6 +9,8 @@ import aio_pika
 from aio_pika.abc import AbstractIncomingMessage
 
 from app.core.config import Settings
+from app.graph import EntityRelationExtractor, GraphServiceClient
+from app.infrastructure.model_gateway import create_chat_model
 from app.ingestion.chunking import DeterministicChunker
 from app.ingestion.embedding import OllamaEmbeddingClient
 from app.ingestion.errors import PermanentIngestionError, TransientIngestionError
@@ -45,6 +47,10 @@ class DocumentWorker:
             chunker=DeterministicChunker(),
             embedder=OllamaEmbeddingClient(settings),
             vector_store=QdrantChunkStore(settings),
+            graph_store=GraphServiceClient(settings),
+            graph_extractor=EntityRelationExtractor(
+                create_chat_model(settings), batch_size=settings.GRAPH_EXTRACTION_BATCH_SIZE
+            ),
         )
         self._connection: Any | None = connection
         self._owns_connection = connection is None

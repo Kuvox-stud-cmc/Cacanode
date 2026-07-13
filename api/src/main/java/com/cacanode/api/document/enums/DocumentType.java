@@ -4,6 +4,8 @@ public enum DocumentType {
     PDF,
     DOCX,
     TXT,
+    MARKDOWN,
     HTML,
+    XLSX,
     CSV
 }

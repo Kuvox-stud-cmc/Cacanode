@@ -56,11 +56,40 @@ export async function getDocumentStatusApi(
   return readJsonOrThrow<DocumentStatusResponse>(res);
 }
 
+export async function deleteDocumentApi(
+  request: ApiRequest,
+  documentId: string,
+): Promise<void> {
+  const res = await request(`${getApiBase()}/documents/${documentId}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) {
+    await readJsonOrThrow<unknown>(res);
+  }
+}
+
 export function fileTypeFromName(name: string): string {
   const lower = name.toLowerCase();
   if (lower.endsWith(".pdf")) return "PDF";
   if (lower.endsWith(".txt")) return "TXT";
+  if (lower.endsWith(".docx")) return "DOCX";
+  if (lower.endsWith(".md") || lower.endsWith(".markdown")) return "MARKDOWN";
+  if (lower.endsWith(".html") || lower.endsWith(".htm")) return "HTML";
+  if (lower.endsWith(".xlsx")) return "XLSX";
+  if (lower.endsWith(".csv")) return "CSV";
   return "UNKNOWN";
+}
+
+export const SUPPORTED_DOCUMENT_ACCEPT = [
+  ".pdf", ".docx", ".txt", ".md", ".markdown", ".html", ".htm", ".xlsx", ".csv",
+  "application/pdf",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "text/plain", "text/markdown", "text/html", "text/csv",
+].join(",");
+
+export function isSupportedDocumentName(name: string): boolean {
+  return fileTypeFromName(name) !== "UNKNOWN";
 }
 
 export function isTerminalDocumentStatus(status: string): boolean {

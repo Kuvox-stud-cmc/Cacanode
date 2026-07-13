@@ -153,6 +153,13 @@ export interface ChatCitation {
   chunk_index: number;
   score: number;
   snippet: string;
+  unit_id?: string | null;
+  modality?: string | null;
+  section_path?: string[];
+  block_type?: string | null;
+  sheet_name?: string | null;
+  cell_range?: string | null;
+  table_id?: string | null;
 }
 
 export interface AssistantMessageResponse {

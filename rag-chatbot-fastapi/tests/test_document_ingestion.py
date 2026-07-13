@@ -204,6 +204,7 @@ class FakeQdrantClient:
         self.dimension = dimension
         self.created: object | None = None
         self.upserted: list[object] = []
+        self.deleted: object | None = None
 
     async def collection_exists(self, collection_name: str) -> bool:
         self.collection_name = collection_name
@@ -224,6 +225,9 @@ class FakeQdrantClient:
         self.upsert_collection = collection_name
         self.upsert_wait = wait
 
+    async def delete(self, collection_name: str, points_selector: object, wait: bool) -> None:
+        self.deleted = (collection_name, points_selector, wait)
+
 
 @pytest.mark.asyncio
 async def test_qdrant_adapter_creates_collection_and_upserts_payloads() -> None:
@@ -237,7 +241,7 @@ async def test_qdrant_adapter_creates_collection_and_upserts_payloads() -> None:
     assert client.created is not None
     assert len(client.upserted) == 1
     point = cast(Any, client.upserted[0])
-    assert point.id == QdrantChunkStore.point_id(str(event.document_id), 0)
+    assert point.id == QdrantChunkStore.point_id(str(event.document_id), chunks[0].unit_id)
     assert point.payload["tenant_id"] == str(event.tenant_id)
     assert point.payload["knowledge_base_id"] == str(event.knowledge_base_id)
     assert point.payload["text"] == "hello"

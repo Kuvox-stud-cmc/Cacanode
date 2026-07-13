@@ -7,8 +7,11 @@ from pydantic import BaseModel, Field
 from app.core.config import settings
 from app.core.dependencies import get_current_tenant
 from app.core.errors import ApiError, ErrorEnvelope
+from app.graph import GraphServiceClient
 from app.infrastructure.model_gateway import create_chat_model
 from app.ingestion.embedding import OllamaEmbeddingClient
+from app.ingestion.storage import SeaweedS3DocumentStore
+from app.rag.calculation import SpreadsheetCalculationCoordinator
 from app.rag.chat_service import RagChatService
 from app.rag.errors import (
     ChatModelProviderError,
@@ -19,7 +22,7 @@ from app.rag.errors import (
     ChatWorkspaceNotFoundError,
 )
 from app.rag.models import AssistantMessage, ChatMessage, ChatSession, Citation
-from app.rag.retrieval import QdrantVectorRetriever
+from app.rag.retrieval import HybridRetriever, QdrantVectorRetriever
 from app.rag.sessions import PostgresChatSessionStore
 
 router = APIRouter(prefix="/chat", tags=["chat"])
@@ -65,6 +68,13 @@ class CitationResponse(BaseModel):
     chunk_index: int
     score: float
     snippet: str
+    unit_id: str | None = None
+    modality: str | None = None
+    section_path: tuple[str, ...] = ()
+    block_type: str | None = None
+    sheet_name: str | None = None
+    cell_range: str | None = None
+    table_id: str | None = None
 
     @classmethod
     def from_citation(cls, citation: Citation) -> "CitationResponse":
@@ -76,6 +86,13 @@ class CitationResponse(BaseModel):
             chunk_index=citation.chunk_index,
             score=citation.score,
             snippet=citation.snippet,
+            unit_id=citation.unit_id,
+            modality=citation.modality,
+            section_path=citation.section_path,
+            block_type=citation.block_type,
+            sheet_name=citation.sheet_name,
+            cell_range=citation.cell_range,
+            table_id=citation.table_id,
         )
 
 
@@ -156,8 +173,15 @@ def get_chat_service() -> RagChatService:
             settings=settings,
             sessions=PostgresChatSessionStore(settings.POSTGRES_URL),
             embedder=OllamaEmbeddingClient(settings),
-            retriever=QdrantVectorRetriever(settings),
+            retriever=HybridRetriever(
+                QdrantVectorRetriever(settings),
+                GraphServiceClient(settings),
+                create_chat_model(settings),
+            ),
             chat_model=create_chat_model(settings),
+            calculations=SpreadsheetCalculationCoordinator(
+                SeaweedS3DocumentStore(settings), create_chat_model(settings)
+            ),
         )
     return _chat_service
 
@@ -307,8 +331,9 @@ async def delete_session(
 ) -> None:
     try:
         chat_service.close_session(
-            tenant_id=str(tenant["tenant_id"]), session_id=session_id,
-            user_id=str(tenant["user_id"])
+            tenant_id=str(tenant["tenant_id"]),
+            session_id=session_id,
+            user_id=str(tenant["user_id"]),
         )
     except ChatSessionNotFoundError as exc:
         raise ApiError(

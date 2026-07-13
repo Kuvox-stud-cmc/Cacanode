@@ -24,6 +24,8 @@ import {
   Plus,
   Trash2,
   AlertCircle,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react"
 import { AppShell } from "@/components/app/AppShell"
 import { useAuthStore } from "@/components/providers/StoreProvider"
@@ -42,9 +44,11 @@ import { cn } from "@/lib/utils"
 import {
   fileTypeFromName,
   getDocumentStatusApi,
+  isSupportedDocumentName,
   isTerminalDocumentStatus,
   listDocumentsApi,
   uploadDocumentApi,
+  SUPPORTED_DOCUMENT_ACCEPT,
 } from "@/lib/documents-api"
 import {
   createChatSessionApi,
@@ -148,8 +152,7 @@ function statusClass(status: SourceStatus): string {
 }
 
 function isSupportedFile(file: File): boolean {
-  const lower = file.name.toLowerCase()
-  return lower.endsWith(".txt") || lower.endsWith(".pdf")
+  return isSupportedDocumentName(file.name)
 }
 
 function Playground({ authenticated }: { authenticated: boolean }) {
@@ -171,6 +174,7 @@ function Playground({ authenticated }: { authenticated: boolean }) {
   const [history, setHistory] = useState<PlaygroundSession[]>([])
   const [historyLoading, setHistoryLoading] = useState(false)
   const [historyError, setHistoryError] = useState<string | null>(null)
+  const [historyCollapsed, setHistoryCollapsed] = useState(false)
   const [drawerOpen, setDrawerOpen] = useState(false)
 
   const hasCompletedSource = sources.some((source) => source.status === "COMPLETED")
@@ -438,7 +442,7 @@ function Playground({ authenticated }: { authenticated: boolean }) {
       toast.error(
         hasIndexingSource
           ? "Wait for at least one document to finish indexing."
-          : "Upload a TXT or PDF source before asking a question.",
+          : "Upload a supported digital document or spreadsheet before asking a question.",
       )
       return
     }
@@ -545,7 +549,7 @@ function Playground({ authenticated }: { authenticated: boolean }) {
 
     for (const file of files) {
       if (!isSupportedFile(file)) {
-        toast.error(`${file.name} is not supported. Upload TXT or PDF files.`)
+        toast.error(`${file.name} is not supported. Use PDF, DOCX, TXT, Markdown, HTML, XLSX, or CSV.`)
         continue
       }
 
@@ -661,7 +665,40 @@ function Playground({ authenticated }: { authenticated: boolean }) {
       )}
 
       <div className="flex min-h-0 flex-1">
-        {authenticated && <aside className="hidden w-72 shrink-0 border-r border-slate-200 lg:block">{historyPanel}</aside>}
+        {authenticated && (
+          <aside
+            className={cn(
+              "relative hidden shrink-0 border-r border-slate-200 bg-slate-50 transition-[width] duration-300 ease-in-out lg:block",
+              historyCollapsed ? "w-12" : "w-72",
+            )}
+          >
+            <div className="h-full overflow-hidden">
+              <div
+                className={cn(
+                  "h-full w-72 transition-all duration-300 ease-in-out",
+                  historyCollapsed
+                    ? "pointer-events-none -translate-x-3 opacity-0"
+                    : "translate-x-0 opacity-100",
+                )}
+              >
+                {historyPanel}
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setHistoryCollapsed((collapsed) => !collapsed)}
+              className="absolute -right-3 top-4 z-10 grid size-7 place-items-center rounded-full border border-slate-200 bg-white text-slate-500 shadow-sm transition-all duration-200 hover:scale-105 hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300"
+              aria-label={historyCollapsed ? "Expand conversation history" : "Collapse conversation history"}
+              aria-expanded={!historyCollapsed}
+            >
+              {historyCollapsed ? (
+                <ChevronRight className="size-4" />
+              ) : (
+                <ChevronLeft className="size-4" />
+              )}
+            </button>
+          </aside>
+        )}
         {authenticated && drawerOpen && <div className="fixed inset-0 z-50 lg:hidden"><button aria-label="Close conversations" className="absolute inset-0 bg-slate-950/35" onClick={() => setDrawerOpen(false)} /><aside className="relative h-full w-[min(20rem,85vw)] border-r border-slate-200 shadow-xl">{historyPanel}</aside></div>}
         <div className="flex min-w-0 flex-1 flex-col">
           {authenticated && <div className="flex h-11 shrink-0 items-center border-b border-slate-100 px-3 lg:hidden"><Button size="sm" variant="ghost" className="gap-2" onClick={() => setDrawerOpen(true)} disabled={sending}><Menu className="size-4" /> Conversations</Button></div>}
@@ -677,7 +714,7 @@ function Playground({ authenticated }: { authenticated: boolean }) {
                 Chat with your documents
               </h2>
               <p className="mt-2 text-sm leading-6 text-slate-500 sm:text-base">
-                Upload a TXT or text-based PDF, wait for indexing, then ask questions with citations.
+                Upload a digital document or spreadsheet, wait for indexing, then ask questions with citations.
               </p>
               {!authenticated && (
                 <p className="mt-4 rounded-full bg-slate-100 px-3 py-1.5 text-xs font-medium text-slate-600">
@@ -724,7 +761,7 @@ function Playground({ authenticated }: { authenticated: boolean }) {
                               <span>{citation.score.toFixed(2)}</span>
                             </div>
                             <p className="text-slate-500">
-                              {citation.page_number ? `Page ${citation.page_number} · ` : ""}
+                              {citation.sheet_name ? `${citation.sheet_name}${citation.cell_range ? ` · ${citation.cell_range}` : ""} · ` : citation.page_number ? `Page ${citation.page_number} · ` : citation.section_path?.length ? `${citation.section_path.join(" / ")} · ` : ""}
                               Chunk {citation.chunk_index}
                             </p>
                             <p className="mt-1 line-clamp-3">{citation.snippet}</p>
@@ -824,7 +861,7 @@ function Playground({ authenticated }: { authenticated: boolean }) {
                   ref={fileInputRef}
                   type="file"
                   multiple
-                  accept=".txt,.pdf,text/plain,application/pdf"
+                  accept={SUPPORTED_DOCUMENT_ACCEPT}
                   className="hidden"
                   onChange={handleFiles}
                 />

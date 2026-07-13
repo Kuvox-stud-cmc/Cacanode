@@ -22,15 +22,18 @@ import {
 } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Card, CardContent } from "@/components/ui/card";
-import { Cloud, FileText, Loader2, Upload } from "lucide-react";
+import { Cloud, FileText, Loader2, Trash2, Upload } from "lucide-react";
 import { useApiClient } from "@/hooks/useApiClient";
 import {
   fileTypeFromName,
+  deleteDocumentApi,
   getDocumentStatusApi,
+  isSupportedDocumentName,
   isTerminalDocumentStatus,
   listDocumentsApi,
   uploadDocumentApi,
   updateDocumentVisibilityApi,
+  SUPPORTED_DOCUMENT_ACCEPT,
 } from "@/lib/documents-api";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
@@ -94,8 +97,7 @@ function makeId(): string {
 }
 
 function isSupportedFile(file: File): boolean {
-  const lower = file.name.toLowerCase();
-  return lower.endsWith(".txt") || lower.endsWith(".pdf");
+  return isSupportedDocumentName(file.name);
 }
 
 function TableSkeleton() {
@@ -120,6 +122,8 @@ export default function DocumentsPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [documents, setDocuments] = useState<DashboardDocument[]>([]);
   const [workspace, setWorkspace] = useState<TenantWorkspace | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<DashboardDocument | null>(null);
   const [loading, setLoading] = useState(true);
   const [isDragging, setIsDragging] = useState(false);
   const [uploadOpen, setUploadOpen] = useState(false);
@@ -198,7 +202,7 @@ export default function DocumentsPage() {
 
     for (const file of files) {
       if (!isSupportedFile(file)) {
-        toast.error(`${file.name} is not supported. Upload TXT or PDF files.`);
+        toast.error(`${file.name} is not supported. Use PDF, DOCX, TXT, Markdown, HTML, XLSX, or CSV.`);
         continue;
       }
 
@@ -296,6 +300,22 @@ export default function DocumentsPage() {
     }
   }
 
+  async function confirmDelete() {
+    const document = deleteTarget;
+    if (!document) return;
+    setDeletingId(document.id);
+    try {
+      await deleteDocumentApi(request, document.id);
+      setDocuments((current) => current.filter((item) => item.id !== document.id));
+      setDeleteTarget(null);
+      toast.success(`${document.fileName} deleted`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to delete document");
+    } finally {
+      setDeletingId(null);
+    }
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -313,7 +333,7 @@ export default function DocumentsPage() {
           ref={fileInputRef}
           type="file"
           multiple
-          accept=".txt,.pdf,text/plain,application/pdf"
+          accept={SUPPORTED_DOCUMENT_ACCEPT}
           className="hidden"
           onChange={handleFileInputChange}
         />
@@ -334,7 +354,7 @@ export default function DocumentsPage() {
       >
         <Cloud className="mx-auto mb-3 h-10 w-10 text-slate-400" />
         <p className="text-sm font-medium text-slate-700">Drop files here to upload</p>
-        <p className="mt-1 text-xs text-slate-400">Supports TXT and text-based PDF up to 20 MB</p>
+        <p className="mt-1 text-xs text-slate-400">PDF, DOCX, TXT, Markdown, HTML, XLSX, and CSV up to 20 MB. Scanned PDFs and legacy Office files are excluded.</p>
       </div>
 
       <Card>
@@ -345,7 +365,7 @@ export default function DocumentsPage() {
             <FileText className="mx-auto mb-3 h-10 w-10 text-slate-300" />
             <p className="font-medium text-slate-500">No documents yet</p>
             <p className="mt-1 text-sm text-slate-400">
-              Upload your first TXT or PDF document to start indexing
+              Upload your first digital document or spreadsheet to start indexing
             </p>
           </CardContent>
         ) : (
@@ -359,6 +379,7 @@ export default function DocumentsPage() {
                 <TableHead>Size</TableHead>
                 <TableHead>Uploaded</TableHead>
                 <TableHead>Details</TableHead>
+                {user?.role === "TENANT_ADMIN" && <TableHead className="w-16">Actions</TableHead>}
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -398,6 +419,20 @@ export default function DocumentsPage() {
                         ? doc.errorMessage ?? "Indexing failed"
                         : "Waiting for indexing"}
                   </TableCell>
+                  {user?.role === "TENANT_ADMIN" && (
+                    <TableCell>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="text-slate-400 hover:text-red-600"
+                        aria-label={`Delete ${doc.fileName}`}
+                        disabled={Boolean(doc.uploadState) || deletingId === doc.id || doc.status === "PENDING" || doc.status === "PROCESSING"}
+                        onClick={() => setDeleteTarget(doc)}
+                      >
+                        {deletingId === doc.id ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />}
+                      </Button>
+                    </TableCell>
+                  )}
                 </TableRow>
               ))}
             </TableBody>
@@ -426,6 +461,39 @@ export default function DocumentsPage() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setUploadOpen(false)}>Cancel</Button>
             <Button onClick={() => void confirmUpload()}>Upload</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={deleteTarget !== null}
+        onOpenChange={(open) => {
+          if (!open && !deletingId) setDeleteTarget(null);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete document?</DialogTitle>
+            <DialogDescription>
+              This will permanently delete <span className="font-medium text-slate-700">{deleteTarget?.fileName}</span> and remove all of its indexed knowledge. This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              disabled={Boolean(deletingId)}
+              onClick={() => setDeleteTarget(null)}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={Boolean(deletingId)}
+              onClick={() => void confirmDelete()}
+            >
+              {deletingId ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />}
+              Delete document
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

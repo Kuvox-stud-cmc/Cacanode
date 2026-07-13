@@ -12,6 +12,7 @@ import lombok.RequiredArgsConstructor;
 import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.CreateBucketRequest;
+import software.amazon.awssdk.services.s3.model.DeleteObjectRequest;
 import software.amazon.awssdk.services.s3.model.HeadBucketRequest;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 import software.amazon.awssdk.services.s3.model.S3Exception;
@@ -41,6 +42,18 @@ public class SeaweedFsDocumentStorage implements DocumentStorage {
             throw new InternalServerErrorException("Unable to read uploaded document");
         } catch (RuntimeException e) {
             throw new InternalServerErrorException("Unable to store uploaded document", e);
+        }
+    }
+
+    @Override
+    public void delete(String key) {
+        try {
+            seaweedFsS3Client.deleteObject(DeleteObjectRequest.builder()
+                    .bucket(properties.bucket())
+                    .key(key)
+                    .build());
+        } catch (RuntimeException e) {
+            throw new InternalServerErrorException("Unable to delete stored document", e);
         }
     }
 

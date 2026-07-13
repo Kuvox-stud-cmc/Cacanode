@@ -3,7 +3,6 @@ package com.cacanode.api.document.service;
 import java.time.Instant;
 import java.util.List;
 import java.util.Locale;
-import java.util.Set;
 import java.util.UUID;
 
 import org.springframework.stereotype.Service;
@@ -37,16 +36,11 @@ import lombok.RequiredArgsConstructor;
 public class DocumentService {
 
     private static final long MAX_FILE_SIZE_BYTES = 20L * 1024L * 1024L;
-    private static final Set<String> ALLOWED_CONTENT_TYPES = Set.of(
-            "text/plain",
-            "application/pdf",
-            "application/octet-stream"
-    );
-
     private final DocumentRepository documentRepository;
     private final KnowledgeBaseRepository knowledgeBaseRepository;
     private final DocumentStorage documentStorage;
     private final DocumentIngestionPublisher ingestionPublisher;
+    private final DocumentIndexCleanup indexCleanup;
 
     DocumentUploadResponse upload(UUID tenantId, UUID userId, UUID knowledgeBaseId, MultipartFile file) {
         return upload(tenantId, userId, "TENANT_ADMIN", knowledgeBaseId,
@@ -143,6 +137,22 @@ public class DocumentService {
         return toStatusResponse(document);
     }
 
+    @Transactional
+    public void delete(UUID tenantId, String role, UUID documentId) {
+        if (!"TENANT_ADMIN".equals(role)) {
+            throw new AccessDeniedException("Only tenant admins can delete documents");
+        }
+        Document document = documentRepository.findByIdAndTenantId(documentId, tenantId)
+                .orElseThrow(() -> new ResourceNotFoundException("Document not found"));
+        if (document.getStatus() == DocumentStatus.PENDING
+                || document.getStatus() == DocumentStatus.PROCESSING) {
+            throw new BadRequestException("Wait for document processing to finish before deleting it");
+        }
+        indexCleanup.delete(tenantId, document.getKnowledgeBaseId(), documentId);
+        documentStorage.delete(document.getStoragePath());
+        documentRepository.delete(document);
+    }
+
     @Transactional(readOnly = true)
     public DocumentStatusResponse get(UUID tenantId, UUID documentId) {
         return documentRepository.findByIdAndTenantId(documentId, tenantId)
@@ -188,18 +198,29 @@ public class DocumentService {
         }
 
         String filename = safeFileName(file.getOriginalFilename());
-        documentTypeFor(filename);
-
-        String contentType = file.getContentType();
-        if (!StringUtils.hasText(contentType) || !ALLOWED_CONTENT_TYPES.contains(contentType.toLowerCase(Locale.ROOT))) {
-            throw new BadRequestException("Unsupported file content type");
-        }
+        DocumentType type = documentTypeFor(filename);
+        DocumentFileValidator.validate(file, type);
     }
 
     private DocumentType documentTypeFor(String filename) {
         String lower = filename.toLowerCase(Locale.ROOT);
         if (lower.endsWith(".txt")) {
             return DocumentType.TXT;
+        }
+        if (lower.endsWith(".md") || lower.endsWith(".markdown")) {
+            return DocumentType.MARKDOWN;
+        }
+        if (lower.endsWith(".docx")) {
+            return DocumentType.DOCX;
+        }
+        if (lower.endsWith(".html") || lower.endsWith(".htm")) {
+            return DocumentType.HTML;
+        }
+        if (lower.endsWith(".xlsx")) {
+            return DocumentType.XLSX;
+        }
+        if (lower.endsWith(".csv")) {
+            return DocumentType.CSV;
         }
         if (lower.endsWith(".pdf")) {
             return DocumentType.PDF;

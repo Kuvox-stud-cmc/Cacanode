@@ -7,6 +7,8 @@ x-local-environment: &local-environment
   QDRANT_URL: http://qdrant:6333
   KUZU_DATABASE_PATH: /data/kuzu/cacanode.kuzu
   GRAPH_SERVICE_URL: http://graph-service:8010
+  GRAPH_INTERNAL_TOKEN: ${GRAPH_INTERNAL_TOKEN:-development-graph-token}
+  INGESTION_INTERNAL_TOKEN: ${INGESTION_INTERNAL_TOKEN:-development-ingestion-token}
   SEAWEEDFS_MASTER_URL: http://seaweedfs-master:9333
   SEAWEEDFS_FILER_URL: http://seaweedfs-filer:8888
   SEAWEEDFS_S3_ENDPOINT: http://seaweedfs-s3:8333

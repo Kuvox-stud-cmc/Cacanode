@@ -6,6 +6,7 @@ import java.util.UUID;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
@@ -76,5 +77,14 @@ public class DocumentController extends BaseController {
     ) {
         return documentService.updateVisibility(
                 getTenantId(request), getRole(request), documentId, body.visibility());
+    }
+
+    @DeleteMapping("/{documentId}")
+    public ResponseEntity<Void> delete(
+            @PathVariable UUID documentId,
+            HttpServletRequest request
+    ) {
+        documentService.delete(getTenantId(request), getRole(request), documentId);
+        return ResponseEntity.noContent().build();
     }
 }

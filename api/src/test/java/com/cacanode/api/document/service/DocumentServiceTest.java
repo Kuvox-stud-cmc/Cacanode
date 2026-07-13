@@ -58,6 +58,9 @@ class DocumentServiceTest {
     @Mock
     private DocumentIngestionPublisher ingestionPublisher;
 
+    @Mock
+    private DocumentIndexCleanup indexCleanup;
+
     private AutoCloseable mocks;
     private DocumentService documentService;
 
@@ -68,7 +71,8 @@ class DocumentServiceTest {
                 documentRepository,
                 knowledgeBaseRepository,
                 documentStorage,
-                ingestionPublisher
+                ingestionPublisher,
+                indexCleanup
         );
 
         when(knowledgeBaseRepository.findByIdAndTenantId(knowledgeBaseId, tenantId))
@@ -86,7 +90,7 @@ class DocumentServiceTest {
                 "file",
                 "return-policy-demo-vi.pdf",
                 "application/pdf",
-                "pdf-bytes".getBytes()
+                "%PDF-1.4\n%%EOF".getBytes()
         );
 
         var response = documentService.upload(tenantId, userId, knowledgeBaseId, file);
@@ -194,7 +198,7 @@ class DocumentServiceTest {
 
     @Test
     void uploadRejectsUnsupportedExtension() {
-        MockMultipartFile file = new MockMultipartFile("file", "doc.csv", "text/plain", "x".getBytes());
+        MockMultipartFile file = new MockMultipartFile("file", "doc.doc", "application/msword", "x".getBytes());
 
         assertThrows(BadRequestException.class, () -> documentService.upload(tenantId, userId, knowledgeBaseId, file));
     }
@@ -306,6 +310,33 @@ class DocumentServiceTest {
 
         assertEquals(DocumentStatus.FAILED, document.getStatus());
         assertEquals("parse error", document.getErrorMessage());
+    }
+
+    @Test
+    void tenantAdminDeletesIndexesStorageAndDatabase() {
+        Document document = document();
+        document.setStatus(DocumentStatus.COMPLETED);
+        when(documentRepository.findByIdAndTenantId(documentId, tenantId))
+                .thenReturn(Optional.of(document));
+
+        documentService.delete(tenantId, "TENANT_ADMIN", documentId);
+
+        verify(indexCleanup).delete(tenantId, knowledgeBaseId, documentId);
+        verify(documentStorage).delete("storage-key");
+        verify(documentRepository).delete(document);
+    }
+
+    @Test
+    void deleteRejectsProcessingDocumentAndRegularEmployee() {
+        Document document = document();
+        when(documentRepository.findByIdAndTenantId(documentId, tenantId))
+                .thenReturn(Optional.of(document));
+
+        assertThrows(AccessDeniedException.class,
+                () -> documentService.delete(tenantId, "USER", documentId));
+        assertThrows(BadRequestException.class,
+                () -> documentService.delete(tenantId, "TENANT_ADMIN", documentId));
+        verify(indexCleanup, never()).delete(any(), any(), any());
     }
 
     private KnowledgeBase knowledgeBase(KnowledgeBaseStatus status) {
