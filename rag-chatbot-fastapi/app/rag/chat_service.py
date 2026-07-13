@@ -33,6 +33,7 @@ class VectorRetriever(Protocol):
         query_vector: Sequence[float],
         limit: int,
         score_threshold: float,
+        document_ids: Sequence[str] | None = None,
     ) -> list[RetrievedChunk]: ...
 
 
@@ -93,6 +94,7 @@ class RagChatService:
         limit: int = 50,
         after: int | None = None,
         integration_token_id: str | None = None,
+        user_id: str | None = None,
     ) -> list[ChatMessage]:
         session = self._sessions.get_for_tenant(session_id, tenant_id)
         if session is None:
@@ -100,6 +102,10 @@ class RagChatService:
         if (
             integration_token_id is not None
             and session.integration_token_id != integration_token_id
+        ):
+            raise ChatSessionNotFoundError(session_id)
+        if user_id is not None and (
+            session.channel != "EMPLOYEE_PLAYGROUND" or session.user_id != user_id
         ):
             raise ChatSessionNotFoundError(session_id)
         return self._sessions.list_messages(
@@ -115,11 +121,31 @@ class RagChatService:
         tenant_id: str,
         session_id: str,
         integration_token_id: str | None = None,
+        user_id: str | None = None,
     ) -> None:
         session = self._sessions.get_for_tenant(session_id, tenant_id)
         if session is None or (
             integration_token_id is not None
             and session.integration_token_id != integration_token_id
+        ):
+            raise ChatSessionNotFoundError(session_id)
+        if user_id is not None and (
+            session.channel != "EMPLOYEE_PLAYGROUND" or session.user_id != user_id
+        ):
+            raise ChatSessionNotFoundError(session_id)
+        if not self._sessions.close_for_tenant(session_id, tenant_id):
+            raise ChatSessionNotFoundError(session_id)
+
+    def list_playground_sessions(
+        self, *, tenant_id: str, user_id: str, limit: int, offset: int
+    ) -> list[dict[str, Any]]:
+        return self._sessions.list_playground_sessions(
+            tenant_id=tenant_id, user_id=user_id, limit=limit, offset=offset
+        )
+
+    def hide_playground_session(self, *, tenant_id: str, user_id: str, session_id: str) -> None:
+        if not self._sessions.hide_playground_session(
+            tenant_id=tenant_id, user_id=user_id, session_id=session_id
         ):
             raise ChatSessionNotFoundError(session_id)
 
@@ -143,8 +169,6 @@ class RagChatService:
         if method is None:
             return None
         return method(tenant_id=tenant_id, session_id=session_id)
-        if not self._sessions.close_for_tenant(session_id, tenant_id):
-            raise ChatSessionNotFoundError(session_id)
 
     async def submit_message(
         self,
@@ -153,6 +177,7 @@ class RagChatService:
         session_id: str,
         content: str,
         integration_token_id: str | None = None,
+        user_id: str | None = None,
     ) -> AssistantMessage:
         total_started_at = time.perf_counter()
         outcome = "success"
@@ -182,6 +207,11 @@ class RagChatService:
             ):
                 outcome = "error"
                 raise ChatSessionNotFoundError(session_id)
+            if user_id is not None and (
+                session.channel != "EMPLOYEE_PLAYGROUND" or session.user_id != user_id
+            ):
+                outcome = "error"
+                raise ChatSessionNotFoundError(session_id)
 
             self._sessions.consume_message_quota(tenant_id)
             self._sessions.add_user_message(session.id, content)
@@ -205,13 +235,26 @@ class RagChatService:
             retrieval_started_at = time.perf_counter()
             retrieval_outcome = "success"
             try:
-                chunks = await self._retriever.retrieve(
-                    tenant_id=tenant_id,
-                    knowledge_base_id=session.knowledge_base_id,
-                    query_vector=query_vector,
-                    limit=self._settings.TEXT_TOP_K,
-                    score_threshold=self._settings.MIN_RETRIEVAL_CONFIDENCE,
-                )
+                if session.channel in {"WIDGET", "CUSTOM_API"}:
+                    visible_ids = self._sessions.customer_visible_document_ids(
+                        tenant_id=tenant_id, knowledge_base_id=session.knowledge_base_id
+                    )
+                    chunks = [] if not visible_ids else await self._retriever.retrieve(
+                        tenant_id=tenant_id,
+                        knowledge_base_id=session.knowledge_base_id,
+                        query_vector=query_vector,
+                        limit=self._settings.TEXT_TOP_K,
+                        score_threshold=self._settings.MIN_RETRIEVAL_CONFIDENCE,
+                        document_ids=visible_ids,
+                    )
+                else:
+                    chunks = await self._retriever.retrieve(
+                        tenant_id=tenant_id,
+                        knowledge_base_id=session.knowledge_base_id,
+                        query_vector=query_vector,
+                        limit=self._settings.TEXT_TOP_K,
+                        score_threshold=self._settings.MIN_RETRIEVAL_CONFIDENCE,
+                    )
             except Exception:
                 retrieval_outcome = "error"
                 outcome = "error"

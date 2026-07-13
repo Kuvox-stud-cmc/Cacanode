@@ -2,6 +2,7 @@ import type {
   Document,
   DocumentStatusResponse,
   DocumentUploadResponse,
+  DocumentVisibility,
 } from "@/types";
 import { getApiBase } from "@/lib/auth-api";
 import { readJsonOrThrow } from "@/lib/api-error";
@@ -21,16 +22,30 @@ export async function uploadDocumentApi(
   request: ApiRequest,
   file: File,
   knowledgeBaseId: string,
+  visibility: DocumentVisibility,
 ): Promise<DocumentUploadResponse> {
   const form = new FormData();
   form.append("file", file);
   form.append("knowledgeBaseId", knowledgeBaseId);
+  form.append("visibility", visibility);
 
   const res = await request(`${getApiBase()}/documents`, {
     method: "POST",
     body: form,
   });
   return readJsonOrThrow<DocumentUploadResponse>(res);
+}
+
+export async function updateDocumentVisibilityApi(
+  request: ApiRequest,
+  documentId: string,
+  visibility: DocumentVisibility,
+): Promise<DocumentStatusResponse> {
+  const res = await request(`${getApiBase()}/documents/${documentId}/visibility`, {
+    method: "PATCH",
+    body: JSON.stringify({ visibility }),
+  });
+  return readJsonOrThrow<DocumentStatusResponse>(res);
 }
 
 export async function getDocumentStatusApi(

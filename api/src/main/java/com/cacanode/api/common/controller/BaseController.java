@@ -14,4 +14,8 @@ public abstract class BaseController {
     return UUID.fromString((String) request.getAttribute("userId"));
   }
 
+  protected String getRole(HttpServletRequest request) {
+    return (String) request.getAttribute("role");
+  }
+
 }

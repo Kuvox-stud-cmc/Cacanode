@@ -128,6 +128,23 @@ async def test_qdrant_retriever_filters_by_tenant_and_knowledge_base() -> None:
     assert metric_value("cacanode_ai_retrieval_seconds_count", labels) == before + 1
 
 
+@pytest.mark.asyncio
+async def test_qdrant_retriever_can_filter_to_allowed_document_ids() -> None:
+    client = FakeQdrantClient()
+    retriever = QdrantVectorRetriever(Settings(), client=client)  # type: ignore[arg-type]
+
+    await retriever.retrieve(
+        tenant_id="tenant-1", knowledge_base_id="kb-1", query_vector=[0.1],
+        limit=5, score_threshold=0, document_ids=["doc-1", "doc-2"],
+    )
+
+    document_condition = next(
+        condition for condition in client.kwargs["query_filter"].must
+        if condition.key == "document_id"
+    )
+    assert document_condition.match.any == ["doc-1", "doc-2"]
+
+
 class FakeEmbedder:
     async def embed_query(self, text: str) -> list[float]:
         self.text = text
@@ -147,6 +164,7 @@ class FakeRetriever:
         query_vector: Sequence[float],
         limit: int,
         score_threshold: float,
+        document_ids: Sequence[str] | None = None,
     ) -> list[RetrievedChunk]:
         self.calls.append(
             {
@@ -155,6 +173,7 @@ class FakeRetriever:
                 "query_vector": list(query_vector),
                 "limit": limit,
                 "score_threshold": score_threshold,
+                "document_ids": list(document_ids) if document_ids is not None else None,
             }
         )
         return self.chunks
@@ -286,6 +305,21 @@ async def test_external_chat_rejects_another_integration_token() -> None:
             content="Can another token read this?",
             integration_token_id="token-2",
         )
+
+
+def test_external_conversation_can_be_closed_by_its_integration_token() -> None:
+    service, store, _, _ = make_service(chunks=[])
+    session = service.create_session(
+        tenant_id="tenant-1", user_id=None, chatbot_id="bot-1",
+        knowledge_base_id="kb-1", locale="en", channel="WIDGET",
+        integration_token_id="token-1",
+    )
+
+    service.close_session(
+        tenant_id="tenant-1", session_id=session.id, integration_token_id="token-1"
+    )
+
+    assert store.get_for_tenant(session.id, "tenant-1") is None
 
 
 @pytest.mark.asyncio
@@ -436,3 +470,82 @@ async def test_chat_service_enforces_session_tenant_isolation() -> None:
             session_id=session.id,
             content="Can I read this?",
         )
+
+
+@pytest.mark.asyncio
+async def test_employee_cannot_read_or_continue_another_employees_session() -> None:
+    service, _, _, _ = make_service(chunks=[])
+    session = service.create_session(
+        tenant_id="tenant-1", user_id="user-1", chatbot_id="bot-1",
+        knowledge_base_id="kb-1", locale="en",
+    )
+
+    with pytest.raises(ChatSessionNotFoundError):
+        service.list_messages(
+            tenant_id="tenant-1", session_id=session.id, user_id="user-2"
+        )
+    with pytest.raises(ChatSessionNotFoundError):
+        await service.submit_message(
+            tenant_id="tenant-1", session_id=session.id,
+            content="Not my chat", user_id="user-2",
+        )
+
+
+def test_hiding_employee_session_preserves_messages_but_prevents_reopening() -> None:
+    service, store, _, _ = make_service(chunks=[])
+    session = service.create_session(
+        tenant_id="tenant-1", user_id="user-1", chatbot_id="bot-1",
+        knowledge_base_id="kb-1", locale="en",
+    )
+    store.add_user_message(session.id, "Keep this for analytics")
+
+    service.hide_playground_session(
+        tenant_id="tenant-1", user_id="user-1", session_id=session.id
+    )
+
+    assert len(store._sessions[session.id].messages) == 1
+    assert store.get_for_tenant(session.id, "tenant-1") is None
+    assert service.list_playground_sessions(
+        tenant_id="tenant-1", user_id="user-1", limit=50, offset=0
+    ) == []
+
+
+@pytest.mark.asyncio
+async def test_external_retrieval_filters_to_customer_visible_documents() -> None:
+    service, store, retriever, _ = make_service(
+        chunks=[RetrievedChunk(
+            document_id="shared-doc", source_name="shared.txt", page_number=None,
+            chunk_index=0, text="Shared answer", score=0.9,
+        )]
+    )
+    store.customer_document_ids = ["shared-doc"]
+    session = service.create_session(
+        tenant_id="tenant-1", user_id=None, chatbot_id="bot-1",
+        knowledge_base_id="kb-1", locale="en", channel="WIDGET",
+        integration_token_id="token-1",
+    )
+
+    await service.submit_message(
+        tenant_id="tenant-1", session_id=session.id, content="Question",
+        integration_token_id="token-1",
+    )
+
+    assert retriever.calls[0]["document_ids"] == ["shared-doc"]
+
+
+@pytest.mark.asyncio
+async def test_external_retrieval_skips_qdrant_when_no_documents_are_shared() -> None:
+    service, _, retriever, model = make_service(chunks=[])
+    session = service.create_session(
+        tenant_id="tenant-1", user_id=None, chatbot_id="bot-1",
+        knowledge_base_id="kb-1", locale="en", channel="CUSTOM_API",
+        integration_token_id="token-1",
+    )
+
+    await service.submit_message(
+        tenant_id="tenant-1", session_id=session.id, content="Question",
+        integration_token_id="token-1",
+    )
+
+    assert retriever.calls == []
+    assert len(model.calls) == 1

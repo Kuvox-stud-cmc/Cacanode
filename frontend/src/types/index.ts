@@ -9,7 +9,10 @@ export interface Document {
   chunkCount?: number | null;
   errorMessage?: string | null;
   uploadedAt: string;
+  visibility: DocumentVisibility;
 }
+
+export type DocumentVisibility = "EMPLOYEE_ONLY" | "CUSTOMER_AND_EMPLOYEE";
 
 export type DocumentStatus = "PENDING" | "PROCESSING" | "COMPLETED" | "FAILED";
 
@@ -18,6 +21,7 @@ export interface DocumentUploadResponse {
   jobId: string;
   fileName: string;
   status: DocumentStatus;
+  visibility: DocumentVisibility;
 }
 
 export interface DocumentStatusResponse {
@@ -26,6 +30,7 @@ export interface DocumentStatusResponse {
   fileName: string;
   knowledgeBaseId: string;
   status: DocumentStatus;
+  visibility: DocumentVisibility;
   chunkCount?: number | null;
   errorMessage?: string | null;
 }
@@ -161,6 +166,15 @@ export interface ChatHistoryMessageResponse {
   content: string;
   citations: ChatCitation[];
   sequence_number?: number | null;
+}
+
+export interface PlaygroundSession {
+  id: string;
+  title: string;
+  message_count: number;
+  status: string;
+  created_at: string;
+  last_activity_at: string;
 }
 
 export interface WidgetConfig {

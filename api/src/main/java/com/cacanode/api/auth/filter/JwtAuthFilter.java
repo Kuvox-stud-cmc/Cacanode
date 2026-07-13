@@ -64,6 +64,7 @@ public class JwtAuthFilter extends OncePerRequestFilter {
       String email = jwtService.extractEmail(token);
       String tenantId = jwtService.extractTenantId(token);
       String role = jwtService.extractRole(token);
+      String authenticatedRole = role;
 
       log.debug("JWT valid - email: {}, tenantId: {}, role: {}", email, tenantId, role);
 
@@ -84,6 +85,7 @@ public class JwtAuthFilter extends OncePerRequestFilter {
             || !user.getTenant().getId().toString().equals(tenantId)) {
             throw new IllegalStateException("User account is disabled or token scope is invalid");
           }
+          authenticatedRole = user.getRole().name();
         }
 
         // 4. Build authentication token
@@ -102,6 +104,7 @@ public class JwtAuthFilter extends OncePerRequestFilter {
         // 6. Store tenantId in request attribute for controllers
         request.setAttribute("tenantId", tenantId);
         request.setAttribute("userId", jwtService.extractUserId(token));
+        request.setAttribute("role", authenticatedRole);
       } 
 
     } catch (Exception e) {

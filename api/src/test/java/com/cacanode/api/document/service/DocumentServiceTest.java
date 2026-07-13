@@ -27,6 +27,8 @@ import com.cacanode.api.common.exception.custom.InternalServerErrorException;
 import com.cacanode.api.common.exception.custom.ResourceNotFoundException;
 import com.cacanode.api.document.enums.DocumentStatus;
 import com.cacanode.api.document.enums.DocumentType;
+import com.cacanode.api.document.enums.DocumentVisibility;
+import org.springframework.security.access.AccessDeniedException;
 import com.cacanode.api.document.messaging.DocumentIngestRequestedEvent;
 import com.cacanode.api.document.messaging.DocumentIngestionPublisher;
 import com.cacanode.api.document.messaging.DocumentStatusEvent;
@@ -115,6 +117,44 @@ class DocumentServiceTest {
         assertEquals(documentId, event.documentId());
         assertEquals(userId, event.uploaderId());
         assertEquals(saved.getStoragePath(), event.storageKey());
+    }
+
+    @Test
+    void tenantAdminCanUploadCustomerVisibleDocument() {
+        var response = documentService.upload(
+                tenantId, userId, "TENANT_ADMIN", knowledgeBaseId,
+                DocumentVisibility.CUSTOMER_AND_EMPLOYEE, txtFile());
+
+        assertEquals(DocumentVisibility.CUSTOMER_AND_EMPLOYEE, response.visibility());
+    }
+
+    @Test
+    void regularEmployeeCanUploadEmployeeOnlyDocument() {
+        var response = documentService.upload(
+                tenantId, userId, "USER", knowledgeBaseId,
+                DocumentVisibility.EMPLOYEE_ONLY, txtFile());
+
+        assertEquals(DocumentVisibility.EMPLOYEE_ONLY, response.visibility());
+    }
+
+    @Test
+    void regularEmployeeCannotExposeDocumentToCustomers() {
+        assertThrows(AccessDeniedException.class, () -> documentService.upload(
+                tenantId, userId, "USER", knowledgeBaseId,
+                DocumentVisibility.CUSTOMER_AND_EMPLOYEE, txtFile()));
+        verify(documentRepository, never()).save(any());
+    }
+
+    @Test
+    void onlyTenantAdminCanUpdateVisibility() {
+        Document document = document();
+        when(documentRepository.findByIdAndTenantId(documentId, tenantId)).thenReturn(Optional.of(document));
+
+        var updated = documentService.updateVisibility(
+                tenantId, "TENANT_ADMIN", documentId, DocumentVisibility.EMPLOYEE_ONLY);
+        assertEquals(DocumentVisibility.EMPLOYEE_ONLY, updated.visibility());
+        assertThrows(AccessDeniedException.class, () -> documentService.updateVisibility(
+                tenantId, "USER", documentId, DocumentVisibility.CUSTOMER_AND_EMPLOYEE));
     }
 
     @Test

@@ -8,7 +8,8 @@ import {
   type DragEvent,
 } from "react";
 import toast from "react-hot-toast";
-import type { Document, DocumentStatus, TenantWorkspace } from "@/types";
+import type { Document, DocumentStatus, DocumentVisibility, TenantWorkspace } from "@/types";
+import { useAuthStore } from "@/components/providers/StoreProvider";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -29,7 +30,10 @@ import {
   isTerminalDocumentStatus,
   listDocumentsApi,
   uploadDocumentApi,
+  updateDocumentVisibilityApi,
 } from "@/lib/documents-api";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
 import { getTenantWorkspaceApi } from "@/lib/workspace-api";
 
 type DashboardDocument = Document & {
@@ -112,11 +116,15 @@ function TableSkeleton() {
 
 export default function DocumentsPage() {
   const { request } = useApiClient();
+  const user = useAuthStore((state) => state.user);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [documents, setDocuments] = useState<DashboardDocument[]>([]);
   const [workspace, setWorkspace] = useState<TenantWorkspace | null>(null);
   const [loading, setLoading] = useState(true);
   const [isDragging, setIsDragging] = useState(false);
+  const [uploadOpen, setUploadOpen] = useState(false);
+  const [pendingFiles, setPendingFiles] = useState<File[]>([]);
+  const [visibility, setVisibility] = useState<DocumentVisibility>("EMPLOYEE_ONLY");
 
   useEffect(() => {
     let cancelled = false;
@@ -163,6 +171,7 @@ export default function DocumentsPage() {
           return {
             ...document,
             status: result.value.status,
+            visibility: result.value.visibility,
             chunkCount: result.value.chunkCount,
             errorMessage: result.value.errorMessage,
           };
@@ -181,7 +190,7 @@ export default function DocumentsPage() {
     };
   }, [documents, request]);
 
-  async function uploadFiles(files: File[]) {
+  async function uploadFiles(files: File[], selectedVisibility: DocumentVisibility) {
     if (!workspace) {
       toast.error("Workspace is still loading.");
       return;
@@ -205,6 +214,7 @@ export default function DocumentsPage() {
         jobId: localId,
         knowledgeBaseId: workspace.knowledgeBase.id,
         uploadedAt: new Date().toISOString(),
+        visibility: selectedVisibility,
       };
       setDocuments((current) => [uploading, ...current]);
 
@@ -213,6 +223,7 @@ export default function DocumentsPage() {
           request,
           file,
           workspace.knowledgeBase.id,
+          selectedVisibility,
         );
         setDocuments((current) =>
           current.map((document) =>
@@ -223,6 +234,7 @@ export default function DocumentsPage() {
                   jobId: uploaded.jobId,
                   fileName: uploaded.fileName,
                   status: uploaded.status,
+                  visibility: uploaded.visibility,
                   uploadState: undefined,
                 }
               : document,
@@ -249,7 +261,11 @@ export default function DocumentsPage() {
 
   function handleFileInputChange(event: ChangeEvent<HTMLInputElement>) {
     const files = Array.from(event.target.files ?? []);
-    if (files.length > 0) void uploadFiles(files);
+    if (files.length > 0) {
+      setPendingFiles(files);
+      setVisibility("EMPLOYEE_ONLY");
+      setUploadOpen(true);
+    }
     event.target.value = "";
   }
 
@@ -257,7 +273,27 @@ export default function DocumentsPage() {
     event.preventDefault();
     setIsDragging(false);
     const files = Array.from(event.dataTransfer.files ?? []);
-    if (files.length > 0) void uploadFiles(files);
+    if (files.length > 0) {
+      setPendingFiles(files);
+      setVisibility("EMPLOYEE_ONLY");
+      setUploadOpen(true);
+    }
+  }
+
+  async function confirmUpload() {
+    const files = pendingFiles;
+    setUploadOpen(false);
+    setPendingFiles([]);
+    await uploadFiles(files, visibility);
+  }
+
+  async function changeVisibility(documentId: string, next: DocumentVisibility) {
+    try {
+      const updated = await updateDocumentVisibilityApi(request, documentId, next);
+      setDocuments((current) => current.map((item) => item.id === documentId ? { ...item, visibility: updated.visibility } : item));
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to update visibility");
+    }
   }
 
   return (
@@ -319,6 +355,7 @@ export default function DocumentsPage() {
                 <TableHead>File Name</TableHead>
                 <TableHead>Type</TableHead>
                 <TableHead>Status</TableHead>
+                <TableHead>Access</TableHead>
                 <TableHead>Size</TableHead>
                 <TableHead>Uploaded</TableHead>
                 <TableHead>Details</TableHead>
@@ -335,6 +372,18 @@ export default function DocumentsPage() {
                   </TableCell>
                   <TableCell>
                     <StatusBadge status={doc.status} uploadState={doc.uploadState} />
+                  </TableCell>
+                  <TableCell>
+                    {user?.role === "TENANT_ADMIN" && !doc.uploadState ? (
+                      <select className="h-8 rounded-md border border-slate-200 bg-white px-2 text-xs" value={doc.visibility} onChange={(event) => void changeVisibility(doc.id, event.target.value as DocumentVisibility)}>
+                        <option value="EMPLOYEE_ONLY">Employees only</option>
+                        <option value="CUSTOMER_AND_EMPLOYEE">Everyone</option>
+                      </select>
+                    ) : (
+                      <Badge variant="outline" className="whitespace-nowrap text-xs">
+                        {doc.visibility === "CUSTOMER_AND_EMPLOYEE" ? "Everyone" : "Employees only"}
+                      </Badge>
+                    )}
                   </TableCell>
                   <TableCell className="text-sm text-slate-500">
                     {formatBytes(doc.fileSizeBytes)}
@@ -355,6 +404,31 @@ export default function DocumentsPage() {
           </Table>
         )}
       </Card>
+
+      <Dialog open={uploadOpen} onOpenChange={setUploadOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Upload documents</DialogTitle>
+            <DialogDescription>{pendingFiles.length} file{pendingFiles.length === 1 ? "" : "s"} selected. Choose who can use them in answers.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="max-h-40 space-y-1 overflow-y-auto rounded-lg bg-slate-50 p-3 text-sm">
+              {pendingFiles.map((file) => <p key={`${file.name}-${file.size}`} className="truncate">{file.name}</p>)}
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="document-visibility">Access</Label>
+              <select id="document-visibility" className="h-10 w-full rounded-md border border-slate-300 px-3 text-sm" value={visibility} onChange={(event) => setVisibility(event.target.value as DocumentVisibility)}>
+                <option value="EMPLOYEE_ONLY">Employees only</option>
+                {user?.role === "TENANT_ADMIN" && <option value="CUSTOMER_AND_EMPLOYEE">Customers and employees</option>}
+              </select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setUploadOpen(false)}>Cancel</Button>
+            <Button onClick={() => void confirmUpload()}>Upload</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

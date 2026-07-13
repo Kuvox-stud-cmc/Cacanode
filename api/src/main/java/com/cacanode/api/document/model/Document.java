@@ -3,6 +3,7 @@ package com.cacanode.api.document.model;
 import com.cacanode.api.common.model.BaseEntity;
 import com.cacanode.api.document.enums.DocumentStatus;
 import com.cacanode.api.document.enums.DocumentType;
+import com.cacanode.api.document.enums.DocumentVisibility;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.Setter;
@@ -51,6 +52,10 @@ public class Document extends BaseEntity {
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 50)
     private DocumentStatus status = DocumentStatus.PENDING;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "visibility", nullable = false, length = 50)
+    private DocumentVisibility visibility = DocumentVisibility.CUSTOMER_AND_EMPLOYEE;
 
     @Column(name = "job_id")
     private String jobId;

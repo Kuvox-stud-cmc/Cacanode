@@ -1,4 +1,5 @@
 from datetime import UTC, datetime, timedelta
+from uuid import UUID
 
 import jwt
 from fastapi.testclient import TestClient
@@ -29,6 +30,23 @@ def auth_headers(tenant_id: str = "tenant-1", user_id: str = "user-1") -> dict[s
 
 
 class FakeChatService:
+    def list_playground_sessions(self, *, tenant_id: str, user_id: str, limit: int, offset: int):
+        self.listed = {"tenant_id": tenant_id, "user_id": user_id, "limit": limit, "offset": offset}
+        now = datetime.now(UTC)
+        return [
+            {
+                "id": UUID("be98a53d-ab96-4738-8e59-dd7da3975147"),
+                "title": "First question",
+                "message_count": 2,
+                "status": "OPEN",
+                "created_at": now,
+                "last_activity_at": now,
+            }
+        ]
+
+    def hide_playground_session(self, *, tenant_id: str, user_id: str, session_id: str) -> None:
+        self.hidden = {"tenant_id": tenant_id, "user_id": user_id, "session_id": session_id}
+
     def create_session(
         self,
         *,
@@ -60,11 +78,13 @@ class FakeChatService:
         tenant_id: str,
         session_id: str,
         content: str,
+        user_id: str | None = None,
     ) -> AssistantMessage:
         self.submitted = {
             "tenant_id": tenant_id,
             "session_id": session_id,
             "content": content,
+            "user_id": user_id,
         }
         return AssistantMessage(
             role="assistant",
@@ -90,8 +110,9 @@ class TimeoutChatService(FakeChatService):
         tenant_id: str,
         session_id: str,
         content: str,
+        user_id: str | None = None,
     ) -> AssistantMessage:
-        del tenant_id, session_id, content
+        del tenant_id, session_id, content, user_id
         raise ChatModelTimeoutError("Model generation timed out")
 
 
@@ -102,8 +123,9 @@ class ProviderErrorChatService(FakeChatService):
         tenant_id: str,
         session_id: str,
         content: str,
+        user_id: str | None = None,
     ) -> AssistantMessage:
-        del tenant_id, session_id, content
+        del tenant_id, session_id, content, user_id
         raise ChatModelProviderError("Model provider request failed")
 
 
@@ -212,6 +234,39 @@ def test_chat_session_store_failure_returns_service_unavailable() -> None:
     assert response.status_code == 503
     assert response.json()["error"]["code"] == "CHAT_SESSION_STORE_UNAVAILABLE"
 
+
+def test_playground_history_is_scoped_to_current_user_and_supports_pagination() -> None:
+    service = with_fake_service()
+    try:
+        with TestClient(app) as client:
+            response = client.get(
+                "/api/v1/chat/playground/sessions?limit=25&offset=5",
+                headers=auth_headers(tenant_id="tenant-123", user_id="employee-7"),
+            )
+        assert response.status_code == 200
+        assert response.json()[0]["id"] == "be98a53d-ab96-4738-8e59-dd7da3975147"
+        assert response.json()[0]["title"] == "First question"
+        assert service.listed == {
+            "tenant_id": "tenant-123", "user_id": "employee-7", "limit": 25, "offset": 5
+        }
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_hiding_playground_session_uses_current_employee_identity() -> None:
+    service = with_fake_service()
+    try:
+        with TestClient(app) as client:
+            response = client.delete(
+                "/api/v1/chat/playground/sessions/session-1",
+                headers=auth_headers(tenant_id="tenant-123", user_id="employee-7"),
+            )
+        assert response.status_code == 204
+        assert service.hidden == {
+            "tenant_id": "tenant-123", "user_id": "employee-7", "session_id": "session-1"
+        }
+    finally:
+        app.dependency_overrides.clear()
 
 def test_chat_message_returns_structured_citations() -> None:
     service = with_fake_service()

@@ -10,6 +10,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.security.access.AccessDeniedException;
 
 import com.cacanode.api.common.exception.custom.BadRequestException;
 import com.cacanode.api.common.exception.custom.InternalServerErrorException;
@@ -19,6 +20,7 @@ import com.cacanode.api.document.dto.DocumentStatusResponse;
 import com.cacanode.api.document.dto.DocumentUploadResponse;
 import com.cacanode.api.document.enums.DocumentStatus;
 import com.cacanode.api.document.enums.DocumentType;
+import com.cacanode.api.document.enums.DocumentVisibility;
 import com.cacanode.api.document.messaging.DocumentIngestRequestedEvent;
 import com.cacanode.api.document.messaging.DocumentIngestionPublisher;
 import com.cacanode.api.document.messaging.DocumentStatusEvent;
@@ -46,8 +48,20 @@ public class DocumentService {
     private final DocumentStorage documentStorage;
     private final DocumentIngestionPublisher ingestionPublisher;
 
+    DocumentUploadResponse upload(UUID tenantId, UUID userId, UUID knowledgeBaseId, MultipartFile file) {
+        return upload(tenantId, userId, "TENANT_ADMIN", knowledgeBaseId,
+                DocumentVisibility.CUSTOMER_AND_EMPLOYEE, file);
+    }
+
     @Transactional(noRollbackFor = InternalServerErrorException.class)
-    public DocumentUploadResponse upload(UUID tenantId, UUID userId, UUID knowledgeBaseId, MultipartFile file) {
+    public DocumentUploadResponse upload(UUID tenantId, UUID userId, String role, UUID knowledgeBaseId,
+                                         DocumentVisibility visibility, MultipartFile file) {
+        if (visibility == null) {
+            throw new BadRequestException("Document visibility is required");
+        }
+        if (!"TENANT_ADMIN".equals(role) && visibility != DocumentVisibility.EMPLOYEE_ONLY) {
+            throw new AccessDeniedException("Only tenant admins can share documents with customers");
+        }
         var knowledgeBase = knowledgeBaseRepository.findByIdAndTenantId(knowledgeBaseId, tenantId)
                 .orElseThrow(() -> new BadRequestException("Knowledge base is not active or not found"));
 
@@ -70,6 +84,7 @@ public class DocumentService {
         document.setFileSizeBytes(file.getSize());
         document.setStoragePath("pending");
         document.setStatus(DocumentStatus.PENDING);
+        document.setVisibility(visibility);
         document.setJobId(jobId.toString());
 
         document = documentRepository.save(document);
@@ -114,6 +129,18 @@ public class DocumentService {
         }
 
         return toUploadResponse(document);
+    }
+
+    @Transactional
+    public DocumentStatusResponse updateVisibility(UUID tenantId, String role, UUID documentId,
+                                                   DocumentVisibility visibility) {
+        if (!"TENANT_ADMIN".equals(role)) {
+            throw new AccessDeniedException("Only tenant admins can update document visibility");
+        }
+        Document document = documentRepository.findByIdAndTenantId(documentId, tenantId)
+                .orElseThrow(() -> new ResourceNotFoundException("Document not found"));
+        document.setVisibility(visibility);
+        return toStatusResponse(document);
     }
 
     @Transactional(readOnly = true)
@@ -211,7 +238,8 @@ public class DocumentService {
                 document.getId(),
                 UUID.fromString(document.getJobId()),
                 document.getFileName(),
-                document.getStatus()
+                document.getStatus(),
+                document.getVisibility()
         );
     }
 
@@ -222,6 +250,7 @@ public class DocumentService {
                 document.getFileName(),
                 document.getKnowledgeBaseId(),
                 document.getStatus(),
+                document.getVisibility(),
                 document.getChunkCount(),
                 document.getErrorMessage()
         );
@@ -236,6 +265,7 @@ public class DocumentService {
                 document.getFileSizeBytes(),
                 document.getKnowledgeBaseId(),
                 document.getStatus(),
+                document.getVisibility(),
                 document.getChunkCount(),
                 document.getErrorMessage(),
                 document.getCreatedAt()

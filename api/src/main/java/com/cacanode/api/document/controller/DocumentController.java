@@ -8,6 +8,8 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -17,6 +19,9 @@ import com.cacanode.api.common.controller.BaseController;
 import com.cacanode.api.document.dto.DocumentListItemResponse;
 import com.cacanode.api.document.dto.DocumentStatusResponse;
 import com.cacanode.api.document.dto.DocumentUploadResponse;
+import com.cacanode.api.document.dto.DocumentVisibilityUpdateRequest;
+import com.cacanode.api.document.enums.DocumentVisibility;
+import jakarta.validation.Valid;
 import com.cacanode.api.document.service.DocumentService;
 
 import jakarta.servlet.http.HttpServletRequest;
@@ -41,12 +46,15 @@ public class DocumentController extends BaseController {
     public ResponseEntity<DocumentUploadResponse> upload(
             @RequestParam("file") MultipartFile file,
             @RequestParam("knowledgeBaseId") UUID knowledgeBaseId,
+            @RequestParam("visibility") DocumentVisibility visibility,
             HttpServletRequest request
     ) {
         DocumentUploadResponse response = documentService.upload(
                 getTenantId(request),
                 getUserId(request),
+                getRole(request),
                 knowledgeBaseId,
+                visibility,
                 file
         );
         return ResponseEntity.accepted().body(response);
@@ -58,5 +66,15 @@ public class DocumentController extends BaseController {
             HttpServletRequest request
     ) {
         return documentService.get(getTenantId(request), documentId);
+    }
+
+    @PatchMapping("/{documentId}/visibility")
+    public DocumentStatusResponse updateVisibility(
+            @PathVariable UUID documentId,
+            @Valid @RequestBody DocumentVisibilityUpdateRequest body,
+            HttpServletRequest request
+    ) {
+        return documentService.updateVisibility(
+                getTenantId(request), getRole(request), documentId, body.visibility());
     }
 }

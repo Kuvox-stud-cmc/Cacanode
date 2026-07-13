@@ -2,6 +2,7 @@
 
 import {
   useEffect,
+  useCallback,
   useRef,
   useState,
   type ChangeEvent,
@@ -19,9 +20,13 @@ import {
   Sparkles,
   Square,
   Upload,
-  X,
+  Menu,
+  Plus,
+  Trash2,
+  AlertCircle,
 } from "lucide-react"
 import { AppShell } from "@/components/app/AppShell"
+import { useAuthStore } from "@/components/providers/StoreProvider"
 import { useTokenRehydration } from "@/hooks/useTokenRehydration"
 import { useApiClient } from "@/hooks/useApiClient"
 import { Button } from "@/components/ui/button"
@@ -45,9 +50,11 @@ import {
   createChatSessionApi,
   getChatMessagesApi,
   submitChatMessageApi,
+  listPlaygroundSessionsApi,
+  hidePlaygroundSessionApi,
 } from "@/lib/chat-api"
 import { getTenantWorkspaceApi } from "@/lib/workspace-api"
-import type { ChatCitation, Document, DocumentStatus, TenantWorkspace } from "@/types"
+import type { ChatCitation, Document, DocumentStatus, DocumentVisibility, PlaygroundSession, TenantWorkspace } from "@/types"
 
 type SourceStatus = DocumentStatus | "UPLOADING"
 
@@ -67,8 +74,6 @@ type ChatMessage = {
 
 type PersistedPlaygroundState = {
   sessionId: string | null
-  messages: ChatMessage[]
-  sources: SourceDocument[]
 }
 
 function playgroundStateKey(workspace: TenantWorkspace): string {
@@ -81,7 +86,7 @@ function playgroundStateKey(workspace: TenantWorkspace): string {
 }
 
 function emptyPlaygroundState(): PersistedPlaygroundState {
-  return { sessionId: null, messages: [], sources: [] }
+  return { sessionId: null }
 }
 
 function readPersistedPlaygroundState(key: string): PersistedPlaygroundState {
@@ -96,8 +101,6 @@ function readPersistedPlaygroundState(key: string): PersistedPlaygroundState {
     const restored = JSON.parse(raw) as Partial<PersistedPlaygroundState>
     return {
       sessionId: typeof restored.sessionId === "string" ? restored.sessionId : null,
-      messages: Array.isArray(restored.messages) ? restored.messages : [],
-      sources: Array.isArray(restored.sources) ? restored.sources : [],
     }
   } catch {
     window.sessionStorage.removeItem(key)
@@ -151,10 +154,12 @@ function isSupportedFile(file: File): boolean {
 
 function Playground({ authenticated }: { authenticated: boolean }) {
   const { request } = useApiClient()
+  const user = useAuthStore((state) => state.user)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const suppressRestoredComposerFocus = useRef(false)
   const canPersistStateRef = useRef(false)
   const activeChatAbortRef = useRef<AbortController | null>(null)
+  const uploadVisibilityRef = useRef<DocumentVisibility>("EMPLOYEE_ONLY")
   const [workspace, setWorkspace] = useState<TenantWorkspace | null>(null)
   const [message, setMessage] = useState("")
   const [messages, setMessages] = useState<ChatMessage[]>([])
@@ -163,6 +168,10 @@ function Playground({ authenticated }: { authenticated: boolean }) {
   const [authDialogOpen, setAuthDialogOpen] = useState(false)
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [sending, setSending] = useState(false)
+  const [history, setHistory] = useState<PlaygroundSession[]>([])
+  const [historyLoading, setHistoryLoading] = useState(false)
+  const [historyError, setHistoryError] = useState<string | null>(null)
+  const [drawerOpen, setDrawerOpen] = useState(false)
 
   const hasCompletedSource = sources.some((source) => source.status === "COMPLETED")
   const hasIndexingSource = sources.some(
@@ -171,6 +180,32 @@ function Playground({ authenticated }: { authenticated: boolean }) {
       source.status === "PENDING" ||
       source.status === "PROCESSING",
   )
+  const activeUploads = sources.filter(
+    (source) =>
+      source.status === "UPLOADING" ||
+      source.status === "PENDING" ||
+      source.status === "PROCESSING",
+  )
+
+  const loadHistory = useCallback(async (preferredSessionId?: string | null) => {
+    if (!authenticated) return
+    setHistoryLoading(true)
+    setHistoryError(null)
+    try {
+      const items = await listPlaygroundSessionsApi(request)
+      setHistory(items)
+      setSessionId((current) => {
+        const candidate = preferredSessionId ?? current
+        return candidate && items.some((item) => item.id === candidate)
+          ? candidate
+          : items[0]?.id ?? null
+      })
+    } catch (error) {
+      setHistoryError(error instanceof Error ? error.message : "Unable to load conversations")
+    } finally {
+      setHistoryLoading(false)
+    }
+  }, [authenticated, request])
 
   useEffect(() => {
     if (!authenticated) return
@@ -183,9 +218,8 @@ function Playground({ authenticated }: { authenticated: boolean }) {
         const restored = readPersistedPlaygroundState(playgroundStateKey(tenantWorkspace))
         setWorkspace(tenantWorkspace)
         setSessionId(restored.sessionId)
-        setMessages(restored.messages)
-        setSources(restored.sources)
         canPersistStateRef.current = true
+        void loadHistory(restored.sessionId)
       })
       .catch((error) => {
         if (!cancelled) {
@@ -196,7 +230,7 @@ function Playground({ authenticated }: { authenticated: boolean }) {
     return () => {
       cancelled = true
     }
-  }, [authenticated, request])
+  }, [authenticated, loadHistory, request])
 
   useEffect(() => {
     if (!authenticated || !workspace) return
@@ -239,7 +273,7 @@ function Playground({ authenticated }: { authenticated: boolean }) {
     let cancelled = false
     getChatMessagesApi(request, sessionId)
       .then((history) => {
-        if (cancelled || history.length === 0) return
+        if (cancelled) return
         setMessages(
           history
             .filter((item) => item.role === "user" || item.role === "assistant")
@@ -275,9 +309,9 @@ function Playground({ authenticated }: { authenticated: boolean }) {
     if (!authenticated || !workspace || !canPersistStateRef.current) return
     window.sessionStorage.setItem(
       playgroundStateKey(workspace),
-      JSON.stringify({ sessionId, messages, sources } satisfies PersistedPlaygroundState),
+      JSON.stringify({ sessionId } satisfies PersistedPlaygroundState),
     )
-  }, [authenticated, messages, sessionId, sources, workspace])
+  }, [authenticated, sessionId, workspace])
 
   useEffect(() => {
     if (!authenticated) return
@@ -303,6 +337,7 @@ function Playground({ authenticated }: { authenticated: boolean }) {
           return {
             ...source,
             status: result.value.status,
+            visibility: result.value.visibility,
             chunkCount: result.value.chunkCount,
             errorMessage: result.value.errorMessage,
           }
@@ -362,6 +397,36 @@ function Playground({ authenticated }: { authenticated: boolean }) {
     })
     setSessionId(session.id)
     return session.id
+  }
+
+  function startNewChat() {
+    if (sending) return
+    setSessionId(null)
+    setMessages([])
+    setMessage("")
+    setDrawerOpen(false)
+  }
+
+  function switchSession(nextSessionId: string) {
+    if (sending || nextSessionId === sessionId) return
+    setMessages([])
+    setSessionId(nextSessionId)
+    setDrawerOpen(false)
+  }
+
+  async function deleteSession(item: PlaygroundSession) {
+    if (sending || !window.confirm(`Hide “${item.title}”? The conversation will remain available for analytics.`)) return
+    try {
+      await hidePlaygroundSessionApi(request, item.id)
+      const remaining = history.filter((candidate) => candidate.id !== item.id)
+      setHistory(remaining)
+      if (sessionId === item.id) {
+        setMessages([])
+        setSessionId(remaining[0]?.id ?? null)
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to hide conversation")
+    }
   }
 
   async function submitMessage(event?: FormEvent) {
@@ -426,6 +491,7 @@ function Playground({ authenticated }: { authenticated: boolean }) {
             : item,
         ),
       )
+      await loadHistory(activeSessionId)
     } catch (error) {
       const aborted = abortController.signal.aborted
       const errorMessage = aborted
@@ -464,8 +530,9 @@ function Playground({ authenticated }: { authenticated: boolean }) {
     }
   }
 
-  function chooseUpload() {
+  function chooseUpload(visibility: DocumentVisibility) {
     if (requireAuthentication()) return
+    uploadVisibilityRef.current = visibility
     setSourceMenuOpen(false)
     fileInputRef.current?.click()
   }
@@ -493,6 +560,7 @@ function Playground({ authenticated }: { authenticated: boolean }) {
         knowledgeBaseId: workspace.knowledgeBase.id,
         status: "UPLOADING",
         uploadedAt: new Date().toISOString(),
+        visibility: uploadVisibilityRef.current,
       }
       setSources((current) => [...current, pendingSource])
 
@@ -501,6 +569,7 @@ function Playground({ authenticated }: { authenticated: boolean }) {
           request,
           file,
           workspace.knowledgeBase.id,
+          uploadVisibilityRef.current,
         )
         setSources((current) =>
           current.map((source) =>
@@ -511,6 +580,7 @@ function Playground({ authenticated }: { authenticated: boolean }) {
                   jobId: uploaded.jobId,
                   fileName: uploaded.fileName,
                   status: uploaded.status,
+                  visibility: uploaded.visibility,
                 }
               : source,
           ),
@@ -541,6 +611,31 @@ function Playground({ authenticated }: { authenticated: boolean }) {
   const sendDisabled =
     authenticated && (!workspace || !message.trim() || !hasCompletedSource || sending)
 
+  const historyPanel = (
+    <div className="flex h-full flex-col bg-slate-50">
+      <div className="border-b border-slate-200 p-3">
+        <Button className="w-full justify-start gap-2" variant="outline" disabled={sending} onClick={startNewChat}>
+          <Plus className="size-4" /> New Chat
+        </Button>
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto p-2">
+        {historyLoading ? Array.from({ length: 5 }).map((_, index) => <div key={index} className="mb-2 h-14 animate-pulse rounded-lg bg-slate-200" />) : historyError ? (
+          <div className="p-3 text-sm text-red-700"><AlertCircle className="mb-2 size-5" /><p>{historyError}</p><Button className="mt-3" size="sm" variant="outline" onClick={() => void loadHistory()}>Retry</Button></div>
+        ) : history.length === 0 ? (
+          <p className="p-4 text-center text-sm text-slate-500">Your conversations will appear here.</p>
+        ) : history.map((item) => (
+          <div key={item.id} className={cn("group mb-1 flex items-start rounded-lg", sessionId === item.id ? "bg-indigo-100 text-indigo-950" : "hover:bg-slate-200")}>
+            <button type="button" disabled={sending} onClick={() => switchSession(item.id)} className="min-w-0 flex-1 px-3 py-2 text-left disabled:cursor-not-allowed">
+              <p className="truncate text-sm font-medium">{item.title}</p>
+              <p className="mt-0.5 text-xs text-slate-500">{new Date(item.last_activity_at).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</p>
+            </button>
+            <button type="button" disabled={sending} onClick={() => void deleteSession(item)} className="m-1 rounded-md p-2 text-slate-400 opacity-0 hover:bg-white hover:text-red-600 group-hover:opacity-100 focus:opacity-100" aria-label={`Hide ${item.title}`}><Trash2 className="size-4" /></button>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+
   return (
     <div
       className={cn(
@@ -564,6 +659,12 @@ function Playground({ authenticated }: { authenticated: boolean }) {
           </Button>
         </header>
       )}
+
+      <div className="flex min-h-0 flex-1">
+        {authenticated && <aside className="hidden w-72 shrink-0 border-r border-slate-200 lg:block">{historyPanel}</aside>}
+        {authenticated && drawerOpen && <div className="fixed inset-0 z-50 lg:hidden"><button aria-label="Close conversations" className="absolute inset-0 bg-slate-950/35" onClick={() => setDrawerOpen(false)} /><aside className="relative h-full w-[min(20rem,85vw)] border-r border-slate-200 shadow-xl">{historyPanel}</aside></div>}
+        <div className="flex min-w-0 flex-1 flex-col">
+          {authenticated && <div className="flex h-11 shrink-0 items-center border-b border-slate-100 px-3 lg:hidden"><Button size="sm" variant="ghost" className="gap-2" onClick={() => setDrawerOpen(true)} disabled={sending}><Menu className="size-4" /> Conversations</Button></div>}
 
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto flex min-h-full w-full max-w-3xl flex-col px-4 py-8 sm:px-6">
@@ -641,9 +742,9 @@ function Playground({ authenticated }: { authenticated: boolean }) {
 
       <div className="shrink-0 border-t border-slate-100 bg-white px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 sm:px-6 sm:pb-5">
         <form onSubmit={submitMessage} className="mx-auto w-full max-w-3xl">
-          {sources.length > 0 && (
+          {activeUploads.length > 0 && (
             <div className="mb-2 flex gap-2 overflow-x-auto pb-1">
-              {sources.map((source) => (
+              {activeUploads.map((source) => (
                 <div
                   key={source.localId}
                   className="flex min-w-0 max-w-72 shrink-0 items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 py-2 pl-2.5 pr-1.5"
@@ -673,18 +774,6 @@ function Playground({ authenticated }: { authenticated: boolean }) {
                       {statusLabel(source.status)}
                     </span>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setSources((current) =>
-                        current.filter((item) => item.localId !== source.localId),
-                      )
-                    }
-                    className="ml-1 rounded-md p-1 text-slate-400 hover:bg-slate-200 hover:text-slate-700"
-                    aria-label={`Remove ${source.fileName}`}
-                  >
-                    <X className="size-3.5" />
-                  </button>
                 </div>
               ))}
             </div>
@@ -723,13 +812,12 @@ function Playground({ authenticated }: { authenticated: boolean }) {
                 </button>
                 {sourceMenuOpen && (
                   <div className="absolute bottom-11 left-0 z-20 w-44 rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl">
-                    <button
-                      type="button"
-                      onClick={chooseUpload}
-                      className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-100"
-                    >
-                      <Upload className="size-4" /> Upload TXT/PDF
+                    <button type="button" onClick={() => chooseUpload("EMPLOYEE_ONLY")} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-100">
+                      <Upload className="size-4" /> Upload for employees
                     </button>
+                    {user?.role === "TENANT_ADMIN" && <button type="button" onClick={() => chooseUpload("CUSTOMER_AND_EMPLOYEE")} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-100">
+                      <Upload className="size-4" /> Upload for everyone
+                    </button>}
                   </div>
                 )}
                 <input
@@ -772,6 +860,8 @@ function Playground({ authenticated }: { authenticated: boolean }) {
             Files are uploaded to CacaNode and indexed before answers are generated.
           </p>
         </form>
+      </div>
+        </div>
       </div>
 
       <Dialog open={authDialogOpen} onOpenChange={handleAuthDialogOpenChange}>

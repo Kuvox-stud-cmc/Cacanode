@@ -30,6 +30,7 @@ class QdrantVectorRetriever:
         query_vector: Sequence[float],
         limit: int,
         score_threshold: float,
+        document_ids: Sequence[str] | None = None,
     ) -> list[RetrievedChunk]:
         started_at = time.perf_counter()
         outcome = "success"
@@ -42,6 +43,12 @@ class QdrantVectorRetriever:
                         models.FieldCondition(
                             key=self._tenant_field,
                             match=models.MatchValue(value=tenant_id),
+                        ),
+                        *(
+                            [models.FieldCondition(
+                                key="document_id", match=models.MatchAny(any=list(document_ids))
+                            )]
+                            if document_ids is not None else []
                         ),
                         models.FieldCondition(
                             key=self._knowledge_base_field,

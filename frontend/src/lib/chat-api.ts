@@ -2,6 +2,7 @@ import type {
   AssistantMessageResponse,
   ChatHistoryMessageResponse,
   ChatSessionResponse,
+  PlaygroundSession,
 } from "@/types";
 import { getAiApiBase } from "@/lib/auth-api";
 import { readJsonOrThrow } from "@/lib/api-error";
@@ -22,6 +23,26 @@ export async function createChatSessionApi(
     body: JSON.stringify(payload),
   });
   return readJsonOrThrow<ChatSessionResponse>(res);
+}
+
+export async function listPlaygroundSessionsApi(
+  request: ApiRequest,
+  limit = 50,
+  offset = 0,
+): Promise<PlaygroundSession[]> {
+  const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+  const res = await request(`${getAiApiBase()}/chat/playground/sessions?${params}`);
+  return readJsonOrThrow<PlaygroundSession[]>(res);
+}
+
+export async function hidePlaygroundSessionApi(
+  request: ApiRequest,
+  sessionId: string,
+): Promise<void> {
+  const res = await request(`${getAiApiBase()}/chat/playground/sessions/${sessionId}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) await readJsonOrThrow(res);
 }
 
 export async function submitChatMessageApi(
@@ -62,6 +83,14 @@ export async function getChatMessagesApi(
   request: ApiRequest,
   sessionId: string,
 ): Promise<ChatHistoryMessageResponse[]> {
-  const res = await request(`${getAiApiBase()}/chat/sessions/${sessionId}/messages`);
-  return readJsonOrThrow<ChatHistoryMessageResponse[]>(res);
+  const messages: ChatHistoryMessageResponse[] = [];
+  let after = 0;
+  while (true) {
+    const params = new URLSearchParams({ limit: "200", after: String(after) });
+    const res = await request(`${getAiApiBase()}/chat/sessions/${sessionId}/messages?${params}`);
+    const page = await readJsonOrThrow<ChatHistoryMessageResponse[]>(res);
+    messages.push(...page);
+    if (page.length < 200) return messages;
+    after = page.at(-1)?.sequence_number ?? after;
+  }
 }

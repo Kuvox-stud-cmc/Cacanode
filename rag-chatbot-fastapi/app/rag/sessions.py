@@ -49,6 +49,16 @@ class ChatSessionStore(Protocol):
 
     def consume_message_quota(self, tenant_id: str) -> None: ...
 
+    def list_playground_sessions(
+        self, *, tenant_id: str, user_id: str, limit: int, offset: int
+    ) -> list[dict[str, Any]]: ...
+
+    def hide_playground_session(self, *, session_id: str, tenant_id: str, user_id: str) -> bool: ...
+
+    def customer_visible_document_ids(
+        self, *, tenant_id: str, knowledge_base_id: str
+    ) -> list[str]: ...
+
 
 @dataclass(slots=True)
 class StoredMessage:
@@ -67,6 +77,8 @@ class StoredSession:
 class InMemoryChatSessionStore:
     def __init__(self) -> None:
         self._sessions: dict[str, StoredSession] = {}
+        self._hidden_sessions: set[str] = set()
+        self.customer_document_ids: list[str] = []
 
     def create(
         self,
@@ -102,7 +114,11 @@ class InMemoryChatSessionStore:
 
     def get_for_tenant(self, session_id: str, tenant_id: str) -> ChatSession | None:
         stored = self._sessions.get(session_id)
-        if stored is None or stored.session.tenant_id != tenant_id:
+        if (
+            stored is None
+            or stored.session.tenant_id != tenant_id
+            or session_id in self._hidden_sessions
+        ):
             return None
         return stored.session
 
@@ -128,7 +144,11 @@ class InMemoryChatSessionStore:
         after: int | None = None,
     ) -> list[ChatMessage]:
         stored = self._sessions.get(session_id)
-        if stored is None or stored.session.tenant_id != tenant_id:
+        if (
+            stored is None
+            or stored.session.tenant_id != tenant_id
+            or session_id in self._hidden_sessions
+        ):
             return []
 
         start = after or 0
@@ -153,6 +173,53 @@ class InMemoryChatSessionStore:
 
     def consume_message_quota(self, tenant_id: str) -> None:
         del tenant_id
+
+    def list_playground_sessions(
+        self, *, tenant_id: str, user_id: str, limit: int, offset: int
+    ) -> list[dict[str, Any]]:
+        rows = []
+        for stored in self._sessions.values():
+            session = stored.session
+            if session.id in self._hidden_sessions:
+                continue
+            if (
+                session.tenant_id != tenant_id
+                or session.user_id != user_id
+                or session.channel != "EMPLOYEE_PLAYGROUND"
+            ):
+                continue
+            first = next(
+                (
+                    item.content.strip()
+                    for item in stored.messages
+                    if item.role == "user" and item.content.strip()
+                ),
+                "",
+            )
+            rows.append({
+                "id": session.id,
+                "title": first[:60] or datetime.now(UTC).strftime("%b %d, %Y"),
+                "message_count": len(stored.messages),
+                "status": "OPEN",
+                "created_at": datetime.now(UTC),
+                "last_activity_at": datetime.now(UTC),
+            })
+        return rows[offset:offset + min(max(limit, 1), 100)]
+
+    def hide_playground_session(self, *, session_id: str, tenant_id: str, user_id: str) -> bool:
+        stored = self._sessions.get(session_id)
+        if (
+            stored is None
+            or stored.session.tenant_id != tenant_id
+            or stored.session.user_id != user_id
+        ):
+            return False
+        self._hidden_sessions.add(session_id)
+        return True
+
+    def customer_visible_document_ids(self, *, tenant_id: str, knowledge_base_id: str) -> list[str]:
+        del tenant_id, knowledge_base_id
+        return list(self.customer_document_ids)
 
 
 class PostgresChatSessionStore:
@@ -267,6 +334,7 @@ class PostgresChatSessionStore:
                     WHERE id = %s
                       AND tenant_id = %s
                       AND status = 'OPEN'
+                      AND hidden_at IS NULL
                     """,
                     (session_id, tenant_id),
                 )
@@ -303,6 +371,7 @@ class PostgresChatSessionStore:
                     FROM chat_sessions
                     WHERE id = %s
                       AND tenant_id = %s
+                      AND hidden_at IS NULL
                     """,
                     (session_id, tenant_id),
                 )
@@ -322,6 +391,71 @@ class PostgresChatSessionStore:
                 )
                 rows = cur.fetchall()
         return [self._message_from_row(row) for row in rows]
+
+    def list_playground_sessions(
+        self, *, tenant_id: str, user_id: str, limit: int, offset: int
+    ) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            with conn.cursor(row_factory=self._dict_row) as cur:
+                cur.execute(
+                    """
+                    SELECT s.id,
+                           COALESCE(NULLIF(LEFT(first_message.content, 60), ''),
+                                    TO_CHAR(s.created_at, 'Mon DD, YYYY')) AS title,
+                           COUNT(m.id) AS message_count,
+                           s.status, s.created_at, s.last_activity_at
+                    FROM chat_sessions s
+                    LEFT JOIN LATERAL (
+                        SELECT BTRIM(content) AS content
+                        FROM chat_messages
+                        WHERE session_id = s.id AND role = 'user'
+                        ORDER BY sequence_number ASC
+                        LIMIT 1
+                    ) first_message ON TRUE
+                    LEFT JOIN chat_messages m ON m.session_id = s.id
+                    WHERE s.tenant_id = %s
+                      AND s.user_id = %s
+                      AND s.channel = 'EMPLOYEE_PLAYGROUND'
+                      AND s.hidden_at IS NULL
+                    GROUP BY s.id, first_message.content
+                    ORDER BY s.last_activity_at DESC, s.created_at DESC
+                    LIMIT %s OFFSET %s
+                    """,
+                    (tenant_id, user_id, min(max(limit, 1), 100), max(offset, 0)),
+                )
+                return [dict(row) for row in cur.fetchall()]
+
+    def hide_playground_session(self, *, session_id: str, tenant_id: str, user_id: str) -> bool:
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE chat_sessions
+                    SET hidden_at = NOW(), status = 'CLOSED',
+                        closed_at = COALESCE(closed_at, NOW()),
+                        updated_at = NOW()
+                    WHERE id = %s AND tenant_id = %s AND user_id = %s
+                      AND channel = 'EMPLOYEE_PLAYGROUND' AND hidden_at IS NULL
+                    """,
+                    (session_id, tenant_id, user_id),
+                )
+                updated = cur.rowcount
+            conn.commit()
+        return updated > 0
+
+    def customer_visible_document_ids(self, *, tenant_id: str, knowledge_base_id: str) -> list[str]:
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT id FROM documents
+                    WHERE tenant_id = %s AND knowledge_base_id = %s
+                      AND status = 'COMPLETED'
+                      AND visibility = 'CUSTOMER_AND_EMPLOYEE'
+                    """,
+                    (tenant_id, knowledge_base_id),
+                )
+                return [str(row[0]) for row in cur.fetchall()]
 
     def close_for_tenant(self, session_id: str, tenant_id: str) -> bool:
         with self._connect() as conn:

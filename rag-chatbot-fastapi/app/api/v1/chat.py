@@ -1,4 +1,5 @@
 from typing import Any
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, status
 from pydantic import BaseModel, Field
@@ -139,6 +140,15 @@ class ConversationDetailResponse(BaseModel):
     messages: list[ChatMessageResponse]
 
 
+class PlaygroundSessionResponse(BaseModel):
+    id: UUID
+    title: str
+    message_count: int
+    status: str
+    created_at: Any
+    last_activity_at: Any
+
+
 def get_chat_service() -> RagChatService:
     global _chat_service
     if _chat_service is None:
@@ -215,6 +225,7 @@ async def submit_message(
             tenant_id=str(tenant["tenant_id"]),
             session_id=session_id,
             content=request.content,
+            user_id=str(tenant["user_id"]),
         )
     except ChatSessionNotFoundError as exc:
         raise ApiError(
@@ -267,6 +278,7 @@ async def history(
             session_id=session_id,
             limit=limit,
             after=after,
+            user_id=str(tenant["user_id"]),
         )
     except ChatSessionNotFoundError as exc:
         raise ApiError(
@@ -294,7 +306,10 @@ async def delete_session(
     chat_service: RagChatService = chat_service_dependency,
 ) -> None:
     try:
-        chat_service.close_session(tenant_id=str(tenant["tenant_id"]), session_id=session_id)
+        chat_service.close_session(
+            tenant_id=str(tenant["tenant_id"]), session_id=session_id,
+            user_id=str(tenant["user_id"])
+        )
     except ChatSessionNotFoundError as exc:
         raise ApiError(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -306,6 +321,50 @@ async def delete_session(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             code="CHAT_SESSION_STORE_UNAVAILABLE",
             message="Chat session storage is unavailable.",
+        ) from exc
+
+
+@router.get(
+    "/playground/sessions",
+    response_model=list[PlaygroundSessionResponse],
+    responses={401: {"model": ErrorEnvelope}},
+)
+async def list_playground_sessions(
+    limit: int = 50,
+    offset: int = 0,
+    tenant: dict[str, Any] = current_tenant_dependency,
+    chat_service: RagChatService = chat_service_dependency,
+) -> list[PlaygroundSessionResponse]:
+    rows = chat_service.list_playground_sessions(
+        tenant_id=str(tenant["tenant_id"]),
+        user_id=str(tenant["user_id"]),
+        limit=limit,
+        offset=offset,
+    )
+    return [PlaygroundSessionResponse(**row) for row in rows]
+
+
+@router.delete(
+    "/playground/sessions/{session_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses={401: {"model": ErrorEnvelope}, 404: {"model": ErrorEnvelope}},
+)
+async def hide_playground_session(
+    session_id: str,
+    tenant: dict[str, Any] = current_tenant_dependency,
+    chat_service: RagChatService = chat_service_dependency,
+) -> None:
+    try:
+        chat_service.hide_playground_session(
+            tenant_id=str(tenant["tenant_id"]),
+            user_id=str(tenant["user_id"]),
+            session_id=session_id,
+        )
+    except ChatSessionNotFoundError as exc:
+        raise ApiError(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code="SESSION_NOT_FOUND",
+            message="Chat session was not found.",
         ) from exc
 
 
