@@ -16,7 +16,7 @@ import java.time.LocalDateTime;
         name = "invitations",
         indexes = {
                 @Index(name = "idx_invitation_tenant_id", columnList = "tenant_id"),
-                @Index(name = "idx_invitation_token", columnList = "token")
+                @Index(name = "idx_invitation_token_hash", columnList = "token_hash")
         }
 )
 public class Invitation extends BaseImmutableEntity {
@@ -36,8 +36,8 @@ public class Invitation extends BaseImmutableEntity {
     @Column(name = "role", nullable = false, length = 50)
     private UserRole role = UserRole.USER;
 
-    @Column(name = "token", unique = true, nullable = false)
-    private String token;
+    @Column(name = "token_hash", unique = true, nullable = false)
+    private String tokenHash;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 50)
@@ -45,4 +45,10 @@ public class Invitation extends BaseImmutableEntity {
 
     @Column(name = "expires_at", nullable = false)
     private LocalDateTime expiresAt;
+
+    @Column(name = "last_sent_at", nullable = false)
+    private LocalDateTime lastSentAt;
+
+    @Column(name = "accepted_at")
+    private LocalDateTime acceptedAt;
 }

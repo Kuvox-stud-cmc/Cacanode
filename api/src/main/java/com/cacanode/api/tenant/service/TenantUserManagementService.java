@@ -1,0 +1,307 @@
+package com.cacanode.api.tenant.service;
+
+import com.cacanode.api.auth.dto.request.AcceptInvitationRequest;
+import com.cacanode.api.auth.dto.response.AuthResponse;
+import com.cacanode.api.auth.dto.response.InvitationValidationResponse;
+import com.cacanode.api.auth.repository.RefreshTokenRepository;
+import com.cacanode.api.auth.service.AuthService;
+import com.cacanode.api.auth.service.JwtService;
+import com.cacanode.api.common.enums.LogAction;
+import com.cacanode.api.common.event.AuditLogEvent;
+import com.cacanode.api.common.event.UserInvitedEvent;
+import com.cacanode.api.common.exception.custom.BadRequestException;
+import com.cacanode.api.common.exception.custom.ConflictException;
+import com.cacanode.api.common.exception.custom.ResourceNotFoundException;
+import com.cacanode.api.tenant.dto.UserAuthDto;
+import com.cacanode.api.tenant.dto.UserManagementDtos.DirectoryResponse;
+import com.cacanode.api.tenant.dto.UserManagementDtos.InvitationResponse;
+import com.cacanode.api.tenant.dto.UserManagementDtos.MemberResponse;
+import com.cacanode.api.tenant.enums.InvitationStatus;
+import com.cacanode.api.tenant.enums.UserRole;
+import com.cacanode.api.tenant.enums.UserStatus;
+import com.cacanode.api.tenant.model.Invitation;
+import com.cacanode.api.tenant.model.User;
+import com.cacanode.api.tenant.repository.InvitationRepository;
+import com.cacanode.api.tenant.repository.UserRepository;
+import jakarta.servlet.http.HttpServletResponse;
+import lombok.RequiredArgsConstructor;
+import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.security.SecureRandom;
+import java.time.Duration;
+import java.time.LocalDateTime;
+import java.util.Base64;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+
+@Service
+@RequiredArgsConstructor
+public class TenantUserManagementService {
+    private static final Duration INVITATION_LIFETIME = Duration.ofHours(72);
+    private static final Duration RESEND_COOLDOWN = Duration.ofSeconds(60);
+    private static final SecureRandom SECURE_RANDOM = new SecureRandom();
+
+    private final UserRepository userRepository;
+    private final InvitationRepository invitationRepository;
+    private final RefreshTokenRepository refreshTokenRepository;
+    private final JwtService jwtService;
+    private final PasswordEncoder passwordEncoder;
+    private final AuthService authService;
+    private final ApplicationEventPublisher eventPublisher;
+
+    @Transactional
+    public DirectoryResponse getDirectory(UUID tenantId, UUID currentUserId) {
+        LocalDateTime now = LocalDateTime.now();
+        List<Invitation> invitations = invitationRepository.findByTenant_IdOrderByCreatedAtDesc(tenantId);
+        invitations.stream()
+                .filter(i -> i.getStatus() == InvitationStatus.PENDING && !i.getExpiresAt().isAfter(now))
+                .forEach(i -> i.setStatus(InvitationStatus.EXPIRED));
+
+        List<MemberResponse> members = userRepository.findByTenant_IdOrderByFullNameAsc(tenantId).stream()
+                .map(user -> toMember(user, currentUserId))
+                .toList();
+        List<InvitationResponse> pending = invitations.stream()
+                .filter(i -> i.getStatus() == InvitationStatus.PENDING || i.getStatus() == InvitationStatus.EXPIRED)
+                .map(this::toInvitation)
+                .toList();
+        return new DirectoryResponse(members, pending);
+    }
+
+    @Transactional
+    public InvitationResponse invite(UUID tenantId, UUID actorId, String rawEmail, UserRole role) {
+        validateManageableRole(role);
+        String email = normalizeEmail(rawEmail);
+        if (userRepository.existsByEmailIgnoreCase(email)) {
+            throw new ConflictException("An account already exists for this email");
+        }
+
+        LocalDateTime now = LocalDateTime.now();
+        invitationRepository.findFirstByTenant_IdAndEmailIgnoreCaseAndStatus(
+                tenantId, email, InvitationStatus.PENDING).ifPresent(existing -> {
+            if (existing.getExpiresAt().isAfter(now)) {
+                throw new ConflictException("A pending invitation already exists for this email");
+            }
+            existing.setStatus(InvitationStatus.EXPIRED);
+            invitationRepository.saveAndFlush(existing);
+        });
+
+        User actor = requireUser(tenantId, actorId);
+        String token = generateToken();
+        Invitation invitation = new Invitation();
+        invitation.setTenant(actor.getTenant());
+        invitation.setInvitedBy(actor);
+        invitation.setEmail(email);
+        invitation.setRole(role);
+        invitation.setTokenHash(jwtService.hashToken(token));
+        invitation.setStatus(InvitationStatus.PENDING);
+        invitation.setLastSentAt(now);
+        invitation.setExpiresAt(now.plus(INVITATION_LIFETIME));
+        invitationRepository.save(invitation);
+
+        publishInvitationEmail(invitation, token);
+        audit(tenantId, actorId, LogAction.USER_INVITE, "invitation", invitation.getId(),
+                Map.of("email", email, "role", role.name()));
+        return toInvitation(invitation);
+    }
+
+    @Transactional
+    public InvitationResponse resend(UUID tenantId, UUID actorId, UUID invitationId) {
+        Invitation invitation = requireInvitation(tenantId, invitationId);
+        if (invitation.getStatus() != InvitationStatus.PENDING
+                && invitation.getStatus() != InvitationStatus.EXPIRED) {
+            throw new BadRequestException("Only pending or expired invitations can be resent");
+        }
+        LocalDateTime now = LocalDateTime.now();
+        invitationRepository.findFirstByTenant_IdAndEmailIgnoreCaseAndStatus(
+                tenantId, invitation.getEmail(), InvitationStatus.PENDING)
+                .filter(existing -> !existing.getId().equals(invitationId))
+                .ifPresent(existing -> { throw new ConflictException(
+                        "Another pending invitation already exists for this email"); });
+        long waitSeconds = RESEND_COOLDOWN.minus(Duration.between(invitation.getLastSentAt(), now)).toSeconds();
+        if (waitSeconds > 0) {
+            throw new BadRequestException("Please wait " + waitSeconds + " seconds before resending");
+        }
+
+        String token = generateToken();
+        invitation.setTokenHash(jwtService.hashToken(token));
+        invitation.setStatus(InvitationStatus.PENDING);
+        invitation.setLastSentAt(now);
+        invitation.setExpiresAt(now.plus(INVITATION_LIFETIME));
+        invitationRepository.save(invitation);
+
+        publishInvitationEmail(invitation, token);
+        audit(tenantId, actorId, LogAction.USER_INVITATION_RESENT, "invitation", invitationId,
+                Map.of("email", invitation.getEmail()));
+        return toInvitation(invitation);
+    }
+
+    @Transactional
+    public void cancel(UUID tenantId, UUID actorId, UUID invitationId) {
+        Invitation invitation = requireInvitation(tenantId, invitationId);
+        if (invitation.getStatus() != InvitationStatus.PENDING) {
+            throw new BadRequestException("Only pending invitations can be cancelled");
+        }
+        invitation.setStatus(InvitationStatus.CANCELLED);
+        invitationRepository.save(invitation);
+        audit(tenantId, actorId, LogAction.USER_INVITATION_CANCELLED, "invitation", invitationId,
+                Map.of("email", invitation.getEmail()));
+    }
+
+    @Transactional
+    public MemberResponse updateRole(UUID tenantId, UUID actorId, UUID userId, UserRole role) {
+        validateManageableRole(role);
+        if (actorId.equals(userId)) {
+            throw new BadRequestException("You cannot change your own role");
+        }
+        User user = requireUser(tenantId, userId);
+        UserRole previousRole = user.getRole();
+        if (previousRole == UserRole.TENANT_ADMIN && role != UserRole.TENANT_ADMIN) {
+            ensureNotFinalActiveAdmin(user);
+        }
+        user.setRole(role);
+        userRepository.save(user);
+        audit(tenantId, actorId, LogAction.USER_ROLE_CHANGED, "user", userId,
+                Map.of("from", previousRole.name(), "to", role.name()));
+        return toMember(user, actorId);
+    }
+
+    @Transactional
+    public MemberResponse updateStatus(UUID tenantId, UUID actorId, UUID userId, UserStatus status) {
+        if (status != UserStatus.ACTIVE && status != UserStatus.INACTIVE) {
+            throw new BadRequestException("Status must be ACTIVE or INACTIVE");
+        }
+        if (actorId.equals(userId) && status == UserStatus.INACTIVE) {
+            throw new BadRequestException("You cannot deactivate your own account");
+        }
+        User user = requireUser(tenantId, userId);
+        if (status == UserStatus.INACTIVE && user.getRole() == UserRole.TENANT_ADMIN) {
+            ensureNotFinalActiveAdmin(user);
+        }
+        user.setStatus(status);
+        userRepository.save(user);
+        if (status == UserStatus.INACTIVE) {
+            refreshTokenRepository.revokeAllByUserId(userId);
+        }
+        audit(tenantId, actorId,
+                status == UserStatus.ACTIVE ? LogAction.USER_REACTIVATED : LogAction.USER_DEACTIVATED,
+                "user", userId, Map.of("status", status.name()));
+        return toMember(user, actorId);
+    }
+
+    @Transactional(readOnly = true)
+    public InvitationValidationResponse validateInvitation(String token) {
+        Invitation invitation = invitationRepository.findByTokenHash(jwtService.hashToken(token))
+                .orElseThrow(() -> new ResourceNotFoundException("Invitation is invalid or no longer available"));
+        validateAcceptable(invitation);
+        return new InvitationValidationResponse(invitation.getEmail(), invitation.getTenant().getName(),
+                invitation.getRole(), invitation.getExpiresAt());
+    }
+
+    @Transactional
+    public AuthResponse acceptInvitation(AcceptInvitationRequest request, HttpServletResponse response) {
+        Invitation invitation = invitationRepository.findByTokenHashForUpdate(jwtService.hashToken(request.getToken()))
+                .orElseThrow(() -> new ResourceNotFoundException("Invitation is invalid or no longer available"));
+        validateAcceptable(invitation);
+        String email = normalizeEmail(invitation.getEmail());
+        if (userRepository.existsByEmailIgnoreCase(email)) {
+            throw new ConflictException("An account already exists for this email");
+        }
+
+        User user = new User();
+        user.setTenant(invitation.getTenant());
+        user.setInvitedBy(invitation.getInvitedBy());
+        user.setEmail(email);
+        user.setFullName(request.getFullName().trim());
+        user.setPasswordHash(passwordEncoder.encode(request.getPassword()));
+        user.setRole(invitation.getRole());
+        user.setStatus(UserStatus.ACTIVE);
+        userRepository.save(user);
+
+        invitation.setStatus(InvitationStatus.ACCEPTED);
+        invitation.setAcceptedAt(LocalDateTime.now());
+        invitationRepository.save(invitation);
+
+        audit(invitation.getTenant().getId(), user.getId(), LogAction.USER_INVITATION_ACCEPTED,
+                "invitation", invitation.getId(), Map.of("email", email));
+        return authService.issueAuthTokens(toAuthDto(user), response, true);
+    }
+
+    private void validateAcceptable(Invitation invitation) {
+        if (invitation.getStatus() != InvitationStatus.PENDING) {
+            throw new ResourceNotFoundException("Invitation is invalid or no longer available");
+        }
+        if (!invitation.getExpiresAt().isAfter(LocalDateTime.now())) {
+            throw new BadRequestException("Invitation has expired");
+        }
+    }
+
+    private void ensureNotFinalActiveAdmin(User user) {
+        if (user.getStatus() == UserStatus.ACTIVE &&
+                userRepository.countByTenant_IdAndRoleAndStatus(
+                        user.getTenant().getId(), UserRole.TENANT_ADMIN, UserStatus.ACTIVE) <= 1) {
+            throw new BadRequestException("The final active tenant admin cannot be demoted or deactivated");
+        }
+    }
+
+    private void validateManageableRole(UserRole role) {
+        if (role != UserRole.TENANT_ADMIN && role != UserRole.USER) {
+            throw new BadRequestException("Role must be TENANT_ADMIN or USER");
+        }
+    }
+
+    private User requireUser(UUID tenantId, UUID userId) {
+        return userRepository.findByIdAndTenant_Id(userId, tenantId)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found"));
+    }
+
+    private Invitation requireInvitation(UUID tenantId, UUID invitationId) {
+        return invitationRepository.findByIdAndTenant_Id(invitationId, tenantId)
+                .orElseThrow(() -> new ResourceNotFoundException("Invitation not found"));
+    }
+
+    private String normalizeEmail(String email) {
+        return email == null ? "" : email.trim().toLowerCase(java.util.Locale.ROOT);
+    }
+
+    private String generateToken() {
+        byte[] bytes = new byte[32];
+        SECURE_RANDOM.nextBytes(bytes);
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
+    }
+
+    private void publishInvitationEmail(Invitation invitation, String token) {
+        eventPublisher.publishEvent(new UserInvitedEvent(this, invitation.getTenant().getId(),
+                invitation.getInvitedBy().getId(), invitation.getEmail(), invitation.getTenant().getName(),
+                invitation.getRole().name(), token, invitation.getExpiresAt()));
+    }
+
+    private void audit(UUID tenantId, UUID actorId, LogAction action, String resourceType,
+                       UUID resourceId, Map<String, Object> metadata) {
+        eventPublisher.publishEvent(AuditLogEvent.builder(this)
+                .tenantId(tenantId).userId(actorId).action(action).resourceType(resourceType)
+                .resourceId(resourceId).metadata(metadata).build());
+    }
+
+    private MemberResponse toMember(User user, UUID currentUserId) {
+        return new MemberResponse(user.getId(), user.getEmail(), user.getFullName(), user.getRole(),
+                user.getStatus(), user.getCreatedAt(), user.getLastLoginAt(), user.getId().equals(currentUserId));
+    }
+
+    private InvitationResponse toInvitation(Invitation invitation) {
+        return new InvitationResponse(invitation.getId(), invitation.getEmail(), invitation.getRole(),
+                invitation.getStatus(), invitation.getCreatedAt(), invitation.getExpiresAt(),
+                invitation.getLastSentAt());
+    }
+
+    private UserAuthDto toAuthDto(User user) {
+        return UserAuthDto.builder()
+                .userId(user.getId()).tenantId(user.getTenant().getId()).email(user.getEmail())
+                .fullName(user.getFullName()).role(user.getRole().name()).status(user.getStatus().name())
+                .plan(user.getTenant().getPlan().name()).tenantStatus(user.getTenant().getStatus().name())
+                .passwordHash(user.getPasswordHash()).build();
+    }
+}

@@ -34,9 +34,40 @@ export interface User {
   id: string;
   email: string;
   fullName: string;
-  role: "admin" | "user";
-  status: "active" | "inactive";
+  role: UserRole;
+  status: UserStatus;
   joinedAt: string;
+}
+
+export type UserRole = "TENANT_ADMIN" | "USER";
+export type UserStatus = "ACTIVE" | "INACTIVE";
+export type InvitationStatus = "PENDING" | "EXPIRED" | "CANCELLED" | "ACCEPTED";
+
+export interface TeamMember extends User {
+  lastLoginAt: string | null;
+  currentUser: boolean;
+}
+
+export interface TeamInvitation {
+  id: string;
+  email: string;
+  role: UserRole;
+  status: InvitationStatus;
+  invitedAt: string;
+  expiresAt: string;
+  lastSentAt: string;
+}
+
+export interface TeamDirectory {
+  members: TeamMember[];
+  invitations: TeamInvitation[];
+}
+
+export interface InvitationValidation {
+  email: string;
+  tenantName: string;
+  role: UserRole;
+  expiresAt: string;
 }
 
 /** Matches Spring Boot `AuthResponse.user` (JWT login/register/refresh). */
@@ -132,14 +163,6 @@ export interface ChatHistoryMessageResponse {
   sequence_number?: number | null;
 }
 
-export interface StatsCard {
-  label: string;
-  value: string | number;
-  icon: string;
-  trend: "up" | "down" | "neutral";
-  trendValue: string;
-}
-
 export interface WidgetConfig {
   displayName: string;
   welcomeMessage: string;
@@ -164,16 +187,6 @@ export interface Conversation {
   durationSeconds: number;
   status: "open" | "resolved";
   messages: Message[];
-}
-
-export interface DailyVolume {
-  date: string;
-  count: number;
-}
-
-export interface PopularQuestion {
-  question: string;
-  count: number;
 }
 
 export interface Testimonial {

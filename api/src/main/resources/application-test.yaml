@@ -16,6 +16,7 @@ app:
     from-name: CacaNode Test
     verification-link: http://localhost:3000/verify
     login-2fa-link: http://localhost:3000/verify-login
+    invitation-link: http://localhost:3000/accept-invitation
 
 spring:
   config:

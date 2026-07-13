@@ -181,6 +181,16 @@ class TimeoutChatModel(FakeChatModel):
         raise ChatModelTimeoutError("Model generation timed out")
 
 
+class TicketDraftChatModel(FakeChatModel):
+    async def complete(self, messages: Sequence[dict[str, object]]) -> str:
+        self.calls.append(messages)
+        return (
+            '{"answer":"I prepared a ticket draft for review.",'
+            '"ticketDraft":{"title":"Refund request",'
+            '"description":"Customer requested help with a refund."}}'
+        )
+
+
 def make_service(
     *,
     chunks: list[RetrievedChunk],
@@ -222,6 +232,60 @@ async def test_chat_service_returns_no_information_without_evidence() -> None:
     assert model.calls == []
     assert retriever.calls[0]["knowledge_base_id"] == "kb-1"
     assert store.get_for_tenant(session.id, "tenant-1") is not None
+
+
+@pytest.mark.asyncio
+async def test_external_chat_can_return_editable_ticket_draft_without_evidence() -> None:
+    service, store, _, model = make_service(chunks=[], model=TicketDraftChatModel())
+    session = service.create_session(
+        tenant_id="tenant-1",
+        user_id=None,
+        chatbot_id="bot-1",
+        knowledge_base_id="kb-1",
+        locale="en",
+        channel="WIDGET",
+        external_user_id="visitor-1",
+        integration_token_id="token-1",
+    )
+
+    message = await service.submit_message(
+        tenant_id="tenant-1",
+        session_id=session.id,
+        content="Please create a support ticket for my refund.",
+        integration_token_id="token-1",
+    )
+
+    assert message.content == "I prepared a ticket draft for review."
+    assert message.action == {
+        "type": "ticket_draft",
+        "title": "Refund request",
+        "description": "Customer requested help with a refund.",
+    }
+    assert len(model.calls) == 1
+    history = store.list_messages(session_id=session.id, tenant_id="tenant-1")
+    assert history[-1].action == message.action
+
+
+@pytest.mark.asyncio
+async def test_external_chat_rejects_another_integration_token() -> None:
+    service, _, _, _ = make_service(chunks=[])
+    session = service.create_session(
+        tenant_id="tenant-1",
+        user_id=None,
+        chatbot_id="bot-1",
+        knowledge_base_id="kb-1",
+        locale="en",
+        channel="CUSTOM_API",
+        integration_token_id="token-1",
+    )
+
+    with pytest.raises(ChatSessionNotFoundError):
+        await service.submit_message(
+            tenant_id="tenant-1",
+            session_id=session.id,
+            content="Can another token read this?",
+            integration_token_id="token-2",
+        )
 
 
 @pytest.mark.asyncio

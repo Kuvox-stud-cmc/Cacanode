@@ -1,5 +1,6 @@
 import type {
   AuthResponse,
+  InvitationValidation,
   LoginResponse,
   RegisterResponse,
   ResendVerificationResponse,
@@ -176,4 +177,30 @@ export async function logoutApi(): Promise<void> {
     const body = await parseJsonSafe(res);
     throw new Error(parseErrorMessage(body));
   }
+}
+
+export async function validateInvitationApi(token: string): Promise<InvitationValidation> {
+  const params = new URLSearchParams({ token });
+  const res = await fetch(`${getApiBase()}/auth/invitations/validate?${params.toString()}`, {
+    credentials: "include",
+  });
+  const body = await parseJsonSafe(res);
+  if (!res.ok) throw new Error(parseErrorMessage(body));
+  return body as InvitationValidation;
+}
+
+export async function acceptInvitationApi(payload: {
+  token: string;
+  fullName: string;
+  password: string;
+}): Promise<AuthResponse> {
+  const res = await fetch(`${getApiBase()}/auth/invitations/accept`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify(payload),
+  });
+  const body = await parseJsonSafe(res);
+  if (!res.ok) throw new Error(parseErrorMessage(body));
+  return body as AuthResponse;
 }

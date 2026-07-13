@@ -20,3 +20,7 @@ class ChatModelTimeoutError(ChatError):
 
 class ChatModelProviderError(ChatError):
     """Model provider rejected or failed the generation request."""
+
+
+class ChatQuotaExceededError(ChatError):
+    """Tenant message quota has been exhausted."""

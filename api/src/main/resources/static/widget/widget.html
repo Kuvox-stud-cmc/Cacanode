@@ -2,9 +2,177 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Title</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>CacaNode Support</title>
+    <link rel="stylesheet" href="/widget/widget.css">
 </head>
 <body>
+<main id="widget" class="widget" data-open="false">
+    <section class="panel" aria-label="Support conversation">
+        <header class="header">
+            <div>
+                <strong id="display-name">Assistant</strong>
+                <span>Online</span>
+            </div>
+            <button id="close" class="icon-button" type="button" aria-label="Close chat">&#10005;</button>
+        </header>
+        <div id="messages" class="messages" aria-live="polite"></div>
+        <form id="composer" class="composer">
+            <textarea id="message" rows="1" maxlength="32000" placeholder="Type a message" aria-label="Message"></textarea>
+            <button id="send" type="submit" aria-label="Send message">&#10148;</button>
+        </form>
+    </section>
+    <button id="launcher" class="launcher" type="button" aria-label="Open support chat">&#9993;</button>
+</main>
 
+<dialog id="ticket-dialog">
+    <form id="ticket-form" method="dialog">
+        <header>
+            <strong>Create support ticket</strong>
+            <button id="ticket-cancel" class="icon-button" type="button" aria-label="Close">&#10005;</button>
+        </header>
+        <label>Email<input id="ticket-email" type="email" maxlength="320" required></label>
+        <label>Title<input id="ticket-title" maxlength="255" required></label>
+        <label>Description<textarea id="ticket-description" rows="6" maxlength="10000" required></textarea></label>
+        <button id="ticket-submit" class="primary" type="submit">Create ticket</button>
+    </form>
+</dialog>
+
+<script>
+(function () {
+  "use strict";
+  var token = null;
+  var config = null;
+  var sessionId = null;
+  var parentOrigin = null;
+  var currentDraft = null;
+  var widget = document.getElementById("widget");
+  var messages = document.getElementById("messages");
+  var composer = document.getElementById("composer");
+  var input = document.getElementById("message");
+  var send = document.getElementById("send");
+  var dialog = document.getElementById("ticket-dialog");
+
+  function api(path, options) {
+    options = options || {};
+    options.headers = Object.assign({"Content-Type": "application/json", "Authorization": "Bearer " + token}, options.headers || {});
+    if (parentOrigin) options.headers["X-Parent-Origin"] = parentOrigin;
+    return fetch(path, options).then(async function (response) {
+      var body = response.status === 204 ? null : await response.json().catch(function () { return null; });
+      if (!response.ok) {
+        var message = body && body.error && body.error.message || body && body.message || "Request failed";
+        throw new Error(message);
+      }
+      return body;
+    });
+  }
+
+  function addMessage(role, content) {
+    var item = document.createElement("div");
+    item.className = "message " + role;
+    item.textContent = content;
+    messages.appendChild(item);
+    messages.scrollTop = messages.scrollHeight;
+  }
+
+  function setOpen(open) {
+    widget.dataset.open = open ? "true" : "false";
+    parent.postMessage({source: "cacanode-widget", type: "resize", open: open}, parentOrigin || "*");
+    if (open) input.focus();
+  }
+
+  async function initialize(incomingToken, origin) {
+    token = incomingToken;
+    parentOrigin = origin;
+    try {
+      config = await api("/api/v1/public/widget/config", {headers: {"X-Parent-Origin": parentOrigin}});
+      document.getElementById("display-name").textContent = config.displayName;
+      document.documentElement.style.setProperty("--primary", config.primaryColor);
+      parent.postMessage({source: "cacanode-widget", type: "position", position: config.position}, parentOrigin);
+      addMessage("assistant", config.welcomeMessage);
+      var visitorKey = "cacanode-visitor:" + parentOrigin;
+      var visitorId = localStorage.getItem(visitorKey);
+      if (!visitorId) {
+        visitorId = "visitor_" + crypto.randomUUID().replaceAll("-", "").slice(0, 12);
+        localStorage.setItem(visitorKey, visitorId);
+      }
+      var session = await api("/api/v1/widget/chat/sessions", {
+        method: "POST",
+        body: JSON.stringify({external_user_id: visitorId, locale: navigator.language || "en"})
+      });
+      sessionId = session.id;
+    } catch (error) {
+      addMessage("error", error.message || "The support widget is unavailable.");
+      input.disabled = true;
+      send.disabled = true;
+    }
+  }
+
+  window.addEventListener("message", function (event) {
+    if (event.source !== parent || !event.data || event.data.source !== "cacanode-host" || event.data.type !== "init") return;
+    if (token) return;
+    initialize(event.data.token, event.origin);
+  });
+
+  document.getElementById("launcher").addEventListener("click", function () { setOpen(true); });
+  document.getElementById("close").addEventListener("click", function () { setOpen(false); });
+
+  composer.addEventListener("submit", async function (event) {
+    event.preventDefault();
+    var content = input.value.trim();
+    if (!content || !sessionId || send.disabled) return;
+    addMessage("user", content);
+    input.value = "";
+    send.disabled = true;
+    try {
+      var response = await api("/api/v1/widget/chat/sessions/" + sessionId + "/messages", {
+        method: "POST",
+        body: JSON.stringify({content: content})
+      });
+      addMessage("assistant", response.content);
+      if (response.action && response.action.type === "ticket_draft") {
+        currentDraft = response.action;
+        document.getElementById("ticket-title").value = response.action.title;
+        document.getElementById("ticket-description").value = response.action.description;
+        dialog.showModal();
+      }
+    } catch (error) {
+      addMessage("error", error.message);
+    } finally {
+      send.disabled = false;
+      input.focus();
+    }
+  });
+
+  document.getElementById("ticket-cancel").addEventListener("click", function () { dialog.close(); });
+  document.getElementById("ticket-form").addEventListener("submit", async function (event) {
+    event.preventDefault();
+    var button = document.getElementById("ticket-submit");
+    button.disabled = true;
+    try {
+      var ticket = await api("/api/v1/external/tickets", {
+        method: "POST",
+        headers: {"Idempotency-Key": crypto.randomUUID()},
+        body: JSON.stringify({
+          sessionId: sessionId,
+          customerEmail: document.getElementById("ticket-email").value,
+          title: document.getElementById("ticket-title").value,
+          description: document.getElementById("ticket-description").value
+        })
+      });
+      dialog.close();
+      addMessage("assistant", "Ticket " + ticket.id.slice(0, 8) + " was created. We will follow up by email.");
+      currentDraft = null;
+    } catch (error) {
+      addMessage("error", error.message);
+      dialog.close();
+    } finally {
+      button.disabled = false;
+    }
+  });
+
+  parent.postMessage({source: "cacanode-widget", type: "ready"}, "*");
+})();
+</script>
 </body>
 </html>

@@ -1,131 +1,43 @@
 import type {
-  Document,
   User,
   Message,
-  StatsCard,
   Conversation,
-  DailyVolume,
-  PopularQuestion,
   Testimonial,
   PricingPlan,
 } from "@/types";
-
-export const mockDocuments: Document[] = [
-  {
-    id: "doc-1",
-    fileName: "Product Manual v2.3.pdf",
-    fileType: "PDF",
-    status: "COMPLETED",
-    fileSizeBytes: 2457600,
-    jobId: "job-abc1",
-    knowledgeBaseId: "kb-demo",
-    uploadedAt: "2026-04-28T10:23:00Z",
-  },
-  {
-    id: "doc-2",
-    fileName: "FAQ Knowledgebase.docx",
-    fileType: "DOCX",
-    status: "PROCESSING",
-    fileSizeBytes: 512000,
-    jobId: "job-abc2",
-    knowledgeBaseId: "kb-demo",
-    uploadedAt: "2026-04-30T14:05:00Z",
-  },
-  {
-    id: "doc-3",
-    fileName: "Return Policy 2026.pdf",
-    fileType: "PDF",
-    status: "PENDING",
-    fileSizeBytes: 204800,
-    jobId: "job-abc3",
-    knowledgeBaseId: "kb-demo",
-    uploadedAt: "2026-05-01T09:10:00Z",
-  },
-  {
-    id: "doc-4",
-    fileName: "Shipping Guide.txt",
-    fileType: "TXT",
-    status: "FAILED",
-    fileSizeBytes: 15360,
-    jobId: "job-abc4",
-    knowledgeBaseId: "kb-demo",
-    uploadedAt: "2026-05-02T16:45:00Z",
-  },
-  {
-    id: "doc-5",
-    fileName: "Warranty Terms.pdf",
-    fileType: "PDF",
-    status: "COMPLETED",
-    fileSizeBytes: 1024000,
-    jobId: "job-abc5",
-    knowledgeBaseId: "kb-demo",
-    uploadedAt: "2026-05-03T11:30:00Z",
-  },
-];
 
 export const mockUsers: User[] = [
   {
     id: "user-1",
     email: "alice@example.com",
     fullName: "Alice Johnson",
-    role: "admin",
-    status: "active",
+    role: "TENANT_ADMIN",
+    status: "ACTIVE",
     joinedAt: "2026-01-15T08:00:00Z",
   },
   {
     id: "user-2",
     email: "bob@example.com",
     fullName: "Bob Smith",
-    role: "user",
-    status: "active",
+    role: "USER",
+    status: "ACTIVE",
     joinedAt: "2026-02-20T09:30:00Z",
   },
   {
     id: "user-3",
     email: "carol@example.com",
     fullName: "Carol White",
-    role: "user",
-    status: "active",
+    role: "USER",
+    status: "ACTIVE",
     joinedAt: "2026-03-10T14:00:00Z",
   },
   {
     id: "user-4",
     email: "david@example.com",
     fullName: "David Lee",
-    role: "admin",
-    status: "inactive",
+    role: "TENANT_ADMIN",
+    status: "INACTIVE",
     joinedAt: "2026-03-25T11:15:00Z",
-  },
-];
-
-export const mockStats: StatsCard[] = [
-  {
-    label: "Total Documents",
-    value: 5,
-    icon: "FileText",
-    trend: "up",
-    trendValue: "+2 this week",
-  },
-  {
-    label: "Messages This Month",
-    value: 1243,
-    icon: "MessageSquare",
-    trend: "up",
-    trendValue: "+18% vs last month",
-  },
-  {
-    label: "Storage Used",
-    value: "2.4 GB",
-    icon: "HardDrive",
-    trend: "neutral",
-    trendValue: "of 10 GB",
-  },
-  {
-    label: "Active Users",
-    value: 4,
-    icon: "Users",
-    trend: "up",
-    trendValue: "+1 this week",
   },
 ];
 
@@ -295,32 +207,6 @@ export const mockConversations: Conversation[] = [
       { id: "m2", role: "user", content: "Thanks, I found the answer already!", timestamp: "2026-05-01T10:20:20Z" },
     ],
   },
-];
-
-function generateDailyVolume(): DailyVolume[] {
-  const data: DailyVolume[] = [];
-  const base = new Date("2026-04-05");
-  const counts = [
-    42, 57, 63, 48, 71, 89, 95, 78, 66, 54,
-    82, 91, 103, 88, 74, 61, 95, 112, 127, 98,
-    84, 73, 91, 108, 119, 103, 87, 142, 136, 121,
-  ];
-  for (let i = 0; i < 30; i++) {
-    const d = new Date(base);
-    d.setDate(base.getDate() + i);
-    data.push({ date: d.toISOString().split("T")[0], count: counts[i] });
-  }
-  return data;
-}
-
-export const mockDailyVolume: DailyVolume[] = generateDailyVolume();
-
-export const mockPopularQuestions: PopularQuestion[] = [
-  { question: "How do I cancel my subscription?", count: 234 },
-  { question: "Where can I find my invoice?", count: 189 },
-  { question: "Can I export my data?", count: 143 },
-  { question: "Does the widget support multiple languages?", count: 112 },
-  { question: "How many documents can I upload?", count: 98 },
 ];
 
 export const mockTestimonials: Testimonial[] = [

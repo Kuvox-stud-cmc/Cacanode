@@ -1,224 +1,77 @@
 "use client";
 
-import { useState } from "react";
-import { mockConversations } from "@/lib/mock-data";
-import type { Conversation } from "@/types";
-import { Card } from "@/components/ui/card";
+import { useEffect, useState } from "react";
+import { Eye, Loader2, MessageSquare } from "lucide-react";
+import toast from "react-hot-toast";
+import { useApiClient } from "@/hooks/useApiClient";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+  closeCustomerConversation,
+  getCustomerConversation,
+  listCustomerConversations,
+  type CustomerConversation,
+  type CustomerConversationDetail,
+} from "@/lib/conversations-api";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Skeleton } from "@/components/ui/skeleton";
-import { MessageSquare, Eye } from "lucide-react";
+import { Card } from "@/components/ui/card";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
-type Filter = "all" | "open" | "resolved";
-
-function StatusBadge({ status }: { status: Conversation["status"] }) {
-  return (
-    <span
-      className={`px-2 py-0.5 rounded-full text-xs font-medium ${
-        status === "open"
-          ? "bg-blue-100 text-blue-800"
-          : "bg-green-100 text-green-800"
-      }`}
-    >
-      {status}
-    </span>
-  );
-}
-
-function relativeTime(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime();
-  const mins = Math.floor(diff / 60000);
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  return `${Math.floor(hrs / 24)}d ago`;
-}
-
-function formatDuration(secs: number): string {
-  if (secs < 60) return `${secs}s`;
-  return `${Math.floor(secs / 60)}m ${secs % 60}s`;
-}
-
-function TableSkeleton() {
-  return (
-    <div className="space-y-3 p-4">
-      {Array.from({ length: 5 }).map((_, i) => (
-        <div key={i} className="flex gap-4">
-          <Skeleton className="h-5 w-28" />
-          <Skeleton className="h-5 w-12" />
-          <Skeleton className="h-5 flex-1" />
-          <Skeleton className="h-5 w-16" />
-          <Skeleton className="h-5 w-16" />
-          <Skeleton className="h-5 w-8" />
-        </div>
-      ))}
-    </div>
-  );
-}
+type Filter = "all" | "OPEN" | "CLOSED";
 
 export default function ConversationsPage() {
+  const { request } = useApiClient();
   const [filter, setFilter] = useState<Filter>("all");
-  const [loading] = useState(false);
-  const [selected, setSelected] = useState<Conversation | null>(null);
+  const [items, setItems] = useState<CustomerConversation[]>([]);
+  const [selected, setSelected] = useState<CustomerConversationDetail | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [detailLoading, setDetailLoading] = useState(false);
 
-  const filtered =
-    filter === "all"
-      ? mockConversations
-      : mockConversations.filter((c) => c.status === filter);
+  useEffect(() => {
+    let cancelled = false;
+    listCustomerConversations(request, filter === "all" ? undefined : filter)
+      .then((result) => !cancelled && setItems(result))
+      .catch((error) => toast.error(error instanceof Error ? error.message : "Unable to load conversations"))
+      .finally(() => !cancelled && setLoading(false));
+    return () => { cancelled = true; };
+  }, [filter, request]);
 
-  const filterCounts = {
-    all: mockConversations.length,
-    open: mockConversations.filter((c) => c.status === "open").length,
-    resolved: mockConversations.filter((c) => c.status === "resolved").length,
-  };
+  async function openConversation(id: string) {
+    setDetailLoading(true);
+    try {
+      setSelected(await getCustomerConversation(request, id));
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to load conversation");
+    } finally {
+      setDetailLoading(false);
+    }
+  }
+
+  async function closeConversation() {
+    if (!selected) return;
+    try {
+      await closeCustomerConversation(request, selected.id);
+      setSelected({ ...selected, status: "CLOSED", closed_at: new Date().toISOString() });
+      setItems((current) => current.map((item) => (
+        item.id === selected.id ? { ...item, status: "CLOSED" } : item
+      )));
+      toast.success("Conversation closed");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to close conversation");
+    }
+  }
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h2 className="text-xl font-semibold text-slate-800">Conversations</h2>
+      <div className="flex items-center justify-between"><h2 className="text-xl font-semibold text-slate-800">Customer Conversations</h2><p className="text-sm text-slate-500">Widget and custom API channels only</p></div>
+      <div className="flex w-fit gap-1 rounded-md bg-slate-200 p-1">
+        {(["all", "OPEN", "CLOSED"] as Filter[]).map((value) => <button key={value} type="button" onClick={() => setFilter(value)} className={`rounded px-4 py-1.5 text-sm ${filter === value ? "bg-white text-slate-900 shadow-sm" : "text-slate-600"}`}>{value === "all" ? "All" : value === "OPEN" ? "Open" : "Closed"}</button>)}
       </div>
-
-      {/* Filter tabs */}
-      <div className="flex gap-1 bg-slate-100 rounded-lg p-1 w-fit">
-        {(["all", "open", "resolved"] as Filter[]).map((f) => (
-          <button
-            key={f}
-            onClick={() => setFilter(f)}
-            className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors capitalize ${
-              filter === f
-                ? "bg-white shadow-sm text-slate-800"
-                : "text-slate-500 hover:text-slate-700"
-            }`}
-          >
-            {f}
-            <span className="ml-1.5 text-xs text-slate-400">({filterCounts[f]})</span>
-          </button>
-        ))}
-      </div>
-
-      <Card>
-        {loading ? (
-          <TableSkeleton />
-        ) : filtered.length === 0 ? (
-          <div className="py-16 text-center">
-            <MessageSquare className="w-10 h-10 text-slate-300 mx-auto mb-3" />
-            <p className="text-slate-500 font-medium">No conversations</p>
-            <p className="text-sm text-slate-400 mt-1">Conversations will appear here once visitors start chatting.</p>
-          </div>
-        ) : (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Visitor</TableHead>
-                <TableHead>Messages</TableHead>
-                <TableHead>Started</TableHead>
-                <TableHead>Duration</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead></TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {filtered.map((conv) => (
-                <TableRow key={conv.id} className="cursor-pointer hover:bg-slate-50" onClick={() => setSelected(conv)}>
-                  <TableCell>
-                    <span className="font-mono text-sm text-slate-600">{conv.visitorId}</span>
-                  </TableCell>
-                  <TableCell className="text-sm text-slate-600">{conv.messageCount}</TableCell>
-                  <TableCell className="text-sm text-slate-500">{relativeTime(conv.startedAt)}</TableCell>
-                  <TableCell className="text-sm text-slate-500">{formatDuration(conv.durationSeconds)}</TableCell>
-                  <TableCell>
-                    <StatusBadge status={conv.status} />
-                  </TableCell>
-                  <TableCell>
-                    <button
-                      onClick={(e) => { e.stopPropagation(); setSelected(conv); }}
-                      className="p-1.5 rounded hover:bg-slate-100 text-slate-400 hover:text-slate-700 transition-colors"
-                    >
-                      <Eye className="w-4 h-4" />
-                    </button>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        )}
+      <Card className="overflow-hidden">
+        {loading ? <div className="grid min-h-56 place-items-center"><Loader2 className="animate-spin text-indigo-600" /></div> : items.length === 0 ? <div className="py-16 text-center"><MessageSquare className="mx-auto mb-3 size-9 text-slate-300" /><p className="text-sm text-slate-500">No customer conversations</p></div> : <Table><TableHeader><TableRow><TableHead>Customer</TableHead><TableHead>Channel</TableHead><TableHead>Messages</TableHead><TableHead>Started</TableHead><TableHead>Status</TableHead><TableHead /></TableRow></TableHeader><TableBody>{items.map((item) => <TableRow key={item.id} className="cursor-pointer" onClick={() => void openConversation(item.id)}><TableCell><p className="font-medium">{item.customer_name || item.customer_email || item.external_user_id || "Anonymous"}</p><p className="text-xs text-slate-500">{item.customer_email}</p></TableCell><TableCell><Badge variant="outline">{item.channel === "WIDGET" ? "Widget" : "API"}</Badge></TableCell><TableCell>{item.message_count}</TableCell><TableCell>{new Date(item.created_at).toLocaleString()}</TableCell><TableCell><Badge variant="outline">{item.status}</Badge></TableCell><TableCell><Eye className="size-4 text-slate-400" /></TableCell></TableRow>)}</TableBody></Table>}
       </Card>
 
-      {/* Conversation detail dialog */}
-      <Dialog open={!!selected} onOpenChange={() => setSelected(null)}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
-            <DialogTitle>Conversation detail</DialogTitle>
-          </DialogHeader>
-
-          {selected && (
-            <div className="space-y-4">
-              <div className="flex items-center justify-between text-sm">
-                <div>
-                  <span className="text-slate-500">Visitor: </span>
-                  <span className="font-mono text-slate-700">{selected.visitorId}</span>
-                </div>
-                <StatusBadge status={selected.status} />
-              </div>
-              <div className="flex gap-4 text-xs text-slate-500">
-                <span>Started: {new Date(selected.startedAt).toLocaleString()}</span>
-                <span>Duration: {formatDuration(selected.durationSeconds)}</span>
-              </div>
-
-              <div className="border-t border-slate-100 pt-3 space-y-2 max-h-64 overflow-y-auto">
-                {selected.messages.map((msg) => (
-                  <div
-                    key={msg.id}
-                    className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
-                  >
-                    <div
-                      className={`max-w-[80%] px-3 py-2 rounded-xl text-sm ${
-                        msg.role === "user"
-                          ? "bg-indigo-600 text-white rounded-br-none"
-                          : "bg-slate-100 text-slate-700 rounded-bl-none"
-                      }`}
-                    >
-                      {msg.content}
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              <div className="flex gap-2 pt-2 border-t border-slate-100">
-                {selected.status === "open" && (
-                  <Button
-                    size="sm"
-                    className="bg-green-600 hover:bg-green-700 text-white"
-                    onClick={() => setSelected(null)}
-                  >
-                    Mark resolved
-                  </Button>
-                )}
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => setSelected(null)}
-                >
-                  Close
-                </Button>
-              </div>
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
+      <Dialog open={Boolean(selected) || detailLoading} onOpenChange={(open) => !open && setSelected(null)}><DialogContent className="max-w-2xl"><DialogHeader><DialogTitle>Conversation</DialogTitle></DialogHeader>{detailLoading && !selected ? <div className="grid min-h-52 place-items-center"><Loader2 className="animate-spin" /></div> : selected && <div className="space-y-4"><div className="flex flex-wrap items-center gap-2 text-sm"><Badge variant="outline">{selected.channel}</Badge><Badge variant="outline">{selected.status}</Badge><span className="text-slate-500">{selected.customer_email || selected.external_user_id}</span></div><div className="max-h-[55vh] space-y-2 overflow-y-auto rounded-md bg-slate-50 p-4">{selected.messages.map((message) => <div key={message.sequence_number} className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}><div className={`max-w-[82%] rounded-md px-3 py-2 text-sm ${message.role === "user" ? "bg-indigo-600 text-white" : "border bg-white text-slate-700"}`}>{message.content}</div></div>)}</div>{selected.status === "OPEN" && <Button onClick={() => void closeConversation()}>Close conversation</Button>}</div>}</DialogContent></Dialog>
     </div>
   );
 }

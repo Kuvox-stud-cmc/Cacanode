@@ -1,9 +1,14 @@
 "use client";
 
-import { mockStats, mockDocuments } from "@/lib/mock-data";
+import Link from "next/link";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useApiClient } from "@/hooks/useApiClient";
+import { useAuthStore } from "@/components/providers/StoreProvider";
+import { getDashboardSummary, type DashboardSummary } from "@/lib/usage-api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import {
   Table,
   TableBody,
@@ -22,14 +27,10 @@ import {
   TrendingUp,
   TrendingDown,
   Minus,
+  AlertCircle,
+  Inbox,
 } from "lucide-react";
-
-const iconMap: Record<string, React.ElementType> = {
-  FileText,
-  MessageSquare,
-  HardDrive,
-  Users,
-};
+import { Skeleton } from "@/components/ui/skeleton";
 
 function StatusBadge({ status }: { status: string }) {
   const classes: Record<string, string> = {
@@ -54,7 +55,8 @@ function StatusBadge({ status }: { status: string }) {
 function formatBytes(bytes: number) {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
 }
 
 function formatDate(iso: string) {
@@ -66,27 +68,63 @@ function formatDate(iso: string) {
 }
 
 export default function DashboardPage() {
+  const { request } = useApiClient();
+  const user = useAuthStore((state) => state.user);
+  const [summary, setSummary] = useState<DashboardSummary | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const loadSummary = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      setSummary(await getDashboardSummary(request));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Unable to load the dashboard");
+    } finally {
+      setLoading(false);
+    }
+  }, [request]);
+
+  useEffect(() => {
+    const task = window.setTimeout(() => void loadSummary(), 0);
+    return () => window.clearTimeout(task);
+  }, [loadSummary]);
+
+  const stats = useMemo(() => {
+    const data = summary ?? {
+      totalDocuments: 0, documentsAddedThisWeek: 0, userMessagesThisMonth: 0,
+      userMessagesPreviousMonth: 0, storedDocumentBytes: 0, storageLimitBytes: 0,
+      activeUsers: 0, activeUsersAddedThisWeek: 0,
+    };
+    const messageChange = data.userMessagesPreviousMonth === 0
+      ? 0
+      : ((data.userMessagesThisMonth - data.userMessagesPreviousMonth) / data.userMessagesPreviousMonth) * 100;
+    return [
+      { label: "Total Documents", value: data.totalDocuments.toLocaleString(), icon: FileText, trend: data.documentsAddedThisWeek > 0 ? "up" : "neutral", trendValue: `+${data.documentsAddedThisWeek} this week` },
+      { label: "Messages This Month", value: data.userMessagesThisMonth.toLocaleString(), icon: MessageSquare, trend: messageChange > 0 ? "up" : messageChange < 0 ? "down" : "neutral", trendValue: `${messageChange > 0 ? "+" : ""}${messageChange.toFixed(0)}% vs last month` },
+      { label: "Storage Used", value: formatBytes(data.storedDocumentBytes), icon: HardDrive, trend: "neutral", trendValue: `of ${formatBytes(data.storageLimitBytes)}` },
+      { label: "Active Users", value: data.activeUsers.toLocaleString(), icon: Users, trend: data.activeUsersAddedThisWeek > 0 ? "up" : "neutral", trendValue: `+${data.activeUsersAddedThisWeek} this week` },
+    ] as const;
+  }, [summary]);
+
   return (
     <div className="space-y-6">
       {/* Action buttons */}
       <div className="flex items-center justify-between">
         <h2 className="text-xl font-semibold text-slate-800">Overview</h2>
         <div className="flex gap-2">
-          <Button variant="outline" size="sm" className="gap-1.5">
-            <Upload className="w-4 h-4" />
-            Upload
-          </Button>
-          <Button size="sm" className="gap-1.5 bg-indigo-600 hover:bg-indigo-700 text-white">
-            <UserPlus className="w-4 h-4" />
-            Invite User
-          </Button>
+          <Link href="/documents" className={buttonVariants({ variant: "outline", size: "sm", className: "gap-1.5" })}><Upload className="w-4 h-4" />Upload</Link>
+          {user?.role === "TENANT_ADMIN" && <Link href="/users" className={cn(buttonVariants({ size: "sm" }), "gap-1.5 bg-indigo-600 text-white hover:bg-indigo-700")}><UserPlus className="w-4 h-4" />Invite User</Link>}
         </div>
       </div>
 
+      {error && <div role="alert" className="flex items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800"><span className="flex items-center gap-2"><AlertCircle className="size-4" />{error}</span><Button size="sm" variant="outline" onClick={() => void loadSummary()}>Retry</Button></div>}
+
       {/* Stats cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
-        {mockStats.map((stat) => {
-          const Icon = iconMap[stat.icon];
+        {loading ? Array.from({ length: 4 }).map((_, index) => <Card key={index}><CardHeader><Skeleton className="h-4 w-28" /></CardHeader><CardContent><Skeleton className="mb-2 h-8 w-20" /><Skeleton className="h-3 w-32" /></CardContent></Card>) : stats.map((stat) => {
+          const Icon = stat.icon;
           const TrendIcon =
             stat.trend === "up" ? TrendingUp : stat.trend === "down" ? TrendingDown : Minus;
           const trendColor =
@@ -132,7 +170,7 @@ export default function DashboardPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {mockDocuments.map((doc) => (
+              {loading ? Array.from({ length: 5 }).map((_, index) => <TableRow key={index}><TableCell colSpan={5}><Skeleton className="h-7 w-full" /></TableCell></TableRow>) : (summary?.recentDocuments.length ?? 0) === 0 ? <TableRow><TableCell colSpan={5} className="h-40 text-center"><Inbox className="mx-auto mb-2 size-8 text-slate-300" /><p className="font-medium text-slate-500">No documents uploaded yet</p><p className="mt-1 text-sm text-slate-400">Your latest uploads will appear here.</p></TableCell></TableRow> : summary!.recentDocuments.map((doc) => (
                 <TableRow key={doc.id}>
                   <TableCell className="font-medium">{doc.fileName}</TableCell>
                   <TableCell>

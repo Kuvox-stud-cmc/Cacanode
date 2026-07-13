@@ -1,13 +1,30 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { Check, Copy, KeyRound, Loader2, Play, Plus, RefreshCw, Trash2 } from "lucide-react";
 import toast from "react-hot-toast";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Button } from "@/components/ui/button";
+import { useApiClient } from "@/hooks/useApiClient";
+import { publicConfig } from "@/lib/public-config";
+import {
+  createIntegrationToken,
+  createWebhook,
+  deleteWebhook,
+  getWidgetSettings,
+  listIntegrationTokens,
+  listWebhooks,
+  revokeIntegrationToken,
+  rotateIntegrationToken,
+  rotateWebhookSecret,
+  testWebhook,
+  updateWidgetSettings,
+  type IntegrationScope,
+  type IntegrationToken,
+  type WebhookEndpoint,
+  type WidgetSettings,
+} from "@/lib/integrations-api";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -16,324 +33,206 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import {
-  Copy,
-  Check,
-  MessageSquare,
-  Eye,
-  EyeOff,
-  RefreshCw,
-  ExternalLink,
-} from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
-const EMBED_CODE = `<script>window.CacaNodeConfig={tenantKey:"demo-key"}</script>
-<script src="https://api.cacanode.com/widget/widget.js"></script>`;
+const WEBHOOK_EVENTS = ["conversation.started", "conversation.closed", "ticket.created"];
 
-const MOCK_API_KEY = "sk-ccn-a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6";
+function formatDate(value: string | null): string {
+  return value ? new Date(value).toLocaleString() : "Never";
+}
 
 export default function SettingsPage() {
-  const [displayName, setDisplayName] = useState("Support Bot");
-  const [welcomeMessage, setWelcomeMessage] = useState("Hello! How can I help you today?");
-  const [primaryColor, setPrimaryColor] = useState("#4f46e5");
-  const [position, setPosition] = useState<"bottom-right" | "bottom-left">("bottom-right");
+  const { request } = useApiClient();
+  const [loading, setLoading] = useState(true);
+  const [widget, setWidget] = useState<WidgetSettings | null>(null);
+  const [origins, setOrigins] = useState("");
+  const [tokens, setTokens] = useState<IntegrationToken[]>([]);
+  const [webhooks, setWebhooks] = useState<WebhookEndpoint[]>([]);
+  const [tokenDialog, setTokenDialog] = useState(false);
+  const [tokenName, setTokenName] = useState("");
+  const [tokenExpiry, setTokenExpiry] = useState("");
+  const [tokenScopes, setTokenScopes] = useState<IntegrationScope[]>(["widget:chat"]);
+  const [newSecret, setNewSecret] = useState<string | null>(null);
+  const [newSecretScopes, setNewSecretScopes] = useState<IntegrationScope[]>([]);
+  const [webhookDialog, setWebhookDialog] = useState(false);
+  const [webhookName, setWebhookName] = useState("");
+  const [webhookUrl, setWebhookUrl] = useState("");
+  const [webhookEvents, setWebhookEvents] = useState<string[]>(WEBHOOK_EVENTS);
+  const [webhookSecret, setWebhookSecret] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
   const [copied, setCopied] = useState(false);
 
-  // API Keys tab state
-  const [apiKey, setApiKey] = useState(MOCK_API_KEY);
-  const [showKey, setShowKey] = useState(false);
-  const [apiKeyCopied, setApiKeyCopied] = useState(false);
-  const [webhookUrl, setWebhookUrl] = useState("");
-  const [showRegenDialog, setShowRegenDialog] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all([getWidgetSettings(request), listIntegrationTokens(request), listWebhooks(request)])
+      .then(([widgetResult, tokenResult, webhookResult]) => {
+        if (cancelled) return;
+        setWidget(widgetResult);
+        setOrigins(widgetResult.allowedOrigins.join("\n"));
+        setTokens(tokenResult);
+        setWebhooks(webhookResult);
+      })
+      .catch((error) => toast.error(error instanceof Error ? error.message : "Unable to load settings"))
+      .finally(() => !cancelled && setLoading(false));
+    return () => { cancelled = true; };
+  }, [request]);
 
-  const copyEmbed = async () => {
-    await navigator.clipboard.writeText(EMBED_CODE);
+  const embedCode = useMemo(() => {
+    if (!newSecret || !newSecretScopes.includes("widget:chat")) return null;
+    const widgetUrl = publicConfig.widgetUrl ?? "/widget/v1/cacanode-chat.js";
+    return `<script async src="${widgetUrl}" data-token="${newSecret}"></script>`;
+  }, [newSecret, newSecretScopes]);
+
+  async function saveWidget() {
+    if (!widget) return;
+    setSaving(true);
+    try {
+      const updated = await updateWidgetSettings(request, {
+        ...widget,
+        allowedOrigins: origins.split(/[,\n]/).map((value) => value.trim()).filter(Boolean),
+      });
+      setWidget(updated);
+      setOrigins(updated.allowedOrigins.join("\n"));
+      toast.success("Widget settings saved");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to save widget settings");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function createToken() {
+    if (!tokenName.trim() || tokenScopes.length === 0) return;
+    setSaving(true);
+    try {
+      const created = await createIntegrationToken(request, {
+        name: tokenName.trim(),
+        scopes: tokenScopes,
+        expiresAt: tokenExpiry ? `${tokenExpiry}T23:59:59` : null,
+      });
+      setTokens((current) => [created.token, ...current]);
+      setNewSecret(created.secret);
+      setNewSecretScopes(created.token.scopes);
+      setTokenDialog(false);
+      setTokenName("");
+      setTokenExpiry("");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to create token");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function revokeToken(id: string) {
+    try {
+      await revokeIntegrationToken(request, id);
+      setTokens((current) => current.map((token) => (
+        token.id === id ? { ...token, revokedAt: new Date().toISOString() } : token
+      )));
+      toast.success("Token revoked");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to revoke token");
+    }
+  }
+
+  async function rotateToken(id: string) {
+    try {
+      const created = await rotateIntegrationToken(request, id);
+      setTokens((current) => [created.token, ...current.map((token) => (
+        token.id === id ? { ...token, revokedAt: new Date().toISOString() } : token
+      ))]);
+      setNewSecret(created.secret);
+      setNewSecretScopes(created.token.scopes);
+      toast.success("Token rotated");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to rotate token");
+    }
+  }
+
+  async function createWebhookEndpoint() {
+    if (!webhookName.trim() || !webhookUrl.trim() || webhookEvents.length === 0) return;
+    setSaving(true);
+    try {
+      const created = await createWebhook(request, {
+        name: webhookName.trim(), url: webhookUrl.trim(), events: webhookEvents, active: true,
+      });
+      setWebhooks((current) => [created.endpoint, ...current]);
+      setWebhookSecret(created.signingSecret);
+      setWebhookDialog(false);
+      setWebhookName("");
+      setWebhookUrl("");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to create webhook");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function copyText(value: string) {
+    await navigator.clipboard.writeText(value);
     setCopied(true);
-    toast.success("Copied to clipboard!");
-    setTimeout(() => setCopied(false), 2000);
-  };
+    window.setTimeout(() => setCopied(false), 1500);
+  }
 
-  const copyApiKey = async () => {
-    await navigator.clipboard.writeText(apiKey);
-    setApiKeyCopied(true);
-    toast.success("API key copied!");
-    setTimeout(() => setApiKeyCopied(false), 2000);
-  };
-
-  const regenerateKey = () => {
-    const newKey = "sk-ccn-" + Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
-    setApiKey(newKey);
-    setShowKey(true);
-    setShowRegenDialog(false);
-    toast.success("New API key generated!");
-  };
-
-  const maskedKey = apiKey.slice(0, 12) + "••••••••••••••••••••••••";
+  if (loading) {
+    return <div className="max-w-5xl space-y-4"><Skeleton className="h-8 w-40" /><Skeleton className="h-96 w-full" /></div>;
+  }
 
   return (
-    <div className="space-y-6 max-w-3xl">
+    <div className="max-w-5xl space-y-6">
       <h2 className="text-xl font-semibold text-slate-800">Settings</h2>
-
       <Tabs defaultValue="widget">
         <TabsList className="mb-6">
-          <TabsTrigger value="widget">Widget Config</TabsTrigger>
-          <TabsTrigger value="embed">Embed Code</TabsTrigger>
-          <TabsTrigger value="account">Account</TabsTrigger>
-          <TabsTrigger value="api">API &amp; Webhooks</TabsTrigger>
+          <TabsTrigger value="widget">Widget</TabsTrigger>
+          <TabsTrigger value="tokens">Integration Tokens</TabsTrigger>
+          <TabsTrigger value="webhooks">Webhooks</TabsTrigger>
         </TabsList>
 
-        {/* Widget Config */}
         <TabsContent value="widget">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {widget && <div className="grid gap-6 lg:grid-cols-[1fr_360px]">
             <Card>
-              <CardHeader>
-                <CardTitle className="text-base">Widget Settings</CardTitle>
-              </CardHeader>
+              <CardHeader><CardTitle className="text-base">Widget Configuration</CardTitle></CardHeader>
               <CardContent className="space-y-4">
-                <div className="space-y-1.5">
-                  <Label>Display Name</Label>
-                  <Input
-                    value={displayName}
-                    onChange={(e) => setDisplayName(e.target.value)}
-                    placeholder="Support Bot"
-                  />
+                <div className="space-y-1.5"><Label>Display name</Label><Input value={widget.displayName} onChange={(event) => setWidget({ ...widget, displayName: event.target.value })} /></div>
+                <div className="space-y-1.5"><Label>Welcome message</Label><textarea className="min-h-24 w-full rounded-md border border-slate-200 p-3 text-sm" value={widget.welcomeMessage} onChange={(event) => setWidget({ ...widget, welcomeMessage: event.target.value })} /></div>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="space-y-1.5"><Label>Primary color</Label><div className="flex gap-2"><input type="color" className="h-9 w-12" value={widget.primaryColor} onChange={(event) => setWidget({ ...widget, primaryColor: event.target.value })} /><Input value={widget.primaryColor} onChange={(event) => setWidget({ ...widget, primaryColor: event.target.value })} /></div></div>
+                  <div className="space-y-1.5"><Label>Position</Label><select className="h-9 w-full rounded-md border border-slate-200 px-3 text-sm" value={widget.position} onChange={(event) => setWidget({ ...widget, position: event.target.value as WidgetSettings["position"] })}><option value="BOTTOM_RIGHT">Bottom right</option><option value="BOTTOM_LEFT">Bottom left</option></select></div>
                 </div>
-
-                <div className="space-y-1.5">
-                  <Label>Welcome Message</Label>
-                  <textarea
-                    value={welcomeMessage}
-                    onChange={(e) => setWelcomeMessage(e.target.value)}
-                    rows={3}
-                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 resize-none"
-                    placeholder="Hello! How can I help you?"
-                  />
-                </div>
-
-                <div className="space-y-1.5">
-                  <Label>Primary Color</Label>
-                  <div className="flex items-center gap-3">
-                    <input
-                      type="color"
-                      value={primaryColor}
-                      onChange={(e) => setPrimaryColor(e.target.value)}
-                      className="h-9 w-16 rounded border border-input cursor-pointer"
-                    />
-                    <span className="text-sm text-slate-500 font-mono">{primaryColor}</span>
-                  </div>
-                </div>
-
-                <div className="space-y-1.5">
-                  <Label>Position</Label>
-                  <div className="flex gap-2">
-                    {(["bottom-right", "bottom-left"] as const).map((pos) => (
-                      <button
-                        key={pos}
-                        type="button"
-                        onClick={() => setPosition(pos)}
-                        className={`px-3 py-1.5 rounded-md text-sm border transition-colors ${
-                          position === pos
-                            ? "bg-indigo-600 text-white border-indigo-600"
-                            : "bg-white text-slate-600 border-slate-200 hover:border-indigo-400"
-                        }`}
-                      >
-                        {pos === "bottom-right" ? "Bottom Right" : "Bottom Left"}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <Button className="bg-indigo-600 hover:bg-indigo-700 text-white w-full mt-2"
-                  onClick={() => toast.success("Settings saved!")}>
-                  Save Changes
-                </Button>
+                <div className="space-y-1.5"><Label>Allowed origins</Label><textarea className="min-h-24 w-full rounded-md border border-slate-200 p-3 font-mono text-sm" value={origins} onChange={(event) => setOrigins(event.target.value)} placeholder="https://example.com" /><p className="text-xs text-amber-700">Leave empty to allow the widget on every website. Browser tokens can be inspected and consume your quota.</p></div>
+                <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={widget.active} onChange={(event) => setWidget({ ...widget, active: event.target.checked })} />Widget active</label>
+                <Button onClick={() => void saveWidget()} disabled={saving}>{saving && <Loader2 className="animate-spin" />}Save widget</Button>
               </CardContent>
             </Card>
-
-            {/* Live preview */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">Live Preview</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="relative bg-slate-100 rounded-lg h-56 overflow-hidden">
-                  <div className="p-3 space-y-1.5">
-                    <div className="h-2 bg-slate-300 rounded w-24" />
-                    <div className="h-2 bg-slate-200 rounded w-40" />
-                    <div className="h-2 bg-slate-200 rounded w-32" />
-                  </div>
-                  <div className={`absolute bottom-4 ${position === "bottom-right" ? "right-4" : "left-4"}`}>
-                    <div
-                      className="w-11 h-11 rounded-full flex items-center justify-center shadow-lg cursor-pointer"
-                      style={{ backgroundColor: primaryColor }}
-                    >
-                      <MessageSquare className="w-5 h-5 text-white" />
-                    </div>
-                  </div>
-                </div>
-                <p className="text-xs text-slate-400 text-center mt-2">
-                  Widget position: {position}
-                </p>
-              </CardContent>
-            </Card>
-          </div>
-        </TabsContent>
-
-        {/* Embed Code */}
-        <TabsContent value="embed">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Embed Code</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <p className="text-sm text-slate-500">
-                Add this snippet to your website just before the closing{" "}
-                <code className="bg-slate-100 px-1 rounded text-xs">&lt;/body&gt;</code> tag.
-              </p>
-              <div className="relative">
-                <pre className="bg-slate-900 text-slate-100 rounded-lg p-4 text-xs overflow-x-auto whitespace-pre-wrap">
-                  {EMBED_CODE}
-                </pre>
-                <button
-                  onClick={copyEmbed}
-                  className="absolute top-3 right-3 p-1.5 rounded bg-slate-700 hover:bg-slate-600 text-slate-200 transition-colors"
-                >
-                  {copied ? <Check className="w-4 h-4 text-green-400" /> : <Copy className="w-4 h-4" />}
-                </button>
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        {/* Account */}
-        <TabsContent value="account">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Account Details</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-1.5">
-                <Label>Company Name</Label>
-                <Input defaultValue="Acme Corporation" />
-              </div>
-              <div className="space-y-1.5">
-                <Label>Email</Label>
-                <Input defaultValue="admin@acmecorp.com" readOnly className="bg-slate-50" />
-              </div>
-              <div className="space-y-1.5">
-                <Label>Plan</Label>
-                <div>
-                  <Badge className="bg-yellow-100 text-yellow-800 hover:bg-yellow-100 border-yellow-200">
-                    TRIAL
-                  </Badge>
-                </div>
-              </div>
-              <Button className="bg-indigo-600 hover:bg-indigo-700 text-white"
-                onClick={() => toast.success("Settings saved!")}>
-                Save Changes
-              </Button>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        {/* API & Webhooks */}
-        <TabsContent value="api">
-          <div className="space-y-4">
-            {/* API Key */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">Tenant API Key</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="flex items-center gap-2">
-                  <code className="flex-1 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2.5 text-sm font-mono text-slate-700 truncate">
-                    {showKey ? apiKey : maskedKey}
-                  </code>
-                  <button
-                    onClick={() => setShowKey((v) => !v)}
-                    className="p-2 rounded-lg border border-slate-200 hover:bg-slate-50 text-slate-500 transition-colors shrink-0"
-                    title={showKey ? "Hide key" : "Show key"}
-                  >
-                    {showKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                  </button>
-                  <button
-                    onClick={copyApiKey}
-                    className="p-2 rounded-lg border border-slate-200 hover:bg-slate-50 text-slate-500 transition-colors shrink-0"
-                    title="Copy key"
-                  >
-                    {apiKeyCopied ? <Check className="w-4 h-4 text-green-500" /> : <Copy className="w-4 h-4" />}
-                  </button>
-                  <button
-                    onClick={() => setShowRegenDialog(true)}
-                    className="p-2 rounded-lg border border-slate-200 hover:bg-slate-50 text-slate-500 hover:text-red-500 transition-colors shrink-0"
-                    title="Regenerate key"
-                  >
-                    <RefreshCw className="w-4 h-4" />
-                  </button>
-                </div>
-                <div className="text-xs text-slate-500 flex gap-4">
-                  <span>Created: Jan 15, 2026</span>
-                  <span>Last used: 2 hours ago</span>
-                </div>
-                <p className="text-xs text-slate-400">
-                  Keep this key secret. Never expose it in client-side code.
-                </p>
-              </CardContent>
-            </Card>
-
-            {/* Webhook URL */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">Webhook Endpoint</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <p className="text-sm text-slate-500">
-                  Receive a POST request when a conversation starts, ends, or is escalated.
-                </p>
-                <div className="flex gap-2">
-                  <Input
-                    value={webhookUrl}
-                    onChange={(e) => setWebhookUrl(e.target.value)}
-                    placeholder="https://your-server.com/webhook"
-                    className="flex-1"
-                  />
-                  <Button
-                    variant="outline"
-                    onClick={() => toast.success("Webhook URL saved!")}
-                  >
-                    Save
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Docs link */}
-            <div className="flex items-center gap-2 text-sm text-indigo-600 hover:text-indigo-800 cursor-pointer">
-              <ExternalLink className="w-4 h-4" />
-              <span>View API documentation</span>
+            <div className="relative min-h-80 overflow-hidden rounded-md border bg-slate-100">
+              <div className="p-5 text-sm text-slate-500">Customer website preview</div>
+              <button type="button" className={`absolute bottom-5 ${widget.position === "BOTTOM_LEFT" ? "left-5" : "right-5"} grid size-14 place-items-center rounded-full text-white shadow-lg`} style={{ backgroundColor: widget.primaryColor }}>?</button>
             </div>
+          </div>}
+        </TabsContent>
+
+        <TabsContent value="tokens" className="space-y-4">
+          <div className="flex items-center justify-between"><p className="text-sm text-slate-500">Create separate scoped tokens for hosted widgets and server-side Chat API integrations.</p><Button onClick={() => setTokenDialog(true)}><Plus />Create token</Button></div>
+          {newSecret && <Card><CardHeader><CardTitle className="text-base">New token</CardTitle></CardHeader><CardContent className="space-y-3"><p className="text-sm text-amber-700">This value is shown once. Store it before closing this panel.</p><div className="flex gap-2"><code className="min-w-0 flex-1 overflow-x-auto rounded-md bg-slate-950 p-3 text-xs text-white">{newSecret}</code><Button variant="outline" size="icon" onClick={() => void copyText(newSecret)}>{copied ? <Check /> : <Copy />}</Button></div>{embedCode && <div className="space-y-2"><Label>Widget embed code</Label><pre className="overflow-x-auto rounded-md bg-slate-950 p-3 text-xs text-white">{embedCode}</pre><Button variant="outline" onClick={() => void copyText(embedCode)}><Copy />Copy embed code</Button></div>}</CardContent></Card>}
+          <div className="divide-y rounded-md border bg-white">
+            {tokens.map((token) => <div key={token.id} className="flex flex-wrap items-center gap-3 p-4"><KeyRound className="size-4 text-slate-400" /><div className="min-w-44 flex-1"><p className="font-medium text-slate-800">{token.name}</p><p className="font-mono text-xs text-slate-500">{token.tokenPrefix}...</p></div><div className="flex gap-1">{token.scopes.map((scope) => <Badge key={scope} variant="outline">{scope}</Badge>)}</div><div className="text-right text-xs text-slate-500"><p>Expires: {formatDate(token.expiresAt)}</p><p>Last used: {formatDate(token.lastUsedAt)}</p></div>{token.revokedAt ? <Badge variant="outline">Revoked</Badge> : <><Button variant="ghost" size="icon" title="Rotate token" onClick={() => void rotateToken(token.id)}><RefreshCw /></Button><Button variant="ghost" size="icon" title="Revoke token" onClick={() => void revokeToken(token.id)}><Trash2 /></Button></>}</div>)}
+            {tokens.length === 0 && <p className="p-8 text-center text-sm text-slate-500">No integration tokens</p>}
           </div>
+        </TabsContent>
+
+        <TabsContent value="webhooks" className="space-y-4">
+          <div className="flex items-center justify-between"><p className="text-sm text-slate-500">Receive signed conversation and ticket lifecycle events.</p><Button onClick={() => setWebhookDialog(true)}><Plus />Add endpoint</Button></div>
+          {webhookSecret && <Card><CardContent className="space-y-2 pt-6"><p className="text-sm text-amber-700">Signing secret shown once</p><div className="flex gap-2"><code className="min-w-0 flex-1 overflow-x-auto rounded-md bg-slate-950 p-3 text-xs text-white">{webhookSecret}</code><Button variant="outline" size="icon" onClick={() => void copyText(webhookSecret)}><Copy /></Button></div></CardContent></Card>}
+          <div className="divide-y rounded-md border bg-white">{webhooks.map((endpoint) => <div key={endpoint.id} className="flex flex-wrap items-center gap-3 p-4"><div className="min-w-56 flex-1"><p className="font-medium">{endpoint.name}</p><p className="truncate text-xs text-slate-500">{endpoint.url}</p></div><div className="flex flex-wrap gap-1">{endpoint.events.map((event) => <Badge key={event} variant="outline">{event}</Badge>)}</div><Badge variant="outline">{endpoint.lastDeliveryStatus ?? "Not delivered"}</Badge><Button variant="ghost" size="icon" title="Send test" onClick={async () => { await testWebhook(request, endpoint.id); toast.success("Test queued"); }}><Play /></Button><Button variant="ghost" size="icon" title="Rotate signing secret" onClick={async () => { const rotated = await rotateWebhookSecret(request, endpoint.id); setWebhookSecret(rotated.signingSecret); toast.success("Signing secret rotated"); }}><RefreshCw /></Button><Button variant="ghost" size="icon" title="Delete endpoint" onClick={async () => { await deleteWebhook(request, endpoint.id); setWebhooks((current) => current.filter((item) => item.id !== endpoint.id)); }}><Trash2 /></Button></div>)}{webhooks.length === 0 && <p className="p-8 text-center text-sm text-slate-500">No webhook endpoints</p>}</div>
         </TabsContent>
       </Tabs>
 
-      {/* Regenerate key confirmation */}
-      <Dialog open={showRegenDialog} onOpenChange={setShowRegenDialog}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Regenerate API key?</DialogTitle>
-            <DialogDescription>
-              This will immediately invalidate your current API key. Any integrations using the old key will stop working until updated.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowRegenDialog(false)}>
-              Cancel
-            </Button>
-            <Button variant="destructive" onClick={regenerateKey}>
-              Regenerate key
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <Dialog open={tokenDialog} onOpenChange={setTokenDialog}><DialogContent><DialogHeader><DialogTitle>Create integration token</DialogTitle><DialogDescription>The secret is displayed once after creation.</DialogDescription></DialogHeader><div className="space-y-4"><div className="space-y-1.5"><Label>Name</Label><Input value={tokenName} onChange={(event) => setTokenName(event.target.value)} placeholder="Production website" /></div><div className="space-y-2"><Label>Scopes</Label>{(["widget:chat", "api:chat"] as IntegrationScope[]).map((scope) => <label key={scope} className="flex items-center gap-2 text-sm"><input type="checkbox" checked={tokenScopes.includes(scope)} onChange={(event) => setTokenScopes((current) => event.target.checked ? [...current, scope] : current.filter((item) => item !== scope))} />{scope}</label>)}</div><div className="space-y-1.5"><Label>Expiry date (optional)</Label><Input type="date" value={tokenExpiry} onChange={(event) => setTokenExpiry(event.target.value)} /></div></div><DialogFooter><Button variant="outline" onClick={() => setTokenDialog(false)}>Cancel</Button><Button onClick={() => void createToken()} disabled={saving || !tokenName.trim() || tokenScopes.length === 0}>Create</Button></DialogFooter></DialogContent></Dialog>
+
+      <Dialog open={webhookDialog} onOpenChange={setWebhookDialog}><DialogContent><DialogHeader><DialogTitle>Add webhook endpoint</DialogTitle><DialogDescription>Payloads are signed with a secret displayed once.</DialogDescription></DialogHeader><div className="space-y-4"><div className="space-y-1.5"><Label>Name</Label><Input value={webhookName} onChange={(event) => setWebhookName(event.target.value)} /></div><div className="space-y-1.5"><Label>URL</Label><Input value={webhookUrl} onChange={(event) => setWebhookUrl(event.target.value)} placeholder="https://example.com/webhooks/cacanode" /></div><div className="space-y-2"><Label>Events</Label>{WEBHOOK_EVENTS.map((event) => <label key={event} className="flex items-center gap-2 text-sm"><input type="checkbox" checked={webhookEvents.includes(event)} onChange={(inputEvent) => setWebhookEvents((current) => inputEvent.target.checked ? [...current, event] : current.filter((item) => item !== event))} />{event}</label>)}</div></div><DialogFooter><Button variant="outline" onClick={() => setWebhookDialog(false)}>Cancel</Button><Button onClick={() => void createWebhookEndpoint()} disabled={saving}>Add endpoint</Button></DialogFooter></DialogContent></Dialog>
     </div>
   );
 }

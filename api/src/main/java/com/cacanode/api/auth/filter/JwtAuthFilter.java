@@ -16,6 +16,8 @@ import org.springframework.web.filter.OncePerRequestFilter;
 import com.cacanode.api.common.security.AppUserDetailsService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.cacanode.api.auth.service.JwtService;
+import com.cacanode.api.tenant.enums.UserStatus;
+import com.cacanode.api.tenant.model.User;
 
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -31,6 +33,14 @@ public class JwtAuthFilter extends OncePerRequestFilter {
 
   private final JwtService jwtService;
   private final AppUserDetailsService userDetailsService;
+
+  @Override
+  protected boolean shouldNotFilter(HttpServletRequest request) {
+    String path = request.getRequestURI();
+    return path.startsWith("/api/v1/public/")
+      || path.equals("/api/v1/external/tickets")
+      || path.startsWith("/widget/");
+  }
 
   @Override
   protected void doFilterInternal(
@@ -62,6 +72,19 @@ public class JwtAuthFilter extends OncePerRequestFilter {
         
         // 3. Load user details from database
         UserDetails userDetails = userDetailsService.loadUserByUsername(email);
+
+        if (!userDetails.isEnabled() || !userDetails.isAccountNonLocked()
+          || !userDetails.isAccountNonExpired() || !userDetails.isCredentialsNonExpired()) {
+          throw new IllegalStateException("User account is disabled");
+        }
+        if (userDetails instanceof User user) {
+          String tokenUserId = jwtService.extractUserId(token);
+          if (user.getStatus() != UserStatus.ACTIVE
+            || !user.getId().toString().equals(tokenUserId)
+            || !user.getTenant().getId().toString().equals(tenantId)) {
+            throw new IllegalStateException("User account is disabled or token scope is invalid");
+          }
+        }
 
         // 4. Build authentication token
         UsernamePasswordAuthenticationToken authentication = new UsernamePasswordAuthenticationToken(

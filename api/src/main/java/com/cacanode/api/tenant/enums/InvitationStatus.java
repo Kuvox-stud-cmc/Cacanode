@@ -1,5 +1,5 @@
 package com.cacanode.api.tenant.enums;
 
 public enum InvitationStatus {
-    PENDING, ACCEPTED, EXPIRED
+    PENDING, ACCEPTED, EXPIRED, CANCELLED
 }

@@ -1,6 +1,7 @@
 x-ai-environment: &ai-environment
   APP_ENV: ${APP_ENV:-development}
   TOKEN_KEY: ${TOKEN_KEY:-change-me-access}
+  INTEGRATION_TOKEN_PEPPER: ${INTEGRATION_TOKEN_PEPPER:-change-me-integration-pepper}
   BUSINESS_API_BASE_URL: http://business-api:8080
   POSTGRES_URL: postgresql://${POSTGRES_USER:-cacanode}:${POSTGRES_PASSWORD:-change-me}@postgres:5432/${POSTGRES_DB:-cacanode}
   REDIS_URL: redis://redis:6379/0
@@ -83,6 +84,8 @@ services:
       RABBITMQ_URL: amqp://rag_user:rag_password@rabbitmq:5672/
       COOKIE_SECURE: ${COOKIE_SECURE:-true}
       TOKEN_KEY: ${TOKEN_KEY:-change-me-access}
+      INTEGRATION_TOKEN_PEPPER: ${INTEGRATION_TOKEN_PEPPER:-change-me-integration-pepper}
+      WEBHOOK_ENCRYPTION_KEY: ${WEBHOOK_ENCRYPTION_KEY:-change-me-webhook-key}
       EXPIRY_MINS: ${EXPIRY_MINS:-15}
       EXPIRY_DAYS: ${EXPIRY_DAYS:-30}
       AI_API_GRPC_ADDRESS: static://ai-api:50051

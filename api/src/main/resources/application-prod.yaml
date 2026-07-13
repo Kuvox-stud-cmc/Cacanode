@@ -17,6 +17,12 @@ app:
     from-name: ${FROM_NAME:CacaNode}
     verification-link: ${VERIFICATION_LINK}
     login-2fa-link: ${LOGIN_2FA_LINK:https://cacanode.com/verify-login}
+    invitation-link: ${INVITATION_LINK:https://cacanode.com/accept-invitation}
+  integrations:
+    token-pepper: ${INTEGRATION_TOKEN_PEPPER}
+  webhooks:
+    encryption-key: ${WEBHOOK_ENCRYPTION_KEY}
+    allow-private-networks: false
 
 spring:
   config:

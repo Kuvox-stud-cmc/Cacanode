@@ -29,6 +29,7 @@ class Settings(BaseSettings):
 
     TOKEN_KEY: str = "development-only-secret"
     BUSINESS_API_BASE_URL: str = "http://localhost:8080"
+    INTEGRATION_TOKEN_PEPPER: str = "development-integration-token-pepper"
 
     POSTGRES_HOST: str = "localhost"
     POSTGRES_PORT: int = 5432

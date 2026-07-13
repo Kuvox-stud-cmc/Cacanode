@@ -2,7 +2,11 @@ package com.cacanode.api.notification.service;
 
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 
 import lombok.extern.slf4j.Slf4j;
 
@@ -14,16 +18,26 @@ public class EmailService {
     private final EmailProvider fallbackProvider;
     private final String verificationLink;
     private final String login2FALink;
+    private final String invitationLink;
 
+    @Autowired
     public EmailService(
             @Qualifier("sendGridEmailProvider") EmailProvider primaryProvider,
             @Qualifier("brevoEmailProvider") EmailProvider fallbackProvider,
             @Value("${app.email.verification-link}") String verificationLink,
-            @Value("${app.email.login-2fa-link:http://localhost:3000/verify-login}") String login2FALink) {
+            @Value("${app.email.login-2fa-link:http://localhost:3000/verify-login}") String login2FALink,
+            @Value("${app.email.invitation-link:http://localhost:3000/accept-invitation}") String invitationLink) {
         this.primaryProvider = primaryProvider;
         this.fallbackProvider = fallbackProvider;
         this.verificationLink = verificationLink;
         this.login2FALink = login2FALink;
+        this.invitationLink = invitationLink;
+    }
+
+    EmailService(EmailProvider primaryProvider, EmailProvider fallbackProvider,
+                 String verificationLink, String login2FALink) {
+        this(primaryProvider, fallbackProvider, verificationLink, login2FALink,
+                "http://localhost:3000/accept-invitation");
     }
 
     public void sendWelcomeEmail(String toEmail, String fullName, String companyName, String verificationToken) {
@@ -87,6 +101,39 @@ public class EmailService {
                 fullName,
                 "Login Verification - CacaNode",
                 buildLogin2FAEmailHtml(fullName, verificationToken)
+        );
+        sendWithFallback(message);
+    }
+
+    public void sendInvitationEmail(String toEmail, String tenantName, String role,
+                                    String token, LocalDateTime expiresAt) {
+        String inviteUrl = invitationLink + "?token=" + token;
+        String roleLabel = "TENANT_ADMIN".equals(role) ? "Tenant admin" : "User";
+        EmailMessage message = new EmailMessage(
+                toEmail,
+                toEmail,
+                "You're invited to join " + tenantName + " on CacaNode",
+                """
+                <!DOCTYPE html>
+                <html><head><meta charset="UTF-8"><style>
+                body { font-family: Arial, sans-serif; background:#f9f9f9; margin:0; padding:0; }
+                .container { max-width:600px; margin:40px auto; background:#fff; border-radius:8px;
+                  padding:40px; box-shadow:0 2px 8px rgba(0,0,0,.08); }
+                .logo { font-size:24px; font-weight:bold; color:#4f46e5; margin-bottom:24px; }
+                h1 { font-size:22px; color:#111827; } p { color:#6b7280; line-height:1.6; }
+                .btn { display:inline-block; padding:12px 28px; background:#4f46e5; color:#fff!important;
+                  text-decoration:none; border-radius:6px; font-weight:bold; margin:24px 0; }
+                .footer { margin-top:32px; font-size:12px; color:#9ca3af; }
+                </style></head><body><div class="container">
+                <div class="logo">CacaNode</div>
+                <h1>Join %s</h1>
+                <p>You have been invited to join <strong>%s</strong> as a <strong>%s</strong>.</p>
+                <a href="%s" class="btn">Accept invitation</a>
+                <p>If you were not expecting this invitation, you can safely ignore this email.</p>
+                <div class="footer">This link expires at %s (72 hours after it was sent).</div>
+                </div></body></html>
+                """.formatted(tenantName, tenantName, roleLabel, inviteUrl,
+                        expiresAt.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")))
         );
         sendWithFallback(message);
     }

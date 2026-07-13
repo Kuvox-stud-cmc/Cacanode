@@ -7,6 +7,7 @@ import com.cacanode.api.common.exception.custom.ResourceNotFoundException;
 import com.cacanode.api.common.exception.custom.UnauthorizedException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -20,6 +21,18 @@ import java.util.List;
 @RestControllerAdvice
 @Slf4j
 public class GlobalExceptionHandler {
+
+    @ExceptionHandler(AccessDeniedException.class)
+    @ResponseStatus(HttpStatus.FORBIDDEN)
+    public ErrorResponse handleAccessDeniedException(AccessDeniedException e, WebRequest request) {
+        return ErrorResponse.builder()
+                .timestamp(LocalDateTime.now())
+                .status(HttpStatus.FORBIDDEN.value())
+                .path(request.getDescription(false).replace("uri=", ""))
+                .error(HttpStatus.FORBIDDEN.getReasonPhrase())
+                .message("You do not have permission to perform this action")
+                .build();
+    }
 
     // 404
     @ExceptionHandler(ResourceNotFoundException.class)

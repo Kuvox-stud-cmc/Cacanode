@@ -76,4 +76,31 @@ public class NotificationService {
     }
   }
 
+  public void sendAndRecordInvitationEmail(
+      UUID tenantId,
+      String email,
+      String tenantName,
+      String role,
+      String token,
+      LocalDateTime expiresAt) {
+    Notification notification = new Notification();
+    notification.setTenantId(tenantId);
+    notification.setType(NotificationType.USER_INVITED);
+    notification.setTitle("You're invited to " + tenantName);
+    notification.setMessage("Team invitation sent to " + email);
+    notification.setStatus(NotificationStatus.PENDING);
+    notificationRepository.save(notification);
+
+    try {
+      emailService.sendInvitationEmail(email, tenantName, role, token, expiresAt);
+      notification.setStatus(NotificationStatus.SENT);
+      notification.setSentAt(LocalDateTime.now());
+    } catch (Exception e) {
+      notification.setStatus(NotificationStatus.FAILED);
+      log.error("Invitation email sending failed: {}", e.getMessage());
+    } finally {
+      notificationRepository.save(notification);
+    }
+  }
+
 }

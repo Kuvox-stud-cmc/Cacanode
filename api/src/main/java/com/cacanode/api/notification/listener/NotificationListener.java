@@ -2,6 +2,7 @@ package com.cacanode.api.notification.listener;
 
 import com.cacanode.api.common.event.Login2FARequestedEvent;
 import com.cacanode.api.common.event.UserRegisteredEvent;
+import com.cacanode.api.common.event.UserInvitedEvent;
 import com.cacanode.api.notification.service.NotificationService;
 
 import lombok.RequiredArgsConstructor;
@@ -9,6 +10,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.event.TransactionPhase;
+import org.springframework.transaction.event.TransactionalEventListener;
 
 @Slf4j(topic = "NOTIFICATION-LISTENER")
 @Component
@@ -49,6 +52,19 @@ public class NotificationListener {
         } catch (Exception e) {
             // Never let email failure break login
             log.error("Failed to send login 2FA email to {}: {}", event.getEmail(), e.getMessage());
+        }
+    }
+
+    @Async
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT, fallbackExecution = true)
+    public void handleUserInvited(UserInvitedEvent event) {
+        log.info("Sending invitation email to: {}", event.getEmail());
+        try {
+            notificationService.sendAndRecordInvitationEmail(
+                    event.getTenantId(), event.getEmail(), event.getTenantName(), event.getRole(),
+                    event.getToken(), event.getExpiresAt());
+        } catch (Exception e) {
+            log.error("Failed to send invitation email to {}: {}", event.getEmail(), e.getMessage());
         }
     }
 

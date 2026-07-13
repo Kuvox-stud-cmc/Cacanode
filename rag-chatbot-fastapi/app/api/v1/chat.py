@@ -12,6 +12,7 @@ from app.rag.chat_service import RagChatService
 from app.rag.errors import (
     ChatModelProviderError,
     ChatModelTimeoutError,
+    ChatQuotaExceededError,
     ChatSessionNotFoundError,
     ChatSessionStoreUnavailableError,
     ChatWorkspaceNotFoundError,
@@ -81,6 +82,7 @@ class AssistantMessageResponse(BaseModel):
     role: str
     content: str
     citations: list[CitationResponse] = Field(default_factory=list)
+    action: dict[str, Any] | None = None
 
     @classmethod
     def from_message(cls, message: AssistantMessage) -> "AssistantMessageResponse":
@@ -88,6 +90,7 @@ class AssistantMessageResponse(BaseModel):
             role=message.role,
             content=message.content,
             citations=[CitationResponse.from_citation(item) for item in message.citations],
+            action=message.action,
         )
 
 
@@ -96,6 +99,7 @@ class ChatMessageResponse(BaseModel):
     content: str
     citations: list[CitationResponse] = Field(default_factory=list)
     sequence_number: int | None = None
+    action: dict[str, Any] | None = None
 
     @classmethod
     def from_message(cls, message: ChatMessage) -> "ChatMessageResponse":
@@ -104,7 +108,35 @@ class ChatMessageResponse(BaseModel):
             content=message.content,
             citations=[CitationResponse.from_citation(item) for item in message.citations],
             sequence_number=message.sequence_number,
+            action=message.action,
         )
+
+
+class ConversationListItemResponse(BaseModel):
+    id: str
+    channel: str
+    external_user_id: str | None
+    customer_name: str | None
+    customer_email: str | None
+    status: str
+    message_count: int
+    created_at: Any
+    updated_at: Any
+    closed_at: Any | None
+
+
+class ConversationDetailResponse(BaseModel):
+    id: str
+    channel: str
+    external_user_id: str | None
+    customer_name: str | None
+    customer_email: str | None
+    customer_metadata: dict[str, Any]
+    status: str
+    created_at: Any
+    updated_at: Any
+    closed_at: Any | None
+    messages: list[ChatMessageResponse]
 
 
 def get_chat_service() -> RagChatService:
@@ -208,6 +240,12 @@ async def submit_message(
             code="MODEL_PROVIDER_ERROR",
             message="The model provider could not complete the request.",
         ) from exc
+    except ChatQuotaExceededError as exc:
+        raise ApiError(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            code="MESSAGE_QUOTA_EXCEEDED",
+            message="The tenant message quota has been reached.",
+        ) from exc
     return AssistantMessageResponse.from_message(message)
 
 
@@ -269,3 +307,38 @@ async def delete_session(
             code="CHAT_SESSION_STORE_UNAVAILABLE",
             message="Chat session storage is unavailable.",
         ) from exc
+
+
+@router.get("/conversations", response_model=list[ConversationListItemResponse])
+async def list_conversations(
+    conversation_status: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+    tenant: dict[str, Any] = current_tenant_dependency,
+    chat_service: RagChatService = chat_service_dependency,
+) -> list[ConversationListItemResponse]:
+    rows = chat_service.list_external_conversations(
+        tenant_id=str(tenant["tenant_id"]),
+        status=conversation_status,
+        limit=limit,
+        offset=offset,
+    )
+    return [ConversationListItemResponse(**row) for row in rows]
+
+
+@router.get("/conversations/{session_id}", response_model=ConversationDetailResponse)
+async def get_conversation(
+    session_id: str,
+    tenant: dict[str, Any] = current_tenant_dependency,
+    chat_service: RagChatService = chat_service_dependency,
+) -> ConversationDetailResponse:
+    result = chat_service.get_external_conversation(
+        tenant_id=str(tenant["tenant_id"]), session_id=session_id
+    )
+    if result is None:
+        raise ApiError(404, "CONVERSATION_NOT_FOUND", "Conversation was not found.")
+    row, messages = result
+    return ConversationDetailResponse(
+        **row,
+        messages=[ChatMessageResponse.from_message(message) for message in messages],
+    )

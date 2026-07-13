@@ -5,9 +5,10 @@ import com.cacanode.api.common.model.AuditLog;
 import com.cacanode.api.common.repository.AuditLogRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.event.TransactionPhase;
+import org.springframework.transaction.event.TransactionalEventListener;
 
 @Slf4j(topic = "AUDIT-LISTENER")
 @Component
@@ -17,7 +18,7 @@ public class AuditLogListener {
     private final AuditLogRepository auditLogRepository;
 
     @Async
-    @EventListener
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT, fallbackExecution = true)
     public void handleAuditLogEvent(AuditLogEvent event) {
         try {
             AuditLog auditLog = new AuditLog();

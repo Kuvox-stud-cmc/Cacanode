@@ -238,6 +238,11 @@ public class AuthServiceImpl implements AuthService {
             throw new UnauthorizedException("Refresh token expired");
         }
 
+        UserAuthDto user = tenantModuleApi.findUserById(stored.getUserId());
+        if (user == null || !"ACTIVE".equals(user.getStatus())) {
+            throw new UnauthorizedException("User account is disabled");
+        }
+
         boolean persistent = stored.isPersistent();
 
         // Rotate — delete old, issue new
@@ -255,11 +260,6 @@ public class AuthServiceImpl implements AuthService {
 
         // Set new cookie (same persistence as previous refresh token)
         setRefreshTokenCookie(res, newRefreshToken, persistent);
-
-        UserAuthDto user = tenantModuleApi.findUserById(stored.getUserId());
-        if (user == null) {
-            throw new UnauthorizedException("User not found");
-        }
 
         String newAccessToken = jwtService.generateAccessToken(
                 stored.getUserId(),
@@ -545,7 +545,9 @@ public class AuthServiceImpl implements AuthService {
         return false;
     }
 
-    private AuthResponse issueAuthTokens(UserAuthDto user, HttpServletResponse res, boolean persistent) {
+    @Override
+    @Transactional
+    public AuthResponse issueAuthTokens(UserAuthDto user, HttpServletResponse res, boolean persistent) {
         deleteRefreshTokensByUserId(user.getUserId());
 
         String accessToken = jwtService.generateAccessToken(

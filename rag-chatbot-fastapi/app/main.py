@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -7,11 +8,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from prometheus_client import make_asgi_app
 
 from app.api.v1.chat import router as chat_router
+from app.api.v1.external_chat import external_router, widget_router
 from app.api.v1.health import router as health_router
 from app.api.v1.ingestion import router as ingestion_router
 from app.core.config import settings
 from app.core.errors import ApiError, api_error_handler
 from app.core.middleware import RequestIdMiddleware
+from app.rag.sessions import PostgresChatSessionStore
 from app.workers.manager import WorkerManager
 
 logging.basicConfig(
@@ -28,12 +31,28 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         manager = WorkerManager(settings)
         await manager.start()
     app.state.worker_manager = manager
+    lifecycle_task = asyncio.create_task(_close_idle_customer_sessions())
     logger.info("Cacanode AI API started with worker mode %s", settings.WORKER_MODE)
     try:
         yield
     finally:
+        lifecycle_task.cancel()
+        try:
+            await lifecycle_task
+        except asyncio.CancelledError:
+            pass
         if manager:
             await manager.stop()
+
+
+async def _close_idle_customer_sessions() -> None:
+    store = PostgresChatSessionStore(settings.POSTGRES_URL)
+    while True:
+        try:
+            await asyncio.to_thread(store.close_idle_external, 30)
+        except Exception:
+            logger.exception("Unable to close idle customer chat sessions")
+        await asyncio.sleep(60)
 
 
 def create_app() -> FastAPI:
@@ -55,6 +74,8 @@ def create_app() -> FastAPI:
 
     application.include_router(health_router)
     application.include_router(chat_router, prefix="/api/v1")
+    application.include_router(widget_router, prefix="/api/v1")
+    application.include_router(external_router, prefix="/api/v1")
     application.include_router(ingestion_router, prefix="/api/v1")
 
     # Temporary compatibility routes for the original prototype.

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import json
 import logging
+import re
 import time
 from collections.abc import Sequence
-from typing import Protocol
+from typing import Any, Protocol
 
 from app.core.config import Settings
 from app.core.metrics import AI_RAG_ANSWER_SECONDS
@@ -58,10 +60,16 @@ class RagChatService:
         self,
         *,
         tenant_id: str,
-        user_id: str,
+        user_id: str | None,
         chatbot_id: str,
         knowledge_base_id: str,
         locale: str,
+        channel: str = "EMPLOYEE_PLAYGROUND",
+        external_user_id: str | None = None,
+        customer_name: str | None = None,
+        customer_email: str | None = None,
+        customer_metadata: dict[str, Any] | None = None,
+        integration_token_id: str | None = None,
     ) -> ChatSession:
         return self._sessions.create(
             tenant_id=tenant_id,
@@ -69,6 +77,12 @@ class RagChatService:
             chatbot_id=chatbot_id,
             knowledge_base_id=knowledge_base_id,
             locale=locale,
+            channel=channel,
+            external_user_id=external_user_id,
+            customer_name=customer_name,
+            customer_email=customer_email,
+            customer_metadata=customer_metadata,
+            integration_token_id=integration_token_id,
         )
 
     def list_messages(
@@ -78,9 +92,15 @@ class RagChatService:
         session_id: str,
         limit: int = 50,
         after: int | None = None,
+        integration_token_id: str | None = None,
     ) -> list[ChatMessage]:
         session = self._sessions.get_for_tenant(session_id, tenant_id)
         if session is None:
+            raise ChatSessionNotFoundError(session_id)
+        if (
+            integration_token_id is not None
+            and session.integration_token_id != integration_token_id
+        ):
             raise ChatSessionNotFoundError(session_id)
         return self._sessions.list_messages(
             session_id=session_id,
@@ -89,7 +109,40 @@ class RagChatService:
             after=after,
         )
 
-    def close_session(self, *, tenant_id: str, session_id: str) -> None:
+    def close_session(
+        self,
+        *,
+        tenant_id: str,
+        session_id: str,
+        integration_token_id: str | None = None,
+    ) -> None:
+        session = self._sessions.get_for_tenant(session_id, tenant_id)
+        if session is None or (
+            integration_token_id is not None
+            and session.integration_token_id != integration_token_id
+        ):
+            raise ChatSessionNotFoundError(session_id)
+
+    def list_external_conversations(
+        self,
+        *,
+        tenant_id: str,
+        status: str | None,
+        limit: int,
+        offset: int,
+    ) -> list[dict[str, Any]]:
+        method = getattr(self._sessions, "list_external_conversations", None)
+        if method is None:
+            return []
+        return method(tenant_id=tenant_id, status=status, limit=limit, offset=offset)
+
+    def get_external_conversation(
+        self, *, tenant_id: str, session_id: str
+    ) -> tuple[dict[str, Any], list[ChatMessage]] | None:
+        method = getattr(self._sessions, "get_external_conversation", None)
+        if method is None:
+            return None
+        return method(tenant_id=tenant_id, session_id=session_id)
         if not self._sessions.close_for_tenant(session_id, tenant_id):
             raise ChatSessionNotFoundError(session_id)
 
@@ -99,6 +152,7 @@ class RagChatService:
         tenant_id: str,
         session_id: str,
         content: str,
+        integration_token_id: str | None = None,
     ) -> AssistantMessage:
         total_started_at = time.perf_counter()
         outcome = "success"
@@ -122,7 +176,14 @@ class RagChatService:
             if session is None:
                 outcome = "error"
                 raise ChatSessionNotFoundError(session_id)
+            if (
+                integration_token_id is not None
+                and session.integration_token_id != integration_token_id
+            ):
+                outcome = "error"
+                raise ChatSessionNotFoundError(session_id)
 
+            self._sessions.consume_message_quota(tenant_id)
             self._sessions.add_user_message(session.id, content)
 
             embedding_started_at = time.perf_counter()
@@ -165,7 +226,8 @@ class RagChatService:
 
             selected = chunks[: min(self._settings.FINAL_CONTEXT_TOP_K, 5)]
             chunk_count = len(selected)
-            if not selected:
+            is_external = session.channel in {"WIDGET", "CUSTOM_API"}
+            if not selected and not is_external:
                 message = AssistantMessage(role="assistant", content=NO_INFORMATION_RESPONSE)
                 self._sessions.add_assistant_message(session.id, message)
                 return message
@@ -174,9 +236,21 @@ class RagChatService:
             llm_started_at = time.perf_counter()
             llm_outcome = "success"
             try:
-                answer = (
+                raw_answer = (
                     await self._chat_model.complete(
-                        self._prompt_messages(
+                        self._external_prompt_messages(
+                            question=content,
+                            locale=session.locale,
+                            chunks=selected,
+                            citations=citations,
+                            history=self._sessions.list_messages(
+                                session_id=session.id,
+                                tenant_id=tenant_id,
+                                limit=20,
+                            ),
+                        )
+                        if is_external
+                        else self._prompt_messages(
                             question=content,
                             locale=session.locale,
                             chunks=selected,
@@ -200,7 +274,14 @@ class RagChatService:
                     outcome=llm_outcome,
                 ).observe(llm_seconds)
 
-            message = AssistantMessage(role="assistant", content=answer, citations=citations)
+            answer, action = (
+                self._parse_external_answer(raw_answer)
+                if is_external
+                else (raw_answer, None)
+            )
+            message = AssistantMessage(
+                role="assistant", content=answer, citations=citations, action=action
+            )
             self._sessions.add_assistant_message(session.id, message)
             return message
         except ChatModelTimeoutError:
@@ -275,6 +356,72 @@ class RagChatService:
                 "content": f"Sources:\n{sources}\n\nQuestion:\n{question}",
             },
         ]
+
+    def _external_prompt_messages(
+        self,
+        *,
+        question: str,
+        locale: str,
+        chunks: list[RetrievedChunk],
+        citations: list[Citation],
+        history: list[ChatMessage],
+    ) -> list[dict[str, object]]:
+        sources = "\n\n".join(
+            f"[{citation.id}] {chunk.source_name}\n{chunk.text}"
+            for chunk, citation in zip(chunks, citations, strict=True)
+        ) or "No relevant tenant sources were found."
+        transcript = "\n".join(
+            f"{message.role}: {message.content}" for message in history[-20:]
+        )[-8000:]
+        return [
+            {
+                "role": "system",
+                "content": (
+                    "Return only valid JSON with keys answer and ticketDraft. "
+                    "ticketDraft must be null unless the customer explicitly asks to create, open, "
+                    "or submit a support ticket. For an explicit request, ticketDraft must contain "
+                    "a concise title and a useful description generated from the conversation. "
+                    "Do not say the ticket has been created; say a draft is ready for review. "
+                    "For knowledge questions, answer only from supplied sources and cite claims "
+                    "with "
+                    "[S1], [S2], etc. If sources are insufficient, say so. "
+                    f"Respond in locale {locale}."
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"Conversation:\n{transcript}\n\nSources:\n{sources}\n\n"
+                    f"Latest customer message:\n{question}\n\n"
+                    'JSON shape: {"answer":"...","ticketDraft":null} or '
+                    '{"answer":"...","ticketDraft":{"title":"...","description":"..."}}'
+                ),
+            },
+        ]
+
+    def _parse_external_answer(
+        self, raw_answer: str
+    ) -> tuple[str, dict[str, Any] | None]:
+        cleaned = raw_answer.strip()
+        if cleaned.startswith("```"):
+            cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", cleaned, flags=re.IGNORECASE)
+        try:
+            payload = json.loads(cleaned)
+            answer = str(payload.get("answer", "")).strip()
+            draft = payload.get("ticketDraft")
+            if isinstance(draft, dict):
+                title = str(draft.get("title", "Support request")).strip() or "Support request"
+                description = str(draft.get("description", "")).strip()
+                if description:
+                    return answer or "A support ticket draft is ready for review.", {
+                        "type": "ticket_draft",
+                        "title": title[:255],
+                        "description": description[:10000],
+                    }
+            return answer or NO_INFORMATION_RESPONSE, None
+        except (json.JSONDecodeError, TypeError, ValueError):
+            logger.warning("external_chat_structured_response_invalid")
+            return raw_answer or NO_INFORMATION_RESPONSE, None
 
     def _citations(self, chunks: list[RetrievedChunk]) -> list[Citation]:
         return [

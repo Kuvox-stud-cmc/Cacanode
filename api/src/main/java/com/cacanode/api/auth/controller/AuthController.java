@@ -1,5 +1,6 @@
 package com.cacanode.api.auth.controller;
 
+import com.cacanode.api.auth.dto.request.AcceptInvitationRequest;
 import com.cacanode.api.auth.dto.request.LoginRequest;
 import com.cacanode.api.auth.dto.request.RegisterRequest;
 import com.cacanode.api.auth.dto.request.ResendLogin2FARequest;
@@ -7,10 +8,12 @@ import com.cacanode.api.auth.dto.request.ResendVerificationRequest;
 import com.cacanode.api.auth.dto.request.VerifyEmailRequest;
 import com.cacanode.api.auth.dto.request.VerifyLogin2FARequest;
 import com.cacanode.api.auth.dto.response.AuthResponse;
+import com.cacanode.api.auth.dto.response.InvitationValidationResponse;
 import com.cacanode.api.auth.dto.response.RegisterResponse;
 import com.cacanode.api.auth.dto.response.ResendVerificationResponse;
 import com.cacanode.api.auth.service.AuthService;
 import com.cacanode.api.common.exception.custom.UnauthorizedException;
+import com.cacanode.api.tenant.service.TenantUserManagementService;
 
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletResponse;
@@ -19,9 +22,11 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.CookieValue;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @Tag(name = "Authentication", description = "Endpoints for user registration, login, token refresh, and logout")
@@ -31,6 +36,19 @@ import org.springframework.web.bind.annotation.RestController;
 public class AuthController {
 
         private final AuthService authService;
+        private final TenantUserManagementService userManagementService;
+
+        @GetMapping("/invitations/validate")
+        public InvitationValidationResponse validateInvitation(@RequestParam String token) {
+                return userManagementService.validateInvitation(token);
+        }
+
+        @PostMapping("/invitations/accept")
+        public ResponseEntity<AuthResponse> acceptInvitation(
+                        @Valid @RequestBody AcceptInvitationRequest request,
+                        HttpServletResponse response) {
+                return ResponseEntity.ok(userManagementService.acceptInvitation(request, response));
+        }
 
         @PostMapping("/register")
         public ResponseEntity<RegisterResponse> register(
