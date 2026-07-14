@@ -1,6 +1,7 @@
 package com.cacanode.api.tenant.model;
 
 import com.cacanode.api.common.model.BaseEntity;
+import com.cacanode.api.tenant.CustomerAnswerPromptDefaults;
 import com.cacanode.api.tenant.enums.TenantPlan;
 import com.cacanode.api.tenant.enums.TenantStatus;
 import jakarta.persistence.*;
@@ -47,5 +48,8 @@ public class Tenant extends BaseEntity {
 
     @Column(name = "max_storage_mb", nullable = false)
     private int maxStorageMb = 5120;
+
+    @Column(name = "customer_answer_prompt", nullable = false, columnDefinition = "TEXT")
+    private String customerAnswerPrompt = CustomerAnswerPromptDefaults.PLATFORM_DEFAULT;
 
 }

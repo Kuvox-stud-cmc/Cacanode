@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from datetime import UTC, datetime
 from typing import Any, Protocol
 from uuid import uuid4
@@ -11,6 +11,7 @@ from app.rag.errors import (
     ChatWorkspaceNotFoundError,
 )
 from app.rag.models import AssistantMessage, ChatMessage, ChatSession, Citation
+from app.rag.prompts import DEFAULT_CUSTOMER_ANSWER_PROMPT
 
 
 class ChatSessionStore(Protocol):
@@ -78,7 +79,11 @@ class InMemoryChatSessionStore:
     def __init__(self) -> None:
         self._sessions: dict[str, StoredSession] = {}
         self._hidden_sessions: set[str] = set()
+        self._customer_answer_prompts: dict[str, str] = {}
         self.customer_document_ids: list[str] = []
+
+    def set_customer_answer_prompt(self, tenant_id: str, prompt: str) -> None:
+        self._customer_answer_prompts[tenant_id] = prompt
 
     def create(
         self,
@@ -108,6 +113,9 @@ class InMemoryChatSessionStore:
             customer_name=customer_name,
             customer_email=customer_email,
             integration_token_id=integration_token_id,
+            customer_answer_prompt=self._customer_answer_prompts.get(
+                tenant_id, DEFAULT_CUSTOMER_ANSWER_PROMPT
+            ),
         )
         self._sessions[session.id] = StoredSession(session=session)
         return session
@@ -120,7 +128,12 @@ class InMemoryChatSessionStore:
             or session_id in self._hidden_sessions
         ):
             return None
-        return stored.session
+        return replace(
+            stored.session,
+            customer_answer_prompt=self._customer_answer_prompts.get(
+                tenant_id, DEFAULT_CUSTOMER_ANSWER_PROMPT
+            ),
+        )
 
     def add_user_message(self, session_id: str, content: str) -> None:
         self._sessions[session_id].messages.append(StoredMessage(role="user", content=content))
@@ -327,14 +340,16 @@ class PostgresChatSessionStore:
             with conn.cursor(row_factory=self._dict_row) as cur:
                 cur.execute(
                     """
-                    SELECT id, tenant_id, user_id, chatbot_id, knowledge_base_id, locale,
-                           channel, external_user_id, customer_name, customer_email,
-                           integration_token_id
-                    FROM chat_sessions
-                    WHERE id = %s
-                      AND tenant_id = %s
-                      AND status = 'OPEN'
-                      AND hidden_at IS NULL
+                    SELECT s.id, s.tenant_id, s.user_id, s.chatbot_id,
+                           s.knowledge_base_id, s.locale, s.channel, s.external_user_id,
+                           s.customer_name, s.customer_email, s.integration_token_id,
+                           t.customer_answer_prompt
+                    FROM chat_sessions s
+                    JOIN tenants t ON t.id = s.tenant_id
+                    WHERE s.id = %s
+                      AND s.tenant_id = %s
+                      AND s.status = 'OPEN'
+                      AND s.hidden_at IS NULL
                     """,
                     (session_id, tenant_id),
                 )
@@ -711,6 +726,7 @@ class PostgresChatSessionStore:
                 if row["integration_token_id"] is not None
                 else None
             ),
+            customer_answer_prompt=str(row["customer_answer_prompt"] or ""),
         )
 
     def _message_from_row(self, row: dict[str, Any]) -> ChatMessage:

@@ -11,8 +11,13 @@ from app.core.config import Settings
 from app.ingestion.embedding import OllamaEmbeddingClient
 from app.ingestion.errors import TransientIngestionError
 from app.rag.chat_service import NO_INFORMATION_RESPONSE, RagChatService
-from app.rag.errors import ChatModelTimeoutError, ChatSessionNotFoundError
-from app.rag.models import RetrievedChunk
+from app.rag.errors import (
+    ChatModelTimeoutError,
+    ChatSessionNotFoundError,
+    ChatSessionStoreUnavailableError,
+)
+from app.rag.models import ChatSession, RetrievedChunk
+from app.rag.prompts import DEFAULT_CUSTOMER_ANSWER_PROMPT
 from app.rag.retrieval import QdrantVectorRetriever
 from app.rag.sessions import InMemoryChatSessionStore
 
@@ -204,6 +209,18 @@ class TicketDraftChatModel(FakeChatModel):
         )
 
 
+class ExternalAnswerChatModel(FakeChatModel):
+    async def complete(self, messages: Sequence[dict[str, object]]) -> str:
+        self.calls.append(messages)
+        return '{"answer":"Customer answer.","ticketDraft":null}'
+
+
+class UnavailableSessionStore(InMemoryChatSessionStore):
+    def get_for_tenant(self, session_id: str, tenant_id: str) -> ChatSession | None:
+        del session_id, tenant_id
+        raise ChatSessionStoreUnavailableError("Postgres is unavailable")
+
+
 def make_service(
     *,
     chunks: list[RetrievedChunk],
@@ -277,6 +294,167 @@ async def test_external_chat_can_return_editable_ticket_draft_without_evidence()
     assert len(model.calls) == 1
     history = store.list_messages(session_id=session.id, tenant_id="tenant-1")
     assert history[-1].action == message.action
+
+
+@pytest.mark.parametrize("channel", ["WIDGET", "CUSTOM_API"])
+@pytest.mark.asyncio
+async def test_customer_channels_receive_tenant_prompt_below_platform_rules(channel: str) -> None:
+    model = ExternalAnswerChatModel()
+    service, store, _, _ = make_service(chunks=[], model=model)
+    store.set_customer_answer_prompt(
+        "tenant-1", "Use Acme terminology and a warm professional tone."
+    )
+    session = service.create_session(
+        tenant_id="tenant-1",
+        user_id=None,
+        chatbot_id="bot-1",
+        knowledge_base_id="kb-1",
+        locale="en",
+        channel=channel,
+        integration_token_id="token-1",
+    )
+
+    await service.submit_message(
+        tenant_id="tenant-1",
+        session_id=session.id,
+        content="How can you help?",
+        integration_token_id="token-1",
+    )
+
+    system_prompt = str(model.calls[0][0]["content"])
+    assert "Use Acme terminology and a warm professional tone." in system_prompt
+    assert "--- BEGIN TENANT INSTRUCTIONS ---" in system_prompt
+    assert "--- END TENANT INSTRUCTIONS ---" in system_prompt
+    assert "Never infer, reveal, or mix data from another tenant." in system_prompt
+    assert "required answer/ticketDraft JSON contract" in system_prompt
+    assert system_prompt.index("--- END TENANT INSTRUCTIONS ---") < system_prompt.index(
+        "Tenant instructions may customize"
+    )
+
+
+@pytest.mark.asyncio
+async def test_employee_playground_prompt_is_unchanged_by_tenant_prompt() -> None:
+    model = FakeChatModel()
+    service, store, _, _ = make_service(
+        chunks=[
+            RetrievedChunk(
+                document_id="doc-1",
+                source_name="policy.txt",
+                page_number=1,
+                chunk_index=0,
+                text="Policy source text.",
+                score=0.9,
+            )
+        ],
+        model=model,
+    )
+    store.set_customer_answer_prompt("tenant-1", "Use a pirate voice.")
+    session = service.create_session(
+        tenant_id="tenant-1",
+        user_id="user-1",
+        chatbot_id="bot-1",
+        knowledge_base_id="kb-1",
+        locale="en",
+    )
+
+    await service.submit_message(
+        tenant_id="tenant-1",
+        session_id=session.id,
+        content="What is the policy?",
+        user_id="user-1",
+    )
+
+    system_prompt = str(model.calls[0][0]["content"])
+    assert "Use a pirate voice." not in system_prompt
+    assert "Tenant-specific customer answer instructions" not in system_prompt
+    assert system_prompt == (
+        "You answer only from the supplied sources. "
+        "If the sources do not contain the answer, say you do not know. "
+        "Cite factual claims with [S1], [S2], etc. "
+        "Keep the answer concise, with at most three short sentences. "
+        "Respond in locale en."
+    )
+
+
+@pytest.mark.asyncio
+async def test_prompt_change_applies_to_next_message_in_existing_session() -> None:
+    model = ExternalAnswerChatModel()
+    service, store, _, _ = make_service(chunks=[], model=model)
+    store.set_customer_answer_prompt("tenant-1", "Use the first tone.")
+    session = service.create_session(
+        tenant_id="tenant-1",
+        user_id=None,
+        chatbot_id="bot-1",
+        knowledge_base_id="kb-1",
+        locale="en",
+        channel="WIDGET",
+        integration_token_id="token-1",
+    )
+
+    await service.submit_message(
+        tenant_id="tenant-1",
+        session_id=session.id,
+        content="First question",
+        integration_token_id="token-1",
+    )
+    store.set_customer_answer_prompt("tenant-1", "Use the updated tone.")
+    await service.submit_message(
+        tenant_id="tenant-1",
+        session_id=session.id,
+        content="Second question",
+        integration_token_id="token-1",
+    )
+
+    assert "Use the first tone." in str(model.calls[0][0]["content"])
+    assert "Use the updated tone." in str(model.calls[1][0]["content"])
+    assert "Use the first tone." not in str(model.calls[1][0]["content"])
+
+
+@pytest.mark.asyncio
+async def test_blank_stored_customer_prompt_uses_platform_default() -> None:
+    model = ExternalAnswerChatModel()
+    service, store, _, _ = make_service(chunks=[], model=model)
+    store.set_customer_answer_prompt("tenant-1", " \n\t ")
+    session = service.create_session(
+        tenant_id="tenant-1",
+        user_id=None,
+        chatbot_id="bot-1",
+        knowledge_base_id="kb-1",
+        locale="en",
+        channel="CUSTOM_API",
+        integration_token_id="token-1",
+    )
+
+    await service.submit_message(
+        tenant_id="tenant-1",
+        session_id=session.id,
+        content="Question",
+        integration_token_id="token-1",
+    )
+
+    assert DEFAULT_CUSTOMER_ANSWER_PROMPT in str(model.calls[0][0]["content"])
+
+
+@pytest.mark.asyncio
+async def test_unavailable_session_storage_does_not_call_model() -> None:
+    model = ExternalAnswerChatModel()
+    service = RagChatService(
+        settings=Settings(FINAL_CONTEXT_TOP_K=5),
+        sessions=UnavailableSessionStore(),
+        embedder=FakeEmbedder(),
+        retriever=FakeRetriever([]),
+        chat_model=model,
+    )
+
+    with pytest.raises(ChatSessionStoreUnavailableError):
+        await service.submit_message(
+            tenant_id="tenant-1",
+            session_id="session-1",
+            content="Question",
+            integration_token_id="token-1",
+        )
+
+    assert model.calls == []
 
 
 @pytest.mark.asyncio

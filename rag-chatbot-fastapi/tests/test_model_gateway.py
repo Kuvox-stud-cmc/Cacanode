@@ -141,6 +141,20 @@ async def test_ollama_native_chat_disables_thinking(monkeypatch: pytest.MonkeyPa
 
 
 @pytest.mark.asyncio
+async def test_ollama_preserves_composed_message_content(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("app.infrastructure.model_gateway.httpx.AsyncClient", FakeOllamaClient)
+    gateway = OllamaChatModel(settings())
+    messages = [
+        {"role": "system", "content": "Platform rules\nTenant instructions\nPlatform priority"},
+        {"role": "user", "content": "Question with sources"},
+    ]
+
+    await gateway.complete(messages)
+
+    assert FakeOllamaClient.last_json["messages"] == messages
+
+
+@pytest.mark.asyncio
 async def test_openai_chat_model_passes_configured_client_options(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -170,6 +184,8 @@ async def test_openai_chat_model_passes_configured_client_options(
     assert FakeChatOpenAI.last_kwargs["timeout"] == 12.0
     assert FakeChatOpenAI.last_kwargs["api_key"].get_secret_value() == "test-key"
     assert len(FakeChatOpenAI.last_messages) == 2
+    assert FakeChatOpenAI.last_messages[0].content == "answer tersely"
+    assert FakeChatOpenAI.last_messages[1].content == "hello"
 
 
 def test_openai_chat_model_omits_temperature_for_reasoning_models(

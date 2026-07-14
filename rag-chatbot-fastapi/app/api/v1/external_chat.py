@@ -101,6 +101,10 @@ async def _submit(
         return AssistantMessageResponse.from_message(message)
     except ChatSessionNotFoundError as exc:
         raise ApiError(404, "SESSION_NOT_FOUND", "Chat session was not found.") from exc
+    except ChatSessionStoreUnavailableError as exc:
+        raise ApiError(
+            503, "CHAT_SESSION_STORE_UNAVAILABLE", "Chat storage is unavailable."
+        ) from exc
     except ChatQuotaExceededError as exc:
         raise ApiError(
             429, "MESSAGE_QUOTA_EXCEEDED", "The tenant message quota has been reached."

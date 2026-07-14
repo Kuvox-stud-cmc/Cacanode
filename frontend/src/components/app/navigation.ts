@@ -13,6 +13,7 @@ export type AppNavigationItem = {
   href: string
   label: string
   icon: LucideIcon
+  tenantAdminOnly?: boolean
 }
 
 export const appNavigation: AppNavigationItem[] = [
@@ -23,5 +24,5 @@ export const appNavigation: AppNavigationItem[] = [
   { href: "/tickets", label: "Tickets", icon: TicketCheck },
   { href: "/analytics", label: "Analytics", icon: BarChart2 },
   { href: "/users", label: "Users", icon: Users },
-  { href: "/settings", label: "Settings", icon: Settings },
+  { href: "/settings", label: "Settings", icon: Settings, tenantAdminOnly: true },
 ]

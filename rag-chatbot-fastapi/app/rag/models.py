@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from app.rag.prompts import DEFAULT_CUSTOMER_ANSWER_PROMPT
+
 
 @dataclass(frozen=True, slots=True)
 class ChatSession:
@@ -17,6 +19,7 @@ class ChatSession:
     customer_name: str | None = None
     customer_email: str | None = None
     integration_token_id: str | None = None
+    customer_answer_prompt: str = DEFAULT_CUSTOMER_ANSWER_PROMPT
 
 
 @dataclass(frozen=True, slots=True)

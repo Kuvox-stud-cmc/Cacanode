@@ -1,8 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Check, Copy, KeyRound, Loader2, Play, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { Check, Copy, KeyRound, Loader2, Play, Plus, RefreshCw, RotateCcw, Trash2 } from "lucide-react";
 import toast from "react-hot-toast";
+import { useAuthStore } from "@/components/providers/StoreProvider";
 import { useApiClient } from "@/hooks/useApiClient";
 import { publicConfig } from "@/lib/public-config";
 import {
@@ -22,6 +24,11 @@ import {
   type WebhookEndpoint,
   type WidgetSettings,
 } from "@/lib/integrations-api";
+import {
+  getCustomerAnswerPrompt,
+  updateCustomerAnswerPrompt,
+  type CustomerAnswerPromptSettings,
+} from "@/lib/tenant-settings-api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -45,6 +52,8 @@ function formatDate(value: string | null): string {
 }
 
 export default function SettingsPage() {
+  const router = useRouter();
+  const user = useAuthStore((state) => state.user);
   const { request } = useApiClient();
   const [loading, setLoading] = useState(true);
   const [widget, setWidget] = useState<WidgetSettings | null>(null);
@@ -64,21 +73,40 @@ export default function SettingsPage() {
   const [webhookSecret, setWebhookSecret] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [promptSettings, setPromptSettings] = useState<CustomerAnswerPromptSettings | null>(null);
+  const [promptDraft, setPromptDraft] = useState("");
+  const [restorePromptDialog, setRestorePromptDialog] = useState(false);
 
   useEffect(() => {
+    if (!user) return;
+    if (user.role !== "TENANT_ADMIN") {
+      router.replace("/dashboard");
+      return;
+    }
     let cancelled = false;
-    Promise.all([getWidgetSettings(request), listIntegrationTokens(request), listWebhooks(request)])
-      .then(([widgetResult, tokenResult, webhookResult]) => {
+    Promise.all([
+      getWidgetSettings(request),
+      listIntegrationTokens(request),
+      listWebhooks(request),
+      getCustomerAnswerPrompt(request),
+    ])
+      .then(([widgetResult, tokenResult, webhookResult, promptResult]) => {
         if (cancelled) return;
         setWidget(widgetResult);
         setOrigins(widgetResult.allowedOrigins.join("\n"));
         setTokens(tokenResult);
         setWebhooks(webhookResult);
+        setPromptSettings(promptResult);
+        setPromptDraft(promptResult.prompt);
       })
       .catch((error) => toast.error(error instanceof Error ? error.message : "Unable to load settings"))
       .finally(() => !cancelled && setLoading(false));
     return () => { cancelled = true; };
-  }, [request]);
+  }, [request, router, user]);
+
+  const promptDirty = promptSettings !== null && promptDraft !== promptSettings.prompt;
+  const promptLength = Array.from(promptDraft).length;
+  const promptInvalid = promptDraft.trim().length === 0 || promptLength > 4000;
 
   const embedCode = useMemo(() => {
     if (!newSecret || !newSecretScopes.includes("widget:chat")) return null;
@@ -99,6 +127,36 @@ export default function SettingsPage() {
       toast.success("Widget settings saved");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Unable to save widget settings");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function saveCustomerPrompt() {
+    if (!promptDirty || promptInvalid) return;
+    setSaving(true);
+    try {
+      const updated = await updateCustomerAnswerPrompt(request, promptDraft);
+      setPromptSettings(updated);
+      setPromptDraft(updated.prompt);
+      toast.success("AI prompt saved");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to save AI prompt");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function restoreDefaultPrompt() {
+    setSaving(true);
+    try {
+      const updated = await updateCustomerAnswerPrompt(request, "");
+      setPromptSettings(updated);
+      setPromptDraft(updated.prompt);
+      setRestorePromptDialog(false);
+      toast.success("Default AI prompt restored");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to restore the default prompt");
     } finally {
       setSaving(false);
     }
@@ -177,6 +235,10 @@ export default function SettingsPage() {
     window.setTimeout(() => setCopied(false), 1500);
   }
 
+  if (user?.role !== "TENANT_ADMIN") {
+    return null;
+  }
+
   if (loading) {
     return <div className="max-w-5xl space-y-4"><Skeleton className="h-8 w-40" /><Skeleton className="h-96 w-full" /></div>;
   }
@@ -187,6 +249,7 @@ export default function SettingsPage() {
       <Tabs defaultValue="widget">
         <TabsList className="mb-6">
           <TabsTrigger value="widget">Widget</TabsTrigger>
+          <TabsTrigger value="ai-prompt">AI Prompt</TabsTrigger>
           <TabsTrigger value="tokens">Integration Tokens</TabsTrigger>
           <TabsTrigger value="webhooks">Webhooks</TabsTrigger>
         </TabsList>
@@ -214,6 +277,70 @@ export default function SettingsPage() {
           </div>}
         </TabsContent>
 
+        <TabsContent value="ai-prompt">
+          <Card>
+            <CardHeader className="space-y-2">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <CardTitle className="text-base">Customer answer instructions</CardTitle>
+                {promptSettings && (
+                  <Badge variant="outline">
+                    {promptSettings.usingDefault ? "Using platform default" : "Custom prompt saved"}
+                  </Badge>
+                )}
+              </div>
+              <p className="text-sm text-slate-500">
+                Control tone, terminology, formatting, and escalation behavior for Widget and Custom API answers.
+                Platform grounding, citations, tenant isolation, safety, and ticket response rules always remain in force.
+              </p>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-1.5">
+                <Label htmlFor="customer-answer-prompt">Customer answer instructions</Label>
+                <textarea
+                  id="customer-answer-prompt"
+                  className="min-h-64 w-full rounded-md border border-slate-200 p-3 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
+                  value={promptDraft}
+                  onChange={(event) => setPromptDraft(event.target.value)}
+                  aria-describedby="customer-answer-prompt-guidance"
+                />
+                <div className="flex items-start justify-between gap-4 text-xs">
+                  <p id="customer-answer-prompt-guidance" className="text-amber-700">
+                    Do not enter passwords, API tokens, private keys, or other secrets.
+                  </p>
+                  <span className={promptLength > 4000 ? "font-medium text-red-600" : "text-slate-500"}>
+                    {promptLength}/4000
+                  </span>
+                </div>
+                {promptDraft.trim().length === 0 && (
+                  <p className="text-xs text-red-600">Instructions cannot be blank. Use Restore default instead.</p>
+                )}
+              </div>
+              <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-4">
+                <p className="text-xs text-slate-500">
+                  Last updated: {formatDate(promptSettings?.updatedAt ?? null)}
+                </p>
+                <div className="flex gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setRestorePromptDialog(true)}
+                    disabled={saving || (promptSettings?.usingDefault !== false && !promptDirty)}
+                  >
+                    <RotateCcw />Restore default
+                  </Button>
+                  <Button
+                    type="button"
+                    onClick={() => void saveCustomerPrompt()}
+                    disabled={saving || !promptDirty || promptInvalid}
+                  >
+                    {saving && <Loader2 className="animate-spin" />}Save prompt
+                  </Button>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
         <TabsContent value="tokens" className="space-y-4">
           <div className="flex items-center justify-between"><p className="text-sm text-slate-500">Create separate scoped tokens for hosted widgets and server-side Chat API integrations.</p><Button onClick={() => setTokenDialog(true)}><Plus />Create token</Button></div>
           {newSecret && <Card><CardHeader><CardTitle className="text-base">New token</CardTitle></CardHeader><CardContent className="space-y-3"><p className="text-sm text-amber-700">This value is shown once. Store it before closing this panel.</p><div className="flex gap-2"><code className="min-w-0 flex-1 overflow-x-auto rounded-md bg-slate-950 p-3 text-xs text-white">{newSecret}</code><Button variant="outline" size="icon" onClick={() => void copyText(newSecret)}>{copied ? <Check /> : <Copy />}</Button></div>{embedCode && <div className="space-y-2"><Label>Widget embed code</Label><pre className="overflow-x-auto rounded-md bg-slate-950 p-3 text-xs text-white">{embedCode}</pre><Button variant="outline" onClick={() => void copyText(embedCode)}><Copy />Copy embed code</Button></div>}</CardContent></Card>}
@@ -233,6 +360,25 @@ export default function SettingsPage() {
       <Dialog open={tokenDialog} onOpenChange={setTokenDialog}><DialogContent><DialogHeader><DialogTitle>Create integration token</DialogTitle><DialogDescription>The secret is displayed once after creation.</DialogDescription></DialogHeader><div className="space-y-4"><div className="space-y-1.5"><Label>Name</Label><Input value={tokenName} onChange={(event) => setTokenName(event.target.value)} placeholder="Production website" /></div><div className="space-y-2"><Label>Scopes</Label>{(["widget:chat", "api:chat"] as IntegrationScope[]).map((scope) => <label key={scope} className="flex items-center gap-2 text-sm"><input type="checkbox" checked={tokenScopes.includes(scope)} onChange={(event) => setTokenScopes((current) => event.target.checked ? [...current, scope] : current.filter((item) => item !== scope))} />{scope}</label>)}</div><div className="space-y-1.5"><Label>Expiry date (optional)</Label><Input type="date" value={tokenExpiry} onChange={(event) => setTokenExpiry(event.target.value)} /></div></div><DialogFooter><Button variant="outline" onClick={() => setTokenDialog(false)}>Cancel</Button><Button onClick={() => void createToken()} disabled={saving || !tokenName.trim() || tokenScopes.length === 0}>Create</Button></DialogFooter></DialogContent></Dialog>
 
       <Dialog open={webhookDialog} onOpenChange={setWebhookDialog}><DialogContent><DialogHeader><DialogTitle>Add webhook endpoint</DialogTitle><DialogDescription>Payloads are signed with a secret displayed once.</DialogDescription></DialogHeader><div className="space-y-4"><div className="space-y-1.5"><Label>Name</Label><Input value={webhookName} onChange={(event) => setWebhookName(event.target.value)} /></div><div className="space-y-1.5"><Label>URL</Label><Input value={webhookUrl} onChange={(event) => setWebhookUrl(event.target.value)} placeholder="https://example.com/webhooks/cacanode" /></div><div className="space-y-2"><Label>Events</Label>{WEBHOOK_EVENTS.map((event) => <label key={event} className="flex items-center gap-2 text-sm"><input type="checkbox" checked={webhookEvents.includes(event)} onChange={(inputEvent) => setWebhookEvents((current) => inputEvent.target.checked ? [...current, event] : current.filter((item) => item !== event))} />{event}</label>)}</div></div><DialogFooter><Button variant="outline" onClick={() => setWebhookDialog(false)}>Cancel</Button><Button onClick={() => void createWebhookEndpoint()} disabled={saving}>Add endpoint</Button></DialogFooter></DialogContent></Dialog>
+
+      <Dialog open={restorePromptDialog} onOpenChange={setRestorePromptDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Restore the platform default?</DialogTitle>
+            <DialogDescription>
+              Your custom customer-answer instructions will be replaced immediately for all Widget and Custom API conversations.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setRestorePromptDialog(false)} disabled={saving}>
+              Cancel
+            </Button>
+            <Button type="button" onClick={() => void restoreDefaultPrompt()} disabled={saving}>
+              {saving && <Loader2 className="animate-spin" />}Restore default
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

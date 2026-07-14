@@ -32,6 +32,9 @@ export function AppShell({ children, contentClassName, mobileNavContent }: AppSh
   const user = useAuthStore((state) => state.user)
   const clearAuth = useAuthStore((state) => state.clearAuth)
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const visibleNavigation = appNavigation.filter(
+    (item) => !item.tenantAdminOnly || user?.role === "TENANT_ADMIN",
+  )
   const pageTitle =
     appNavigation.find(
       (item) => item.href === pathname || pathname.startsWith(`${item.href}/`),
@@ -71,7 +74,7 @@ export function AppShell({ children, contentClassName, mobileNavContent }: AppSh
         </div>
 
         <nav className="flex-1 space-y-1 overflow-y-auto p-3">
-          {appNavigation.map(({ href, label, icon: Icon }) => {
+          {visibleNavigation.map(({ href, label, icon: Icon }) => {
             const isActive = pathname === href
             return (
               <Link

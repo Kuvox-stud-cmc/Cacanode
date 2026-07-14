@@ -4,6 +4,7 @@ import "./globals.css";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "react-hot-toast";
 import { useState } from "react";
+import { PageTitle } from "@/components/app/PageTitle";
 import { StoreProvider } from "@/components/providers/StoreProvider";
 
 export default function RootLayout({
@@ -16,6 +17,7 @@ export default function RootLayout({
   return (
     <html lang="vi">
       <body className="font-sans" suppressHydrationWarning>
+        <PageTitle />
         <QueryClientProvider client={queryClient}>
           <StoreProvider>
             {children}

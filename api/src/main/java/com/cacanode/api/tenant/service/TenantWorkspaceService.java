@@ -5,6 +5,7 @@ import com.cacanode.api.ai.model.ModelConfigVersion;
 import com.cacanode.api.ai.repository.ModelConfigVersionRepository;
 import com.cacanode.api.common.exception.custom.InternalServerErrorException;
 import com.cacanode.api.common.exception.custom.ResourceNotFoundException;
+import com.cacanode.api.tenant.CustomerAnswerPromptDefaults;
 import com.cacanode.api.tenant.dto.TenantWorkspaceResponse;
 import com.cacanode.api.tenant.enums.ChatbotStatus;
 import com.cacanode.api.tenant.enums.KnowledgeBaseStatus;
@@ -31,9 +32,6 @@ public class TenantWorkspaceService {
     private static final String DEFAULT_KNOWLEDGE_BASE_NAME = "Default Knowledge Base";
     private static final String DEFAULT_CHATBOT_NAME = "CacaNode Assistant";
     private static final String DEFAULT_WELCOME_MESSAGE = "Xin chao! Toi co the giup gi cho ban?";
-    private static final String DEFAULT_SAFE_INSTRUCTIONS = "Answer from the tenant knowledge base when possible. "
-            + "Be clear when information is unavailable, avoid fabricating tenant-specific facts, "
-            + "and include citations when using retrieved sources.";
 
     private final TenantRepository tenantRepository;
     private final KnowledgeBaseRepository knowledgeBaseRepository;
@@ -101,7 +99,7 @@ public class TenantWorkspaceService {
                     chatbot.setDisplayName(DEFAULT_CHATBOT_NAME);
                     chatbot.setDefaultLocale(knowledgeBase.getDefaultLocale());
                     chatbot.setWelcomeMessage(DEFAULT_WELCOME_MESSAGE);
-                    chatbot.setSafeInstructions(DEFAULT_SAFE_INSTRUCTIONS);
+                    chatbot.setSafeInstructions(CustomerAnswerPromptDefaults.PLATFORM_DEFAULT);
                     chatbot.setRetrievalSettings(Map.of(
                             "topK", 8,
                             "graphDepth", 2,
