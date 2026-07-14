@@ -7,6 +7,7 @@ from typing import Any, cast
 from uuid import UUID, uuid4
 
 import pytest
+from botocore import UNSIGNED
 from prometheus_client import REGISTRY
 
 from app.core.config import Settings
@@ -15,6 +16,7 @@ from app.ingestion.embedding import OllamaEmbeddingClient
 from app.ingestion.errors import PermanentIngestionError, TransientIngestionError
 from app.ingestion.events import DocumentIngestRequestedEvent
 from app.ingestion.extraction import DocumentTextExtractor, ExtractedPage
+from app.ingestion.storage import SeaweedS3DocumentStore
 from app.ingestion.vector_store import QdrantChunkStore
 from app.workers import document as document_worker
 from app.workers.document import DocumentWorker
@@ -154,9 +156,10 @@ class FakeOllamaResponse:
 
 class FakeOllamaClient:
     payload: dict[str, object]
+    timeout: float
 
-    def __init__(self, timeout: int):
-        del timeout
+    def __init__(self, timeout: float):
+        self.__class__.timeout = timeout
 
     async def __aenter__(self) -> FakeOllamaClient:
         return self
@@ -185,6 +188,7 @@ async def test_embedding_adapter_parses_ollama_embed_response(
     embeddings = await embedder.embed_documents(["a", "b"])
 
     assert embeddings == [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]
+    assert FakeOllamaClient.timeout == 120.0
     assert metric_value("cacanode_ai_embedding_seconds_count", labels) == before + 1
 
 
@@ -198,6 +202,39 @@ async def test_embedding_adapter_reports_model_errors(monkeypatch: pytest.Monkey
         await embedder.embed_documents(["a"])
 
 
+def test_seaweed_store_uses_unsigned_path_style_and_bounded_timeouts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_client(service: str, **kwargs: object) -> object:
+        captured["service"] = service
+        captured.update(kwargs)
+        return object()
+
+    monkeypatch.setattr("app.ingestion.storage.boto3.client", fake_client)
+
+    SeaweedS3DocumentStore(
+        Settings(
+            SEAWEEDFS_ACCESS_KEY="",
+            SEAWEEDFS_SECRET_KEY="",
+            SEAWEEDFS_CONNECT_TIMEOUT_SECONDS=2.5,
+            SEAWEEDFS_READ_TIMEOUT_SECONDS=15,
+            SEAWEEDFS_MAX_ATTEMPTS=2,
+        )
+    )
+
+    config = captured["config"]
+    assert captured["service"] == "s3"
+    assert captured["aws_access_key_id"] is None
+    assert captured["aws_secret_access_key"] is None
+    assert config.signature_version is UNSIGNED
+    assert config.connect_timeout == 2.5
+    assert config.read_timeout == 15
+    assert config.retries == {"mode": "standard", "total_max_attempts": 2}
+    assert config.s3 == {"addressing_style": "path"}
+
+
 class FakeQdrantClient:
     def __init__(self, exists: bool = False, dimension: int = 3):
         self.exists = exists
@@ -205,25 +242,41 @@ class FakeQdrantClient:
         self.created: object | None = None
         self.upserted: list[object] = []
         self.deleted: object | None = None
+        self.payload_indexes: list[tuple[str, str, object, bool]] = []
 
     async def collection_exists(self, collection_name: str) -> bool:
         self.collection_name = collection_name
         return self.exists
 
-    async def create_collection(self, collection_name: str, vectors_config: object) -> None:
-        self.created = (collection_name, vectors_config)
+    async def create_collection(
+        self,
+        collection_name: str,
+        vectors_config: object,
+        sparse_vectors_config: object,
+    ) -> None:
+        self.created = (collection_name, vectors_config, sparse_vectors_config)
         self.exists = True
 
     async def get_collection(self, collection_name: str) -> object:
         del collection_name
         return SimpleNamespace(
-            config=SimpleNamespace(params=SimpleNamespace(vectors=SimpleNamespace(size=self.dimension)))
+            config=SimpleNamespace(
+                params=SimpleNamespace(
+                    vectors={"text_embeddinggemma_v1": SimpleNamespace(size=self.dimension)},
+                    sparse_vectors={"text_bm25_v1": SimpleNamespace(modifier="idf")},
+                )
+            )
         )
 
     async def upsert(self, collection_name: str, points: list[object], wait: bool) -> None:
         self.upserted = points
         self.upsert_collection = collection_name
         self.upsert_wait = wait
+
+    async def create_payload_index(
+        self, collection_name: str, field_name: str, field_schema: object, wait: bool
+    ) -> None:
+        self.payload_indexes.append((collection_name, field_name, field_schema, wait))
 
     async def delete(self, collection_name: str, points_selector: object, wait: bool) -> None:
         self.deleted = (collection_name, points_selector, wait)
@@ -245,6 +298,13 @@ async def test_qdrant_adapter_creates_collection_and_upserts_payloads() -> None:
     assert point.payload["tenant_id"] == str(event.tenant_id)
     assert point.payload["knowledge_base_id"] == str(event.knowledge_base_id)
     assert point.payload["text"] == "hello"
+    assert "text_embeddinggemma_v1" in point.vector
+    assert {item[1] for item in client.payload_indexes} == {
+        "tenant_id",
+        "knowledge_base_id",
+        "document_id",
+        "chunk_index",
+    }
 
 
 @pytest.mark.asyncio
@@ -253,6 +313,30 @@ async def test_qdrant_adapter_rejects_collection_dimension_mismatch() -> None:
     store = QdrantChunkStore(Settings(QDRANT_COLLECTION="chunks"), client=client)  # type: ignore[arg-type]
 
     with pytest.raises(PermanentIngestionError, match="collection dimension"):
+        await store.ensure_collection(3)
+
+
+@pytest.mark.asyncio
+async def test_qdrant_adapter_explains_legacy_unnamed_vector_collection() -> None:
+    client = FakeQdrantClient(exists=True, dimension=3)
+
+    async def legacy_collection(collection_name: str) -> object:
+        del collection_name
+        return SimpleNamespace(
+            config=SimpleNamespace(
+                params=SimpleNamespace(
+                    vectors=SimpleNamespace(size=3),
+                    sparse_vectors={},
+                )
+            )
+        )
+
+    client.get_collection = legacy_collection  # type: ignore[method-assign]
+    store = QdrantChunkStore(
+        Settings(QDRANT_COLLECTION="knowledge_units_v1"), client=client  # type: ignore[arg-type]
+    )
+
+    with pytest.raises(PermanentIngestionError, match="legacy unnamed-vector schema"):
         await store.ensure_collection(3)
 
 

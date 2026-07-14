@@ -8,4 +8,3 @@ class PermanentIngestionError(IngestionError):
 
 class TransientIngestionError(IngestionError):
     """Failure caused by infrastructure or temporary dependencies."""
-

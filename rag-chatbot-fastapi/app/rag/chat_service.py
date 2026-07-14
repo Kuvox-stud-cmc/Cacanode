@@ -31,9 +31,8 @@ class VectorRetriever(Protocol):
         *,
         tenant_id: str,
         knowledge_base_id: str,
+        query_text: str,
         query_vector: Sequence[float],
-        limit: int,
-        score_threshold: float,
         document_ids: Sequence[str] | None = None,
     ) -> list[RetrievedChunk]: ...
 
@@ -238,9 +237,6 @@ class RagChatService:
             retrieval_started_at = time.perf_counter()
             retrieval_outcome = "success"
             try:
-                set_query = getattr(self._retriever, "set_query", None)
-                if set_query is not None:
-                    set_query(content)
                 if session.channel in {"WIDGET", "CUSTOM_API"}:
                     visible_ids = self._sessions.customer_visible_document_ids(
                         tenant_id=tenant_id, knowledge_base_id=session.knowledge_base_id
@@ -251,9 +247,8 @@ class RagChatService:
                         else await self._retriever.retrieve(
                             tenant_id=tenant_id,
                             knowledge_base_id=session.knowledge_base_id,
+                            query_text=content,
                             query_vector=query_vector,
-                            limit=self._settings.TEXT_TOP_K,
-                            score_threshold=self._settings.MIN_RETRIEVAL_CONFIDENCE,
                             document_ids=visible_ids,
                         )
                     )
@@ -261,9 +256,8 @@ class RagChatService:
                     chunks = await self._retriever.retrieve(
                         tenant_id=tenant_id,
                         knowledge_base_id=session.knowledge_base_id,
+                        query_text=content,
                         query_vector=query_vector,
-                        limit=self._settings.TEXT_TOP_K,
-                        score_threshold=self._settings.MIN_RETRIEVAL_CONFIDENCE,
                     )
             except Exception:
                 retrieval_outcome = "error"
@@ -277,7 +271,7 @@ class RagChatService:
                     outcome=retrieval_outcome,
                 ).observe(retrieval_seconds)
 
-            selected = chunks[: min(self._settings.FINAL_CONTEXT_TOP_K, 5)]
+            selected = chunks[: self._settings.FINAL_CONTEXT_TOP_K]
             calculation_text: str | None = None
             if self._calculations is not None:
                 calculation = await self._calculations.prepare(

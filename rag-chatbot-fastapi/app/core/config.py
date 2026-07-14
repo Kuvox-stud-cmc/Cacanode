@@ -46,10 +46,15 @@ class Settings(BaseSettings):
     SEAWEEDFS_ACCESS_KEY: str = ""
     SEAWEEDFS_SECRET_KEY: str = ""
     SEAWEEDFS_BUCKET: str = "cacanode"
+    SEAWEEDFS_CONNECT_TIMEOUT_SECONDS: float = 3.0
+    SEAWEEDFS_READ_TIMEOUT_SECONDS: float = 30.0
+    SEAWEEDFS_MAX_ATTEMPTS: int = 3
 
     QDRANT_URL: str = "http://localhost:6333"
     QDRANT_API_KEY: str = ""
-    QDRANT_COLLECTION: str = "knowledge_units_v1"
+    QDRANT_COLLECTION: str = "knowledge_units_v2"
+    QDRANT_DENSE_VECTOR_NAME: str = "text_embeddinggemma_v1"
+    QDRANT_SPARSE_VECTOR_NAME: str = "text_bm25_v1"
     QDRANT_TENANT_FIELD: str = "tenant_id"
     QDRANT_KNOWLEDGE_BASE_FIELD: str = "knowledge_base_id"
     KUZU_DATABASE_PATH: str = "./data/kuzu/cacanode.kuzu"
@@ -61,7 +66,7 @@ class Settings(BaseSettings):
     GRAPH_EXTRACTION_MAX_OUTPUT_TOKENS: int = 25_000
     GRAPH_EXTRACTION_REASONING_EFFORT: Literal["low", "medium", "high"] = "low"
     PARSER_VERSION: str = "digital-v1"
-    CHUNKER_VERSION: str = "structural-v1"
+    CHUNKER_VERSION: str = "structural-v2"
     SPREADSHEET_MAX_ROWS: int = 250_000
     SPREADSHEET_MAX_COLUMNS: int = 2_000
 
@@ -82,6 +87,9 @@ class Settings(BaseSettings):
     TEXT_EMBEDDING_MODEL_ID: str = "google/embeddinggemma-300m"
     TEXT_EMBEDDING_DIMENSION: int = 768
     TEXT_EMBEDDING_BATCH_SIZE: int = 32
+    TEXT_EMBEDDING_TIMEOUT_SECONDS: float = 120.0
+    SPARSE_MODEL_ID: str = "Qdrant/bm25"
+    SPARSE_MODEL_CACHE_DIR: str = "./data/models/fastembed"
 
     WORKER_MODE: Literal["embedded", "dedicated", "disabled"] = "embedded"
     WORKER_KINDS: str = "document,ocr,asr,vision,audio,video"
@@ -104,13 +112,34 @@ class Settings(BaseSettings):
     MAX_VIDEO_MB: int = 500
     MALWARE_SCAN_ENABLED: bool = False
 
-    TEXT_TOP_K: int = 20
     IMAGE_TOP_K: int = 12
     AUDIO_TOP_K: int = 12
     GRAPH_MAX_HOPS: int = 3
+    DENSE_CANDIDATE_COUNT: int = 40
+    SPARSE_CANDIDATE_COUNT: int = 40
+    GRAPH_CANDIDATE_COUNT: int = 20
+    FUSION_CANDIDATE_COUNT: int = 30
+    RRF_K: int = 30
+    SEMANTIC_DENSE_WEIGHT: float = 0.55
+    SEMANTIC_SPARSE_WEIGHT: float = 0.30
+    SEMANTIC_GRAPH_WEIGHT: float = 0.15
+    EXACT_DENSE_WEIGHT: float = 0.25
+    EXACT_SPARSE_WEIGHT: float = 0.60
+    EXACT_GRAPH_WEIGHT: float = 0.15
+    RELATIONAL_DENSE_WEIGHT: float = 0.30
+    RELATIONAL_SPARSE_WEIGHT: float = 0.15
+    RELATIONAL_GRAPH_WEIGHT: float = 0.55
+    CALCULATION_DENSE_WEIGHT: float = 0.35
+    CALCULATION_SPARSE_WEIGHT: float = 0.50
+    CALCULATION_GRAPH_WEIGHT: float = 0.15
+    PRIMARY_CONTEXT_TOP_K: int = 5
     FINAL_CONTEXT_TOP_K: int = 8
-    MIN_RETRIEVAL_CONFIDENCE: float = 0.35
-    ENABLE_RERANKER: bool = True
+    CONTEXT_DOCUMENT_SOFT_LIMIT: int = 2
+    NEIGHBOR_EXPANSION_LIMIT: int = 3
+    RERANKER_ENABLED: bool = False
+    RERANKER_URL: str = "http://localhost:8082"
+    RERANKER_MODEL_ID: str = "BAAI/bge-reranker-v2-m3"
+    RERANKER_TIMEOUT_SECONDS: float = 10.0
     ENABLE_GENERAL_KNOWLEDGE: bool = False
 
     SSE_HEARTBEAT_SECONDS: int = 15
@@ -155,6 +184,21 @@ class Settings(BaseSettings):
             self.POSTGRES_URL = urlunsplit(
                 (parts.scheme, netloc, parts.path, parts.query, parts.fragment)
             )
+        retrieval_counts = (
+            self.DENSE_CANDIDATE_COUNT,
+            self.SPARSE_CANDIDATE_COUNT,
+            self.GRAPH_CANDIDATE_COUNT,
+            self.FUSION_CANDIDATE_COUNT,
+            self.RRF_K,
+            self.PRIMARY_CONTEXT_TOP_K,
+            self.FINAL_CONTEXT_TOP_K,
+        )
+        if any(value <= 0 for value in retrieval_counts):
+            raise ValueError("Retrieval candidate and context limits must be positive")
+        if self.PRIMARY_CONTEXT_TOP_K > self.FINAL_CONTEXT_TOP_K:
+            raise ValueError("PRIMARY_CONTEXT_TOP_K cannot exceed FINAL_CONTEXT_TOP_K")
+        if self.RERANKER_TIMEOUT_SECONDS <= 0:
+            raise ValueError("RERANKER_TIMEOUT_SECONDS must be positive")
         return self
 
 

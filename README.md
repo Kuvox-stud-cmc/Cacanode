@@ -15,7 +15,7 @@ Both surfaces use the same tenant-isolated knowledge base, chatbot configuration
 | Primary market | Vietnamese businesses and Vietnamese-language applications |
 | Integration modes | Headless Chat API and hosted JavaScript widget |
 | Streaming protocol | Server-Sent Events over HTTPS |
-| Retrieval | Qdrant vector search plus Kuzu graph traversal |
+| Retrieval | Qdrant dense + BM25 sparse search, Kuzu graph evidence, and TEI reranking |
 | Generative model | Self-hosted Gemma 4 instruction model |
 | Text embedding | Self-hosted EmbeddingGemma |
 | Model operation | Fully managed by Cacanode |
@@ -25,17 +25,17 @@ Both surfaces use the same tenant-isolated knowledge base, chatbot configuration
 
 ## Implementation Status
 
-This repository currently provides a runnable architecture scaffold, not the complete production platform described below.
+This repository provides a runnable vertical slice for document-grounded chat, ingestion, tenant isolation, citations, hybrid retrieval, and operational reindexing. Multimodal processing and several broader platform capabilities remain staged work.
 
 Implemented foundations include:
 
 - Next.js management-console shell and authentication client.
 - Spring Boot identity, tenant, persistence, and versioned-route compatibility.
-- FastAPI public contract scaffolds, request IDs, error envelopes, health checks, and worker lifecycles.
+- FastAPI chat/session contracts, grounded citations, document ingestion, structural chunking, dense/sparse/graph retrieval, reranking fallbacks, request IDs, health checks, and worker lifecycles.
 - PostgreSQL, Redis, RabbitMQ, Qdrant, Kuzu storage, SeaweedFS, gateway, and application Compose definitions.
 - Optional dedicated-worker and GPU model-serving profiles.
 
-Chat generation, GraphRAG retrieval, multimodal processors, billing enforcement, integration credentials, and most management APIs remain implementation work. Scaffolded endpoints return explicit errors rather than fabricated successful responses.
+Image, audio, video, OCR ingestion, some billing enforcement, and several management APIs remain implementation work. Unimplemented paths return explicit errors rather than fabricated successful responses.
 
 ---
 
@@ -483,9 +483,11 @@ flowchart LR
     Store --> Parse[Parse structure]
     Parse --> Normalize[Normalize sections and tables]
     Normalize --> Chunk[Structure-aware chunks]
-    Chunk --> Embed[EmbeddingGemma]
+    Chunk --> Embed[EmbeddingGemma dense vectors]
+    Chunk --> Sparse[FastEmbed Qdrant BM25]
     Chunk --> Extract[Gemma entity and relation extraction]
     Embed --> Vector[(Qdrant)]
+    Sparse --> Vector
     Extract --> Graph[(Kuzu)]
 ```
 
@@ -500,6 +502,11 @@ A text chunk preserves:
 - Table headers when applicable.
 - Content hash.
 - Parser and chunker version.
+
+Oversized prose and extracted page blocks target 800 characters and use a 120-character
+overlap. Headings, lists, code, tables, spreadsheet rows, and sheet records use zero overlap and
+split only on structural line or row boundaries. When a table spans multiple units, its header is
+repeated so every unit remains independently understandable and citable.
 
 ### Spreadsheet pipeline
 
@@ -579,23 +586,21 @@ flowchart TD
     Auth --> Policy[Load chatbot policy and conversation context]
     Policy --> Route[Classify query and retrieval modes]
 
-    Route --> TextQuery[EmbeddingGemma query]
-    Route --> VisualQuery[CLIP text query]
-    Route --> AudioQuery[CLAP text query]
+    Route --> DenseQuery[EmbeddingGemma query]
+    Route --> SparseQuery[BM25 sparse query]
     Route --> GraphQuery[Entity and relation query]
 
-    TextQuery --> TextSearch[Qdrant text search]
-    VisualQuery --> VisualSearch[Qdrant image search]
-    AudioQuery --> AudioSearch[Qdrant audio search]
+    DenseQuery --> DenseSearch[Qdrant dense top 40]
+    SparseQuery --> SparseSearch[Qdrant sparse top 40]
     GraphQuery --> GraphSearch[Kuzu traversal]
 
-    TextSearch --> Fusion[Normalize and fuse results]
-    VisualSearch --> Fusion
-    AudioSearch --> Fusion
+    DenseSearch --> Fusion[Adaptive weighted RRF, k=30]
+    SparseSearch --> Fusion
     GraphSearch --> Fusion
 
-    Fusion --> Rerank[Rerank and confidence check]
-    Rerank --> Context[Assemble context with provenance]
+    Fusion --> Rerank[TEI bge-reranker-v2-m3]
+    Rerank --> Primary[Select five diverse primary units]
+    Primary --> Context[Add up to three eligible neighbors]
     Context --> Generate[Gemma 4 grounded generation]
     Generate --> Stream[JSON or SSE response]
 ```
@@ -605,7 +610,10 @@ flowchart TD
 - Tenant and knowledge-base filters are generated from authenticated server context.
 - A tenant identifier in request JSON is never treated as authorization.
 - Each modality is searched in its own vector space.
-- Result fusion uses normalized scores or reciprocal-rank fusion.
+- Routing precedence is calculation, relational, exact, then semantic; each profile selects its documented dense, sparse, and graph weights.
+- Weighted reciprocal-rank fusion deduplicates by `(document_id, unit_id)` and retains 30 candidates for reranking.
+- Reranking, graph search, and neighbor expansion fail open without discarding usable channel evidence.
+- Context contains five primary units plus at most three prose/page neighbors; every unit has its own citation.
 - Graph facts must retain evidence links to source units.
 - Low-confidence retrieval returns an explicit unavailable answer rather than invented tenant facts.
 - Uploaded content is untrusted data and cannot override system or chatbot policy.
@@ -1157,20 +1165,15 @@ The knowledge collection uses named vectors so incompatible embedding spaces are
 
 ```json
 {
-  "collection": "knowledge_units_v1",
+  "collection": "knowledge_units_v2",
   "vectors": {
     "text_embeddinggemma_v1": {
       "size": 768,
       "distance": "Cosine"
-    },
-    "image_clip_v1": {
-      "size": 512,
-      "distance": "Cosine"
-    },
-    "audio_clap_v1": {
-      "size": 512,
-      "distance": "Cosine"
     }
+  },
+  "sparse_vectors": {
+    "text_bm25_v1": {"modifier": "idf"}
   }
 }
 ```
@@ -1227,6 +1230,27 @@ Every derived artifact records:
 - Creation timestamp.
 
 Changing an embedding checkpoint, dimension, tokenizer, normalization rule, or task prefix creates a new vector version. Migration uses a new named vector or collection, dual writes, background reindexing, validation, and controlled cutover.
+
+### Reindex and v2 cutover
+
+Build the new collection while chat continues reading v1:
+
+```bash
+cd rag-chatbot-fastapi
+python -m app.maintenance.reindex_documents \
+  --target-collection knowledge_units_v2 \
+  --batch-size 50
+```
+
+The command is idempotent and supports `--dry-run`, `--tenant-id`, `--knowledge-base-id`,
+`--after-id`, and `--updated-since`. It reads completed document metadata from PostgreSQL,
+downloads originals from SeaweedFS, and reruns parsing, structural chunking, dense and sparse
+encoding, Qdrant indexing, and graph extraction.
+
+For cutover, pause uploads briefly, run a final `--updated-since` delta, compare completed-document
+chunk counts and retrieval evaluation, then set `QDRANT_COLLECTION=knowledge_units_v2` and restart
+chat/worker processes. Keep v1 until acceptance checks pass; rollback only requires switching the
+environment variable back to v1.
 
 ---
 
@@ -1448,12 +1472,18 @@ RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/
 # SeaweedFS
 SEAWEEDFS_MASTER_URL=http://seaweedfs-master:9333
 SEAWEEDFS_FILER_URL=http://seaweedfs-filer:8888
+SEAWEEDFS_S3_ENDPOINT=http://seaweedfs-s3:8333
 SEAWEEDFS_BUCKET=cacanode
+SEAWEEDFS_CONNECT_TIMEOUT_SECONDS=3
+SEAWEEDFS_READ_TIMEOUT_SECONDS=30
+SEAWEEDFS_MAX_ATTEMPTS=3
 
 # Qdrant
 QDRANT_URL=http://qdrant:6333
 QDRANT_API_KEY=
-QDRANT_COLLECTION=knowledge_units_v1
+QDRANT_COLLECTION=knowledge_units_v2
+QDRANT_DENSE_VECTOR_NAME=text_embeddinggemma_v1
+QDRANT_SPARSE_VECTOR_NAME=text_bm25_v1
 QDRANT_TENANT_FIELD=tenant_id
 QDRANT_KNOWLEDGE_BASE_FIELD=knowledge_base_id
 
@@ -1472,6 +1502,9 @@ LLM_MAX_OUTPUT_TOKENS=1024
 TEXT_EMBEDDING_MODEL_ID=google/embeddinggemma-300M
 TEXT_EMBEDDING_DIMENSION=768
 TEXT_EMBEDDING_BATCH_SIZE=32
+TEXT_EMBEDDING_TIMEOUT_SECONDS=120
+SPARSE_MODEL_ID=Qdrant/bm25
+SPARSE_MODEL_CACHE_DIR=/models/fastembed
 
 # Vision, audio, ASR, and OCR
 CLIP_MODEL_ID=<approved-clip-checkpoint>
@@ -1495,13 +1528,34 @@ MAX_VIDEO_MB=500
 MALWARE_SCAN_ENABLED=true
 
 # Retrieval
-TEXT_TOP_K=20
+DENSE_CANDIDATE_COUNT=40
+SPARSE_CANDIDATE_COUNT=40
+GRAPH_CANDIDATE_COUNT=20
+FUSION_CANDIDATE_COUNT=30
+RRF_K=30
+SEMANTIC_DENSE_WEIGHT=0.55
+SEMANTIC_SPARSE_WEIGHT=0.30
+SEMANTIC_GRAPH_WEIGHT=0.15
+EXACT_DENSE_WEIGHT=0.25
+EXACT_SPARSE_WEIGHT=0.60
+EXACT_GRAPH_WEIGHT=0.15
+RELATIONAL_DENSE_WEIGHT=0.30
+RELATIONAL_SPARSE_WEIGHT=0.15
+RELATIONAL_GRAPH_WEIGHT=0.55
+CALCULATION_DENSE_WEIGHT=0.35
+CALCULATION_SPARSE_WEIGHT=0.50
+CALCULATION_GRAPH_WEIGHT=0.15
 IMAGE_TOP_K=12
 AUDIO_TOP_K=12
 GRAPH_MAX_HOPS=3
+PRIMARY_CONTEXT_TOP_K=5
 FINAL_CONTEXT_TOP_K=8
-MIN_RETRIEVAL_CONFIDENCE=0.0
-ENABLE_RERANKER=true
+CONTEXT_DOCUMENT_SOFT_LIMIT=2
+NEIGHBOR_EXPANSION_LIMIT=3
+RERANKER_ENABLED=true
+RERANKER_URL=http://reranker-service
+RERANKER_MODEL_ID=BAAI/bge-reranker-v2-m3
+RERANKER_TIMEOUT_SECONDS=10
 ENABLE_GENERAL_KNOWLEDGE=false
 
 # Public API
@@ -1531,13 +1585,11 @@ No environment variable accepts a tenant-supplied model-provider key.
 - Sufficient GPU memory for the selected Gemma checkpoint.
 - Sufficient disk space for model weights, raw sources, and derived media.
 
-### Start local development dependencies
+### Start local development
 
-```bash
-docker compose up -d --build
-```
-
-This starts PostgreSQL, Redis, RabbitMQ, Qdrant, SeaweedFS, and the local Kuzu graph service. The FastAPI app is run on the host for development:
+The development infrastructure target starts PostgreSQL, Redis, RabbitMQ, Qdrant, Ollama,
+SeaweedFS, and the Kuzu graph service through Docker Compose. The AI/chat FastAPI app runs on the
+host with auto-reload:
 
 ```bash
 cd rag-chatbot-fastapi
@@ -1545,7 +1597,19 @@ cp .env.example .env
 make dev
 ```
 
-The default `make dev` mode starts all worker lifecycles inside the FastAPI process with `WORKER_MODE=embedded`.
+The AI API reaches Graph on `http://localhost:8010`. Reranking is disabled by default locally
+because TEI does not publish an ARM64 image. The production `BAAI/bge-reranker-v2-m3` model can
+exhaust Docker Desktop memory under x86 emulation, starving Ollama and SeaweedFS. Local opt-in uses
+the much smaller Vietnamese-capable `cross-encoder/mmarco-mMiniLMv2-L12-H384-v1` model instead.
+Start it explicitly with `make dev-reranker`, then run the API with
+`DEV_RERANKER_ENABLED=true make dev`. The default `make dev` mode also starts worker lifecycles
+inside the FastAPI process with `WORKER_MODE=embedded`.
+
+Stop the development containers without deleting their volumes using:
+
+```bash
+make dev-down
+```
 
 ### Start the container platform
 
@@ -1667,6 +1731,19 @@ Text retrieval is evaluated with:
 - Vietnamese diacritic and spelling variants.
 
 Multimodal retrieval is evaluated with modality-specific Recall@K and timestamp accuracy.
+
+The versioned Vietnamese fixture is `rag-chatbot-fastapi/tests/data/retrieval_vi_v1.json`. Score
+recorded rankings for the dense-only, dense+sparse, dense+graph, and full-pipeline ablations with:
+
+```bash
+python -m app.maintenance.evaluate_retrieval \
+  --dataset tests/data/retrieval_vi_v1.json \
+  --results artifacts/full-pipeline.json \
+  --label full-pipeline
+```
+
+The report includes Recall@5/10, MRR, nDCG@10, no-answer precision, channel contribution, and p95
+latency without logging query or document text.
 
 ### Generation evaluation
 

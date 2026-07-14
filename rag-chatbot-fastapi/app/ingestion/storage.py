@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 
 import boto3
+from botocore import UNSIGNED
+from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError
 
 from app.core.config import Settings
@@ -12,11 +14,19 @@ from app.ingestion.errors import TransientIngestionError
 class SeaweedS3DocumentStore:
     def __init__(self, settings: Settings):
         self._bucket = settings.SEAWEEDFS_BUCKET
+        has_credentials = bool(settings.SEAWEEDFS_ACCESS_KEY and settings.SEAWEEDFS_SECRET_KEY)
         self._client = boto3.client(
             "s3",
             endpoint_url=settings.SEAWEEDFS_S3_ENDPOINT,
             aws_access_key_id=settings.SEAWEEDFS_ACCESS_KEY or None,
             aws_secret_access_key=settings.SEAWEEDFS_SECRET_KEY or None,
+            config=Config(
+                signature_version=None if has_credentials else UNSIGNED,
+                connect_timeout=settings.SEAWEEDFS_CONNECT_TIMEOUT_SECONDS,
+                read_timeout=settings.SEAWEEDFS_READ_TIMEOUT_SECONDS,
+                retries={"mode": "standard", "total_max_attempts": settings.SEAWEEDFS_MAX_ATTEMPTS},
+                s3={"addressing_style": "path"},
+            ),
         )
 
     async def download(self, storage_key: str) -> bytes:

@@ -7,6 +7,7 @@ import java.util.UUID;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.security.access.AccessDeniedException;
@@ -18,6 +19,7 @@ import com.cacanode.api.document.dto.DocumentListItemResponse;
 import com.cacanode.api.document.dto.DocumentDownloadResponse;
 import com.cacanode.api.document.dto.DocumentStatusResponse;
 import com.cacanode.api.document.dto.DocumentUploadResponse;
+import com.cacanode.api.document.event.FailedDocumentCleanupRequestedEvent;
 import com.cacanode.api.document.enums.DocumentStatus;
 import com.cacanode.api.document.enums.DocumentType;
 import com.cacanode.api.document.enums.DocumentVisibility;
@@ -42,6 +44,7 @@ public class DocumentService {
     private final DocumentStorage documentStorage;
     private final DocumentIngestionPublisher ingestionPublisher;
     private final DocumentIndexCleanup indexCleanup;
+    private final ApplicationEventPublisher eventPublisher;
 
     DocumentUploadResponse upload(UUID tenantId, UUID userId, UUID knowledgeBaseId, MultipartFile file) {
         return upload(tenantId, userId, "TENANT_ADMIN", knowledgeBaseId,
@@ -148,6 +151,16 @@ public class DocumentService {
         if (document.getStatus() == DocumentStatus.PENDING
                 || document.getStatus() == DocumentStatus.PROCESSING) {
             throw new BadRequestException("Wait for document processing to finish before deleting it");
+        }
+        if (document.getStatus() == DocumentStatus.FAILED) {
+            documentRepository.delete(document);
+            eventPublisher.publishEvent(new FailedDocumentCleanupRequestedEvent(
+                    tenantId,
+                    document.getKnowledgeBaseId(),
+                    documentId,
+                    document.getStoragePath()
+            ));
+            return;
         }
         indexCleanup.delete(tenantId, document.getKnowledgeBaseId(), documentId);
         documentStorage.delete(document.getStoragePath());

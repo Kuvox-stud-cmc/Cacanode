@@ -23,7 +23,7 @@ class TextChunk:
     source_start: int | None = None
     source_end: int | None = None
     parser_version: str = "digital-v1"
-    chunker_version: str = "structural-v1"
+    chunker_version: str = "structural-v2"
 
 
 class DeterministicChunker:
@@ -53,10 +53,7 @@ class DeterministicChunker:
     def _chunk_blocks(self, document: ParsedDocument) -> list[TextChunk]:
         chunks: list[TextChunk] = []
         for block in document.blocks:
-            pieces = self._split_block(
-                block.text,
-                preserve_lines=block.block_type in {"table", "code"},
-            )
+            pieces = self._split_block(block.text, block_type=block.block_type)
             for piece_index, text in enumerate(pieces):
                 unit_id = block.unit_id if len(pieces) == 1 else f"{block.unit_id}:{piece_index}"
                 chunks.append(
@@ -80,17 +77,21 @@ class DeterministicChunker:
                 )
         return chunks
 
-    def _split_block(self, text: str, *, preserve_lines: bool = False) -> list[str]:
-        if preserve_lines:
-            normalized = "\n".join(
-                " ".join(line.split()) for line in text.splitlines() if line.strip()
-            )
+    def _split_block(self, text: str, *, block_type: str = "paragraph") -> list[str]:
+        structural = block_type in {"heading", "list", "code", "table", "sheet", "row"}
+        if structural:
+            normalized = "\n".join(line.rstrip() for line in text.splitlines() if line.strip())
         else:
             normalized = " ".join(text.split())
         if not normalized:
             return []
         if len(normalized) <= self._chunk_size:
             return [normalized]
+        if structural:
+            return self._split_structural(normalized, repeat_table_header=block_type == "table")
+        return self._split_prose(normalized)
+
+    def _split_prose(self, normalized: str) -> list[str]:
         result: list[str] = []
         start = 0
         while start < len(normalized):
@@ -112,3 +113,46 @@ class DeterministicChunker:
             while start < len(normalized) and normalized[start] == " ":
                 start += 1
         return result
+
+    def _split_structural(self, normalized: str, *, repeat_table_header: bool) -> list[str]:
+        lines = normalized.splitlines()
+        if repeat_table_header and lines:
+            header = [lines[0]]
+            if len(lines) > 1 and self._is_table_separator(lines[1]):
+                header.append(lines[1])
+            return self._split_table(lines, header)
+        result: list[str] = []
+        current: list[str] = []
+        for line in lines:
+            candidates = [*current, line]
+            if current and len("\n".join(candidates)) > self._chunk_size:
+                result.append("\n".join(current))
+                current = []
+            if len(line) <= self._chunk_size:
+                current.append(line)
+                continue
+            if current:
+                result.append("\n".join(current))
+                current = []
+            for start in range(0, len(line), self._chunk_size):
+                result.append(line[start : start + self._chunk_size])
+        if current:
+            result.append("\n".join(current))
+        return result
+
+    def _split_table(self, lines: list[str], header: list[str]) -> list[str]:
+        result: list[str] = []
+        current = list(header)
+        for line in lines[len(header) :]:
+            if len("\n".join([*current, line])) > self._chunk_size and current != header:
+                result.append("\n".join(current))
+                current = list(header)
+            current.append(line)
+        if current:
+            result.append("\n".join(current))
+        return result
+
+    @staticmethod
+    def _is_table_separator(line: str) -> bool:
+        compact = line.replace("|", "").replace(":", "").replace("-", "").strip()
+        return not compact

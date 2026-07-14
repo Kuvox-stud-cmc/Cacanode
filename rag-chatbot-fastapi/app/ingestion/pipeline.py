@@ -6,6 +6,7 @@ from app.ingestion.embedding import OllamaEmbeddingClient
 from app.ingestion.errors import PermanentIngestionError
 from app.ingestion.events import DocumentIngestRequestedEvent
 from app.ingestion.extraction import DocumentTextExtractor
+from app.ingestion.sparse import FastEmbedSparseEncoder
 from app.ingestion.spreadsheets import parquet_bytes
 from app.ingestion.storage import SeaweedS3DocumentStore
 from app.ingestion.vector_store import QdrantChunkStore
@@ -19,6 +20,7 @@ class DocumentIngestionPipeline:
         extractor: DocumentTextExtractor,
         chunker: DeterministicChunker,
         embedder: OllamaEmbeddingClient,
+        sparse_encoder: FastEmbedSparseEncoder,
         vector_store: QdrantChunkStore,
         graph_store: GraphServiceClient,
         graph_extractor: EntityRelationExtractor,
@@ -27,6 +29,7 @@ class DocumentIngestionPipeline:
         self._extractor = extractor
         self._chunker = chunker
         self._embedder = embedder
+        self._sparse_encoder = sparse_encoder
         self._vector_store = vector_store
         self._graph_store = graph_store
         self._graph_extractor = graph_extractor
@@ -41,9 +44,7 @@ class DocumentIngestionPipeline:
         chunks = self._chunker.chunk(parsed)
         if not chunks:
             raise PermanentIngestionError("Document contains no extractable text")
-        artifact_keys: list[str] = []
         vector_written = False
-        graph_attempted = False
         try:
             for table in parsed.tables:
                 key = (
@@ -53,9 +54,11 @@ class DocumentIngestionPipeline:
                 await self._store.upload_artifact(
                     key, parquet_bytes(table), "application/vnd.apache.parquet"
                 )
-                artifact_keys.append(key)
             embeddings = await self._embedder.embed_documents([chunk.text for chunk in chunks])
-            await self._vector_store.upsert(event, chunks, embeddings)
+            sparse_embeddings = await self._sparse_encoder.embed_documents(
+                [chunk.text for chunk in chunks]
+            )
+            await self._vector_store.upsert(event, chunks, embeddings, sparse_embeddings)
             vector_written = True
             if parsed.modality == "document":
                 batch = await self._graph_extractor.extract(event, chunks)
@@ -67,25 +70,12 @@ class DocumentIngestionPipeline:
                     source_name=event.file_name,
                     units=tuple(_unit_payload(chunk) for chunk in chunks),
                 )
-            graph_attempted = True
             await self._graph_store.replace_source(batch)
             return len(chunks)
         except Exception:
             if vector_written:
                 try:
                     await self._vector_store.delete_source(event)
-                except Exception:
-                    pass
-            if graph_attempted:
-                try:
-                    await self._graph_store.delete_source(
-                        str(event.tenant_id), str(event.document_id)
-                    )
-                except Exception:
-                    pass
-            for key in artifact_keys:
-                try:
-                    await self._store.delete_artifact(key)
                 except Exception:
                     pass
             raise

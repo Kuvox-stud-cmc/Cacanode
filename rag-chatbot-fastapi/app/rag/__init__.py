@@ -1,2 +1,1 @@
 """Retrieval-augmented chat components."""
-

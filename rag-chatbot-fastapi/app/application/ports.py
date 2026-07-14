@@ -21,7 +21,7 @@ class VectorRetrieverPort(Protocol):
         self,
         tenant_id: str,
         knowledge_base_id: str,
-        query: str,
+        query_text: str,
         limit: int,
     ) -> list[KnowledgeUnit]: ...
 
@@ -31,7 +31,23 @@ class GraphRetrieverPort(Protocol):
         self,
         tenant_id: str,
         knowledge_base_id: str,
-        query: str,
+        query_text: str,
+    ) -> list[KnowledgeUnit]: ...
+
+
+class SparseRetrieverPort(Protocol):
+    async def retrieve(
+        self,
+        tenant_id: str,
+        knowledge_base_id: str,
+        query_text: str,
+        limit: int,
+    ) -> list[KnowledgeUnit]: ...
+
+
+class RerankerPort(Protocol):
+    async def rerank(
+        self, query_text: str, candidates: Sequence[KnowledgeUnit]
     ) -> list[KnowledgeUnit]: ...
 
 

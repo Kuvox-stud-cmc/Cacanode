@@ -107,15 +107,11 @@ async def test_qdrant_retriever_filters_by_tenant_and_knowledge_base() -> None:
         ),
         client=client,  # type: ignore[arg-type]
     )
-    labels = {"provider": "qdrant", "outcome": "success"}
-    before = metric_value("cacanode_ai_retrieval_seconds_count", labels)
-
     chunks = await retriever.retrieve(
         tenant_id="tenant-1",
         knowledge_base_id="kb-1",
         query_vector=[0.1, 0.2, 0.3],
         limit=5,
-        score_threshold=0.35,
     )
 
     assert len(chunks) == 1
@@ -124,8 +120,8 @@ async def test_qdrant_retriever_filters_by_tenant_and_knowledge_base() -> None:
     conditions = {condition.key: condition.match.value for condition in query_filter.must}
     assert conditions == {"tenant_id": "tenant-1", "knowledge_base_id": "kb-1"}
     assert client.kwargs["collection_name"] == "chunks"
-    assert client.kwargs["score_threshold"] == 0.35
-    assert metric_value("cacanode_ai_retrieval_seconds_count", labels) == before + 1
+    assert client.kwargs["using"] == "text_embeddinggemma_v1"
+    assert "score_threshold" not in client.kwargs
 
 
 @pytest.mark.asyncio
@@ -135,7 +131,7 @@ async def test_qdrant_retriever_can_filter_to_allowed_document_ids() -> None:
 
     await retriever.retrieve(
         tenant_id="tenant-1", knowledge_base_id="kb-1", query_vector=[0.1],
-        limit=5, score_threshold=0, document_ids=["doc-1", "doc-2"],
+        limit=5, document_ids=["doc-1", "doc-2"],
     )
 
     document_condition = next(
@@ -161,18 +157,16 @@ class FakeRetriever:
         *,
         tenant_id: str,
         knowledge_base_id: str,
+        query_text: str,
         query_vector: Sequence[float],
-        limit: int,
-        score_threshold: float,
         document_ids: Sequence[str] | None = None,
     ) -> list[RetrievedChunk]:
         self.calls.append(
             {
                 "tenant_id": tenant_id,
                 "knowledge_base_id": knowledge_base_id,
+                "query_text": query_text,
                 "query_vector": list(query_vector),
-                "limit": limit,
-                "score_threshold": score_threshold,
                 "document_ids": list(document_ids) if document_ids is not None else None,
             }
         )
@@ -219,8 +213,7 @@ def make_service(
     retriever = FakeRetriever(chunks)
     model = model or FakeChatModel()
     service = RagChatService(
-        settings=settings
-        or Settings(TEXT_TOP_K=8, FINAL_CONTEXT_TOP_K=5, MIN_RETRIEVAL_CONFIDENCE=0.35),
+        settings=settings or Settings(FINAL_CONTEXT_TOP_K=5),
         sessions=InMemoryChatSessionStore(),
         embedder=FakeEmbedder(),
         retriever=retriever,
@@ -250,6 +243,7 @@ async def test_chat_service_returns_no_information_without_evidence() -> None:
     assert message.citations == []
     assert model.calls == []
     assert retriever.calls[0]["knowledge_base_id"] == "kb-1"
+    assert retriever.calls[0]["query_text"] == "Khong co trong tai lieu?"
     assert store.get_for_tenant(session.id, "tenant-1") is not None
 
 

@@ -22,7 +22,13 @@ from app.rag.errors import (
     ChatWorkspaceNotFoundError,
 )
 from app.rag.models import AssistantMessage, ChatMessage, ChatSession, Citation
-from app.rag.retrieval import HybridRetriever, QdrantVectorRetriever
+from app.rag.reranking import TeiReranker
+from app.rag.retrieval import (
+    HybridRetriever,
+    QdrantNeighborLoader,
+    QdrantSparseRetriever,
+    QdrantVectorRetriever,
+)
 from app.rag.sessions import PostgresChatSessionStore
 
 router = APIRouter(prefix="/chat", tags=["chat"])
@@ -174,9 +180,12 @@ def get_chat_service() -> RagChatService:
             sessions=PostgresChatSessionStore(settings.POSTGRES_URL),
             embedder=OllamaEmbeddingClient(settings),
             retriever=HybridRetriever(
-                QdrantVectorRetriever(settings),
-                GraphServiceClient(settings),
-                create_chat_model(settings),
+                settings=settings,
+                dense=QdrantVectorRetriever(settings),
+                sparse=QdrantSparseRetriever(settings),
+                graph=GraphServiceClient(settings),
+                reranker=TeiReranker(settings),
+                neighbor_loader=QdrantNeighborLoader(settings),
             ),
             chat_model=create_chat_model(settings),
             calculations=SpreadsheetCalculationCoordinator(

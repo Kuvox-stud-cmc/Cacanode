@@ -211,66 +211,85 @@ export default function DocumentsPage() {
       return;
     }
 
-    for (const file of files) {
+    const uploads = files.flatMap((file) => {
       if (!isSupportedFile(file)) {
         toast.error(`${file.name} is not supported. Use PDF, DOCX, TXT, Markdown, HTML, XLSX, or CSV.`);
-        continue;
+        return [];
       }
+      return [{ file, localId: makeId() }];
+    });
+    if (uploads.length === 0) return;
 
-      const localId = makeId();
-      const uploading: DashboardDocument = {
-        id: localId,
-        localId,
-        fileName: file.name,
-        fileType: fileTypeFromName(file.name),
-        status: "PENDING",
-        uploadState: "UPLOADING",
-        fileSizeBytes: file.size,
-        jobId: localId,
-        knowledgeBaseId: workspace.knowledgeBase.id,
-        uploadedAt: new Date().toISOString(),
-        visibility: selectedVisibility,
-      };
-      setDocuments((current) => [uploading, ...current]);
+    const optimisticDocuments: DashboardDocument[] = uploads.map(({ file, localId }) => ({
+      id: localId,
+      localId,
+      fileName: file.name,
+      fileType: fileTypeFromName(file.name),
+      status: "PENDING",
+      uploadState: "UPLOADING",
+      fileSizeBytes: file.size,
+      jobId: localId,
+      knowledgeBaseId: workspace.knowledgeBase.id,
+      uploadedAt: new Date().toISOString(),
+      visibility: selectedVisibility,
+    }));
+    setDocuments((current) => [...optimisticDocuments, ...current]);
 
-      try {
-        const uploaded = await uploadDocumentApi(
-          request,
-          file,
-          workspace.knowledgeBase.id,
-          selectedVisibility,
-        );
-        setDocuments((current) =>
-          current.map((document) =>
-            document.localId === localId
-              ? {
-                  ...document,
-                  id: uploaded.id,
-                  jobId: uploaded.jobId,
-                  fileName: uploaded.fileName,
-                  status: uploaded.status,
-                  visibility: uploaded.visibility,
-                  uploadState: undefined,
-                }
-              : document,
-          ),
-        );
-      } catch (error) {
-        const message = error instanceof Error ? error.message : "Upload failed";
-        toast.error(message);
-        setDocuments((current) =>
-          current.map((document) =>
-            document.localId === localId
-              ? {
-                  ...document,
-                  status: "FAILED",
-                  uploadState: undefined,
-                  errorMessage: message,
-                }
-              : document,
-          ),
-        );
+    let nextUpload = 0;
+    let successfulUploads = 0;
+    const uploadNext = async () => {
+      while (nextUpload < uploads.length) {
+        const upload = uploads[nextUpload];
+        nextUpload += 1;
+        if (!upload) return;
+        const { file, localId } = upload;
+
+        try {
+          const uploaded = await uploadDocumentApi(
+            request,
+            file,
+            workspace.knowledgeBase.id,
+            selectedVisibility,
+          );
+          successfulUploads += 1;
+          setDocuments((current) =>
+            current.map((document) =>
+              document.localId === localId
+                ? {
+                    ...document,
+                    id: uploaded.id,
+                    jobId: uploaded.jobId,
+                    fileName: uploaded.fileName,
+                    status: uploaded.status,
+                    visibility: uploaded.visibility,
+                    uploadState: undefined,
+                  }
+                : document,
+            ),
+          );
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "Upload failed";
+          toast.error(`${file.name}: ${message}`);
+          setDocuments((current) =>
+            current.map((document) =>
+              document.localId === localId
+                ? {
+                    ...document,
+                    status: "FAILED",
+                    uploadState: undefined,
+                    errorMessage: message,
+                  }
+                : document,
+            ),
+          );
+        }
       }
+    };
+
+    const concurrency = Math.min(3, uploads.length);
+    await Promise.all(Array.from({ length: concurrency }, () => uploadNext()));
+    if (successfulUploads > 1) {
+      toast.success(`${successfulUploads} documents uploaded`);
     }
   }
 

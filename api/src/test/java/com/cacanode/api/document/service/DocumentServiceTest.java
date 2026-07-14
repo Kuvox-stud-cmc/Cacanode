@@ -21,6 +21,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -30,6 +31,7 @@ import com.cacanode.api.common.exception.custom.ResourceNotFoundException;
 import com.cacanode.api.document.enums.DocumentStatus;
 import com.cacanode.api.document.enums.DocumentType;
 import com.cacanode.api.document.enums.DocumentVisibility;
+import com.cacanode.api.document.event.FailedDocumentCleanupRequestedEvent;
 import org.springframework.security.access.AccessDeniedException;
 import com.cacanode.api.document.messaging.DocumentIngestRequestedEvent;
 import com.cacanode.api.document.messaging.DocumentIngestionPublisher;
@@ -64,6 +66,9 @@ class DocumentServiceTest {
     @Mock
     private DocumentIndexCleanup indexCleanup;
 
+    @Mock
+    private ApplicationEventPublisher eventPublisher;
+
     private AutoCloseable mocks;
     private DocumentService documentService;
 
@@ -75,7 +80,8 @@ class DocumentServiceTest {
                 knowledgeBaseRepository,
                 documentStorage,
                 ingestionPublisher,
-                indexCleanup
+                indexCleanup,
+                eventPublisher
         );
 
         when(knowledgeBaseRepository.findByIdAndTenantId(knowledgeBaseId, tenantId))
@@ -380,6 +386,21 @@ class DocumentServiceTest {
         verify(indexCleanup).delete(tenantId, knowledgeBaseId, documentId);
         verify(documentStorage).delete("storage-key");
         verify(documentRepository).delete(document);
+    }
+
+    @Test
+    void tenantAdminDeletesFailedDocumentWithoutWaitingForIndexCleanup() {
+        Document document = document();
+        document.setStatus(DocumentStatus.FAILED);
+        when(documentRepository.findByIdAndTenantId(documentId, tenantId))
+                .thenReturn(Optional.of(document));
+
+        documentService.delete(tenantId, "TENANT_ADMIN", documentId);
+
+        verify(indexCleanup, never()).delete(any(), any(), any());
+        verify(documentStorage, never()).delete(any());
+        verify(documentRepository).delete(document);
+        verify(eventPublisher).publishEvent(any(FailedDocumentCleanupRequestedEvent.class));
     }
 
     @Test

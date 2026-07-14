@@ -9,16 +9,10 @@ import aio_pika
 from aio_pika.abc import AbstractIncomingMessage
 
 from app.core.config import Settings
-from app.graph import EntityRelationExtractor, GraphServiceClient
-from app.infrastructure.model_gateway import create_chat_model
-from app.ingestion.chunking import DeterministicChunker
-from app.ingestion.embedding import OllamaEmbeddingClient
 from app.ingestion.errors import PermanentIngestionError, TransientIngestionError
 from app.ingestion.events import DocumentIngestRequestedEvent, partial_status_ids, status_event
-from app.ingestion.extraction import DocumentTextExtractor
+from app.ingestion.factory import create_document_ingestion_pipeline
 from app.ingestion.pipeline import DocumentIngestionPipeline
-from app.ingestion.storage import SeaweedS3DocumentStore
-from app.ingestion.vector_store import QdrantChunkStore
 
 logger = logging.getLogger(__name__)
 
@@ -41,24 +35,7 @@ class DocumentWorker:
         connection: Any | None = None,
     ):
         self._settings = settings
-        extraction_settings = settings.model_copy(
-            update={"LLM_MAX_OUTPUT_TOKENS": settings.GRAPH_EXTRACTION_MAX_OUTPUT_TOKENS}
-        )
-        self._pipeline = pipeline or DocumentIngestionPipeline(
-            store=SeaweedS3DocumentStore(settings),
-            extractor=DocumentTextExtractor(),
-            chunker=DeterministicChunker(),
-            embedder=OllamaEmbeddingClient(settings),
-            vector_store=QdrantChunkStore(settings),
-            graph_store=GraphServiceClient(settings),
-            graph_extractor=EntityRelationExtractor(
-                create_chat_model(
-                    extraction_settings,
-                    reasoning_effort=settings.GRAPH_EXTRACTION_REASONING_EFFORT,
-                ),
-                batch_size=settings.GRAPH_EXTRACTION_BATCH_SIZE,
-            ),
-        )
+        self._pipeline = pipeline or create_document_ingestion_pipeline(settings)
         self._connection: Any | None = connection
         self._owns_connection = connection is None
         self._channel: Any | None = None

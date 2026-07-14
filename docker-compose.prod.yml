@@ -7,6 +7,9 @@ x-ai-environment: &ai-environment
   REDIS_URL: redis://redis:6379/0
   RABBITMQ_URL: amqp://rag_user:rag_password@rabbitmq:5672/
   QDRANT_URL: http://qdrant:6333
+  QDRANT_COLLECTION: ${QDRANT_COLLECTION:-knowledge_units_v2}
+  QDRANT_DENSE_VECTOR_NAME: ${QDRANT_DENSE_VECTOR_NAME:-text_embeddinggemma_v1}
+  QDRANT_SPARSE_VECTOR_NAME: ${QDRANT_SPARSE_VECTOR_NAME:-text_bm25_v1}
   KUZU_DATABASE_PATH: /data/kuzu/cacanode.kuzu
   GRAPH_SERVICE_URL: http://graph-service:8010
   GRAPH_INTERNAL_TOKEN: ${GRAPH_INTERNAL_TOKEN:?GRAPH_INTERNAL_TOKEN is required}
@@ -27,7 +30,12 @@ x-ai-environment: &ai-environment
   TEXT_EMBEDDING_BASE_URL: ${TEXT_EMBEDDING_BASE_URL:-http://ollama:11434}
   TEXT_EMBEDDING_MODEL_ID: ${TEXT_EMBEDDING_MODEL_ID:-embeddinggemma}
   TEXT_EMBEDDING_DIMENSION: ${TEXT_EMBEDDING_DIMENSION:-768}
-  MIN_RETRIEVAL_CONFIDENCE: ${MIN_RETRIEVAL_CONFIDENCE:-0.35}
+  SPARSE_MODEL_ID: ${SPARSE_MODEL_ID:-Qdrant/bm25}
+  SPARSE_MODEL_CACHE_DIR: /models/fastembed
+  RERANKER_ENABLED: ${RERANKER_ENABLED:-true}
+  RERANKER_URL: ${RERANKER_URL:-http://reranker-service}
+  RERANKER_MODEL_ID: ${RERANKER_MODEL_ID:-BAAI/bge-reranker-v2-m3}
+  RERANKER_TIMEOUT_SECONDS: ${RERANKER_TIMEOUT_SECONDS:-10}
   PUBLIC_RATE_LIMIT_PER_MINUTE: ${PUBLIC_RATE_LIMIT_PER_MINUTE:-120}
 
 x-worker: &worker
@@ -208,6 +216,21 @@ services:
     profiles: [gpu]
     restart: unless-stopped
     command: ["--model-id", "${TEI_MODEL_ID:-google/embeddinggemma-300m}"]
+    volumes:
+      - model_cache:/data
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  reranker-service:
+    image: ghcr.io/huggingface/text-embeddings-inference:latest
+    profiles: [gpu]
+    restart: unless-stopped
+    command: ["--model-id", "${RERANKER_MODEL_ID:-BAAI/bge-reranker-v2-m3}"]
     volumes:
       - model_cache:/data
     deploy:

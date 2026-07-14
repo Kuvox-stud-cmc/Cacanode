@@ -17,6 +17,7 @@ class OllamaEmbeddingClient:
         self._model = settings.TEXT_EMBEDDING_MODEL_ID
         self._batch_size = settings.TEXT_EMBEDDING_BATCH_SIZE
         self._expected_dimension = settings.TEXT_EMBEDDING_DIMENSION
+        self._timeout_seconds = settings.TEXT_EMBEDDING_TIMEOUT_SECONDS
 
     async def embed_documents(self, texts: Sequence[str]) -> list[list[float]]:
         started_at = time.perf_counter()
@@ -55,7 +56,7 @@ class OllamaEmbeddingClient:
 
     async def _embed_batch(self, texts: Sequence[str]) -> list[list[float]]:
         try:
-            async with httpx.AsyncClient(timeout=60) as client:
+            async with httpx.AsyncClient(timeout=self._timeout_seconds) as client:
                 response = await client.post(
                     f"{self._base_url}/api/embed",
                     json={"model": self._model, "input": list(texts)},
