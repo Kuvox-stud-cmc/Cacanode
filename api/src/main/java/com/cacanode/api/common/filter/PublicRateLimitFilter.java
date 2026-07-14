@@ -84,10 +84,10 @@ public class PublicRateLimitFilter extends OncePerRequestFilter {
 
     private String routeGroup(String path) {
         if (path.startsWith("/api/v1/auth/")) {
-            return "auth:" + path.substring("/api/v1/auth/".length());
+            return "auth:" + canonicalAuthRoute(path.substring("/api/v1/auth/".length()));
         }
         if (path.startsWith("/api/auth/")) {
-            return "auth:" + path.substring("/api/auth/".length());
+            return "auth:" + canonicalAuthRoute(path.substring("/api/auth/".length()));
         }
         if (path.startsWith("/api/v1/public/widget/")) {
             return "widget-config";
@@ -96,6 +96,10 @@ public class PublicRateLimitFilter extends OncePerRequestFilter {
             return "external-tickets";
         }
         return "public";
+    }
+
+    private String canonicalAuthRoute(String route) {
+        return route.startsWith("mobile/") ? route.substring("mobile/".length()) : route;
     }
 
     private String clientIdentity(HttpServletRequest request) {

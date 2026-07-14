@@ -494,6 +494,45 @@ def test_external_conversation_can_be_closed_by_its_integration_token() -> None:
     assert store.get_for_tenant(session.id, "tenant-1") is None
 
 
+def test_external_conversation_can_be_closed_by_authenticated_tenant_member() -> None:
+    service, store, _, _ = make_service(chunks=[])
+    session = service.create_session(
+        tenant_id="tenant-1", user_id=None, chatbot_id="bot-1",
+        knowledge_base_id="kb-1", locale="en", channel="CUSTOM_API",
+        integration_token_id="token-1",
+    )
+
+    service.close_session(
+        tenant_id="tenant-1", session_id=session.id, user_id="employee-1"
+    )
+
+    assert store.get_for_tenant(session.id, "tenant-1") is None
+
+
+def test_authenticated_member_cannot_close_another_tenant_or_employees_playground() -> None:
+    service, store, _, _ = make_service(chunks=[])
+    external = service.create_session(
+        tenant_id="tenant-1", user_id=None, chatbot_id="bot-1",
+        knowledge_base_id="kb-1", locale="en", channel="WIDGET",
+    )
+    playground = service.create_session(
+        tenant_id="tenant-1", user_id="employee-1", chatbot_id="bot-1",
+        knowledge_base_id="kb-1", locale="en",
+    )
+
+    with pytest.raises(ChatSessionNotFoundError):
+        service.close_session(
+            tenant_id="tenant-2", session_id=external.id, user_id="employee-2"
+        )
+    with pytest.raises(ChatSessionNotFoundError):
+        service.close_session(
+            tenant_id="tenant-1", session_id=playground.id, user_id="employee-2"
+        )
+
+    assert store.get_for_tenant(external.id, "tenant-1") is not None
+    assert store.get_for_tenant(playground.id, "tenant-1") is not None
+
+
 @pytest.mark.asyncio
 async def test_chat_service_generates_grounded_answer_with_citations() -> None:
     service, _, retriever, model = make_service(

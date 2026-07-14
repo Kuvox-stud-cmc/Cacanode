@@ -5,6 +5,7 @@ import java.util.UUID;
 
 import org.springframework.stereotype.Service;
 
+import com.cacanode.api.auth.enums.Login2FAChallengeType;
 import com.cacanode.api.notification.enums.NotificationStatus;
 import com.cacanode.api.notification.enums.NotificationType;
 import com.cacanode.api.notification.model.Notification;
@@ -54,7 +55,8 @@ public class NotificationService {
       UUID userId,
       String email,
       String fullName,
-      String verificationToken) {
+      String verificationSecret,
+      Login2FAChallengeType challengeType) {
     Notification notification = new Notification();
     notification.setTenantId(tenantId);
     notification.setUserId(userId);
@@ -65,7 +67,11 @@ public class NotificationService {
     notificationRepository.save(notification);
 
     try {
-      emailService.sendLogin2FAEmail(email, fullName, verificationToken);
+      if (challengeType == Login2FAChallengeType.CODE) {
+        emailService.sendLogin2FACodeEmail(email, fullName, verificationSecret);
+      } else {
+        emailService.sendLogin2FAEmail(email, fullName, verificationSecret);
+      }
       notification.setStatus(NotificationStatus.SENT);
       notification.setSentAt(LocalDateTime.now());
     } catch (Exception e) {

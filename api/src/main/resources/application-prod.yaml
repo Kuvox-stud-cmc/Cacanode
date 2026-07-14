@@ -70,6 +70,7 @@ spring:
     verification-resend-cooldown-seconds: ${VERIFICATION_RESEND_COOLDOWN_SECONDS:60}
     max-verification-resend-attempts: ${MAX_VERIFICATION_RESEND_ATTEMPTS:5}
     login-2fa-expiry-minutes: ${LOGIN_2FA_EXPIRY_MINUTES:15}
+    mobile-login-2fa-expiry-minutes: ${MOBILE_LOGIN_2FA_EXPIRY_MINUTES:10}
   brevo:
     api-key: ${BREVO_API_KEY:}
 

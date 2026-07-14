@@ -48,7 +48,8 @@ public class NotificationListener {
                     event.getUserId(),
                     event.getEmail(),
                     event.getFullName(),
-                    event.getVerificationToken());
+                    event.getVerificationSecret(),
+                    event.getChallengeType());
         } catch (Exception e) {
             // Never let email failure break login
             log.error("Failed to send login 2FA email to {}: {}", event.getEmail(), e.getMessage());

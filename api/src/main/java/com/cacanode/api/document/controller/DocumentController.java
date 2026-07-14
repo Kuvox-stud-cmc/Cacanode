@@ -25,6 +25,8 @@ import com.cacanode.api.document.dto.DocumentStatusResponse;
 import com.cacanode.api.document.dto.DocumentUploadResponse;
 import com.cacanode.api.document.dto.DocumentVisibilityUpdateRequest;
 import com.cacanode.api.document.enums.DocumentVisibility;
+import com.cacanode.api.document.enums.DocumentStatus;
+import com.cacanode.api.document.enums.DocumentType;
 import jakarta.validation.Valid;
 import com.cacanode.api.document.service.DocumentService;
 
@@ -41,9 +43,29 @@ public class DocumentController extends BaseController {
     @GetMapping
     public List<DocumentListItemResponse> list(
             @RequestParam("knowledgeBaseId") UUID knowledgeBaseId,
+            @RequestParam(value = "page", required = false) Integer page,
+            @RequestParam(value = "size", required = false) Integer size,
+            @RequestParam(value = "q", required = false) String query,
+            @RequestParam(value = "status", required = false) DocumentStatus status,
+            @RequestParam(value = "type", required = false) DocumentType type,
+            @RequestParam(value = "visibility", required = false) DocumentVisibility visibility,
             HttpServletRequest request
     ) {
-        return documentService.list(getTenantId(request), knowledgeBaseId);
+        UUID tenantId = getTenantId(request);
+        if (page == null && size == null && query == null && status == null && type == null
+                && visibility == null) {
+            return documentService.list(tenantId, knowledgeBaseId);
+        }
+        return documentService.list(
+                tenantId,
+                knowledgeBaseId,
+                page,
+                size,
+                query,
+                status,
+                type,
+                visibility
+        );
     }
 
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)

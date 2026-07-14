@@ -5,6 +5,9 @@ import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
 
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.context.ApplicationEventPublisher;
@@ -39,6 +42,9 @@ import lombok.RequiredArgsConstructor;
 public class DocumentService {
 
     private static final long MAX_FILE_SIZE_BYTES = 20L * 1024L * 1024L;
+    private static final int DEFAULT_PAGE_SIZE = 20;
+    private static final int MAX_PAGE_SIZE = 100;
+    private static final int MAX_SEARCH_LENGTH = 200;
     private final DocumentRepository documentRepository;
     private final KnowledgeBaseRepository knowledgeBaseRepository;
     private final DocumentStorage documentStorage;
@@ -197,14 +203,71 @@ public class DocumentService {
 
     @Transactional(readOnly = true)
     public List<DocumentListItemResponse> list(UUID tenantId, UUID knowledgeBaseId) {
-        var knowledgeBase = knowledgeBaseRepository.findByIdAndTenantId(knowledgeBaseId, tenantId)
-                .orElseThrow(() -> new BadRequestException("Knowledge base is not active or not found"));
-        if (knowledgeBase.getStatus() != KnowledgeBaseStatus.ACTIVE) {
-            throw new BadRequestException("Knowledge base is not active or not found");
-        }
+        requireActiveKnowledgeBase(tenantId, knowledgeBaseId);
 
         return documentRepository
-                .findByTenantIdAndKnowledgeBaseIdOrderByCreatedAtDesc(tenantId, knowledgeBaseId)
+                .findByTenantIdAndKnowledgeBaseIdOrderByCreatedAtDescIdDesc(tenantId, knowledgeBaseId)
+                .stream()
+                .map(this::toListItemResponse)
+                .toList();
+    }
+
+    @Transactional(readOnly = true)
+    public List<DocumentListItemResponse> list(
+            UUID tenantId,
+            UUID knowledgeBaseId,
+            Integer page,
+            Integer size,
+            String searchText,
+            DocumentStatus status,
+            DocumentType type,
+            DocumentVisibility visibility
+    ) {
+        requireActiveKnowledgeBase(tenantId, knowledgeBaseId);
+
+        int requestedPage = page == null ? 0 : page;
+        int requestedSize = size == null ? DEFAULT_PAGE_SIZE : size;
+        if (requestedPage < 0) {
+            throw new BadRequestException("Page must be zero or greater");
+        }
+        if (requestedSize < 1 || requestedSize > MAX_PAGE_SIZE) {
+            throw new BadRequestException("Size must be between 1 and 100");
+        }
+
+        String query = StringUtils.hasText(searchText) ? searchText.trim() : null;
+        if (query != null && query.length() > MAX_SEARCH_LENGTH) {
+            throw new BadRequestException("Search text must be 200 characters or fewer");
+        }
+
+        Specification<Document> specification = (root, criteriaQuery, builder) -> builder.and(
+                builder.equal(root.get("tenantId"), tenantId),
+                builder.equal(root.get("knowledgeBaseId"), knowledgeBaseId)
+        );
+        if (query != null) {
+            String pattern = "%" + escapeLike(query.toLowerCase(Locale.ROOT)) + "%";
+            specification = specification.and((root, criteriaQuery, builder) ->
+                    builder.like(builder.lower(root.get("fileName")), pattern, '\\'));
+        }
+        if (status != null) {
+            specification = specification.and((root, criteriaQuery, builder) ->
+                    builder.equal(root.get("status"), status));
+        }
+        if (type != null) {
+            specification = specification.and((root, criteriaQuery, builder) ->
+                    builder.equal(root.get("fileType"), type));
+        }
+        if (visibility != null) {
+            specification = specification.and((root, criteriaQuery, builder) ->
+                    builder.equal(root.get("visibility"), visibility));
+        }
+
+        var pageable = PageRequest.of(
+                requestedPage,
+                requestedSize,
+                Sort.by(Sort.Order.desc("createdAt"), Sort.Order.desc("id"))
+        );
+        return documentRepository.findAll(specification, pageable)
+                .getContent()
                 .stream()
                 .map(this::toListItemResponse)
                 .toList();
@@ -235,6 +298,18 @@ public class DocumentService {
         String filename = safeFileName(file.getOriginalFilename());
         DocumentType type = documentTypeFor(filename);
         DocumentFileValidator.validate(file, type);
+    }
+
+    private void requireActiveKnowledgeBase(UUID tenantId, UUID knowledgeBaseId) {
+        var knowledgeBase = knowledgeBaseRepository.findByIdAndTenantId(knowledgeBaseId, tenantId)
+                .orElseThrow(() -> new BadRequestException("Knowledge base is not active or not found"));
+        if (knowledgeBase.getStatus() != KnowledgeBaseStatus.ACTIVE) {
+            throw new BadRequestException("Knowledge base is not active or not found");
+        }
+    }
+
+    private String escapeLike(String value) {
+        return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_");
     }
 
     private DocumentType documentTypeFor(String filename) {

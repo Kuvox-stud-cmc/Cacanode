@@ -1,11 +1,14 @@
 package com.cacanode.api.auth.service.implement;
 
 import com.cacanode.api.auth.dto.request.LoginRequest;
+import com.cacanode.api.auth.dto.request.MobileLoginRequest;
 import com.cacanode.api.auth.dto.request.RegisterRequest;
 import com.cacanode.api.auth.dto.response.AuthResponse;
 import com.cacanode.api.auth.dto.response.LoginStep1Response;
+import com.cacanode.api.auth.dto.response.MobileAuthResponse;
 import com.cacanode.api.auth.dto.response.RegisterResponse;
 import com.cacanode.api.auth.dto.response.ResendVerificationResponse;
+import com.cacanode.api.auth.enums.Login2FAChallengeType;
 import com.cacanode.api.auth.model.Login2FAState;
 import com.cacanode.api.auth.model.RefreshToken;
 import com.cacanode.api.auth.model.UserSuspensionState;
@@ -20,6 +23,7 @@ import com.cacanode.api.common.event.UserRegisteredEvent;
 import io.jsonwebtoken.Claims;
 import com.cacanode.api.auth.repository.RefreshTokenRepository;
 import com.cacanode.api.auth.service.AuthService;
+import com.cacanode.api.auth.service.Login2FAAttemptService;
 import com.cacanode.api.common.exception.custom.ConflictException;
 import com.cacanode.api.common.exception.custom.UnauthorizedException;
 import com.cacanode.api.auth.service.JwtService;
@@ -41,6 +45,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.security.SecureRandom;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
@@ -49,6 +54,10 @@ import java.util.UUID;
 @Slf4j(topic = "AUTH-SERVICE")
 @RequiredArgsConstructor
 public class AuthServiceImpl implements AuthService {
+
+    private static final int MOBILE_CODE_BOUND = 1_000_000;
+    private static final int MAX_MOBILE_CODE_ATTEMPTS = 5;
+    private static final SecureRandom SECURE_RANDOM = new SecureRandom();
 
     @Value("${jwt.expiry-days}")
     private Long refreshTokenExpiryTime;
@@ -65,6 +74,9 @@ public class AuthServiceImpl implements AuthService {
     @Value("${spring.sendgrid.login-2fa-expiry-minutes:15}")
     private Integer login2FAExpiryMinutes;
 
+    @Value("${spring.sendgrid.mobile-login-2fa-expiry-minutes:10}")
+    private Integer mobileLogin2FAExpiryMinutes;
+
     @Value("${app.security.cookie-secure:false}")
     private boolean cookieSecure;
 
@@ -77,6 +89,7 @@ public class AuthServiceImpl implements AuthService {
     private final Login2FAStateRepository login2FAStateRepository;
     private final VerificationResendStateRepository verificationResendStateRepository;
     private final JwtService jwtService;
+    private final Login2FAAttemptService login2FAAttemptService;
     private final PasswordEncoder passwordEncoder;
     private final ApplicationEventPublisher eventPublisher;
 
@@ -126,28 +139,44 @@ public class AuthServiceImpl implements AuthService {
     @Override
     @Transactional
     public Object login(LoginRequest req, HttpServletResponse res) {
+        LoginOutcome outcome = beginLogin(req.getEmail(), req.getPassword(), Login2FAChallengeType.LINK);
+        if (outcome.challenge() != null) {
+            return outcome.challenge();
+        }
 
-        // 1. Call tenant module to authenticate user
-        TenantUserResult result = tenantModuleApi.authenticateUser(req.getEmail(), req.getPassword());
+        return deliverBrowserCredentials(issueCredentialPair(outcome.user(), req.isRememberMe()), res);
+    }
 
-        // 2. If authentication fails, tenant module returns null - we throw exception
+    @Override
+    @Transactional
+    public Object mobileLogin(MobileLoginRequest req) {
+        LoginOutcome outcome = beginLogin(req.getEmail(), req.getPassword(), Login2FAChallengeType.CODE);
+        if (outcome.challenge() != null) {
+            return outcome.challenge();
+        }
+
+        return toMobileResponse(issueCredentialPair(outcome.user(), true));
+    }
+
+    private LoginOutcome beginLogin(String email, String password, Login2FAChallengeType challengeType) {
+        TenantUserResult result = tenantModuleApi.authenticateUser(email, password);
+
         if (result == null) {
             throw new ConflictException("Invalid email or password");
         }
 
-        // 3. Check if user is suspended
         if ("SUSPENDED".equals(result.getStatus())) {
             throw new UnauthorizedException(
                     "Account suspended. Please contact " + supportEmail + " for assistance.");
         }
+        if (!"ACTIVE".equals(result.getStatus())) {
+            throw new UnauthorizedException("User account is disabled");
+        }
 
-        // 4. Check for existing 2FA attempt and suspension state
-        Login2FAState existingState = login2FAStateRepository.findByEmail(req.getEmail())
+        Login2FAState existingState = login2FAStateRepository.findByEmail(result.getEmail())
                 .orElse(null);
-
         UserSuspensionState suspensionState = userSuspensionStateRepository.findByUserId(result.getUserId())
                 .orElse(null);
-
         if (suspensionState != null) {
             throw new UnauthorizedException(
                     "Account suspended due to verification abuse. Please contact " + supportEmail + " for assistance.");
@@ -155,20 +184,16 @@ public class AuthServiceImpl implements AuthService {
 
         if (isLogin2FABypassed(result.getEmail())) {
             UserAuthDto user = tenantModuleApi.findUserById(result.getUserId());
-            if (user == null) {
-                throw new UnauthorizedException("User not found");
-            }
+            validateActiveUser(user, result.getUserId(), result.getTenantId());
 
             log.info("Login 2FA bypassed for configured dev account: userId={}, email={}",
                     result.getUserId(), result.getEmail());
-
-            return issueAuthTokens(user, res, req.isRememberMe());
+            return new LoginOutcome(null, user);
         }
 
-        // 5. Generate 2FA token
-        String verificationToken = jwtService.generateVerificationToken(result.getUserId(), result.getEmail());
+        String verificationSecret = createLoginChallengeSecret(
+                challengeType, result.getUserId(), result.getEmail());
 
-        // 6. Create or update login 2FA state
         if (existingState == null) {
             existingState = new Login2FAState();
             existingState.setUserId(result.getUserId());
@@ -177,17 +202,17 @@ public class AuthServiceImpl implements AuthService {
         } else {
             existingState.setAttemptCount(existingState.getAttemptCount() + 1);
         }
-        existingState.setTokenHash(jwtService.hashToken(verificationToken));
-        existingState.setExpiresAt(LocalDateTime.now().plusMinutes(login2FAExpiryMinutes));
+        existingState.setChallengeType(challengeType);
+        existingState.setTokenHash(hashLoginChallenge(challengeType, verificationSecret));
+        existingState.setExpiresAt(LocalDateTime.now().plusMinutes(challengeExpiryMinutes(challengeType)));
         existingState.setUsed(false);
+        existingState.setVerificationAttemptCount(0);
         login2FAStateRepository.save(existingState);
 
-        // 7. Publish event to send 2FA email
         eventPublisher.publishEvent(
                 new Login2FARequestedEvent(this, result.getUserId(), result.getTenantId(),
-                        result.getEmail(), result.getFullName(), verificationToken));
+                        result.getEmail(), result.getFullName(), verificationSecret, challengeType));
 
-        // 8. Publish audit log event
         Map<String, Object> metadata = new HashMap<>();
         metadata.put("attemptCount", existingState.getAttemptCount());
         metadata.put("email", result.getEmail());
@@ -203,93 +228,94 @@ public class AuthServiceImpl implements AuthService {
 
         log.info("Login 2FA requested: userId={}, email={}", result.getUserId(), result.getEmail());
 
-        // 9. Return step 1 response
-        return LoginStep1Response.builder()
-                .message("Please check your email for a verification link to complete login.")
+        LoginStep1Response challenge = LoginStep1Response.builder()
+                .message(challengeType == Login2FAChallengeType.CODE
+                        ? "Please check your email for a six-digit confirmation code."
+                        : "Please check your email for a verification link to complete login.")
                 .email(result.getEmail())
                 .requires2FA(true)
                 .build();
+        return new LoginOutcome(challenge, null);
+    }
+
+    private String createLoginChallengeSecret(
+            Login2FAChallengeType challengeType, UUID userId, String email) {
+        if (challengeType == Login2FAChallengeType.CODE) {
+            return String.format("%06d", SECURE_RANDOM.nextInt(MOBILE_CODE_BOUND));
+        }
+        return jwtService.generateVerificationToken(userId, email);
+    }
+
+    private String hashLoginChallenge(Login2FAChallengeType challengeType, String secret) {
+        return challengeType == Login2FAChallengeType.CODE
+                ? passwordEncoder.encode(secret)
+                : jwtService.hashToken(secret);
+    }
+
+    private int challengeExpiryMinutes(Login2FAChallengeType challengeType) {
+        return challengeType == Login2FAChallengeType.CODE
+                ? mobileLogin2FAExpiryMinutes
+                : login2FAExpiryMinutes;
     }
 
     @Override
     @Transactional
     public void logout(String refreshToken) {
         String tokenHash = jwtService.hashToken(refreshToken);
-        refreshTokenRepository.findByTokenHash(tokenHash)
-                .ifPresent(token -> {
-                    token.setRevoked(true);
-                    refreshTokenRepository.save(token);
-                });
+        refreshTokenRepository.revokeByTokenHash(tokenHash);
     }
 
     @Override
     @Transactional
     public AuthResponse refreshToken(String refreshToken, HttpServletResponse res) {
+        CredentialPair credentials = rotateCredentials(refreshToken, false);
+        return deliverBrowserCredentials(credentials, res);
+    }
+
+    @Override
+    @Transactional
+    public MobileAuthResponse mobileRefreshToken(String refreshToken) {
+        return toMobileResponse(rotateCredentials(refreshToken, true));
+    }
+
+    private CredentialPair rotateCredentials(String refreshToken, boolean genericErrors) {
         String tokenHash = jwtService.hashToken(refreshToken);
 
         RefreshToken stored = refreshTokenRepository.findByTokenHash(tokenHash)
-                .orElseThrow(() -> new UnauthorizedException("Invalid refresh token"));
+                .orElseThrow(() -> refreshFailure(genericErrors, "Invalid refresh token"));
 
         if (stored.isRevoked()) {
-            throw new UnauthorizedException("Refresh token revoked");
+            throw refreshFailure(genericErrors, "Refresh token revoked");
         }
 
-        if (stored.getExpiresAt().isBefore(LocalDateTime.now())) {
-            throw new UnauthorizedException("Refresh token expired");
+        LocalDateTime now = LocalDateTime.now();
+        if (!stored.getExpiresAt().isAfter(now)) {
+            throw refreshFailure(genericErrors, "Refresh token expired");
         }
 
         UserAuthDto user = tenantModuleApi.findUserById(stored.getUserId());
-        if (user == null || !"ACTIVE".equals(user.getStatus())) {
-            throw new UnauthorizedException("User account is disabled");
+        try {
+            validateActiveUser(user, stored.getUserId(), stored.getTenantId());
+        } catch (UnauthorizedException exception) {
+            throw refreshFailure(genericErrors, exception.getMessage());
         }
 
         boolean persistent = stored.isPersistent();
+        int consumed = refreshTokenRepository.consumeActiveToken(stored.getId(), tokenHash, now);
+        if (consumed != 1) {
+            throw refreshFailure(genericErrors, "Invalid refresh token");
+        }
 
-        // Rotate — delete old, issue new
-        refreshTokenRepository.delete(stored);
+        return issueCredentialPair(user, persistent);
+    }
 
-        String newRefreshToken = jwtService.generateRefreshToken();
-        RefreshToken newStored = new RefreshToken();
-        newStored.setUserId(stored.getUserId());
-        newStored.setTenantId(stored.getTenantId());
-        newStored.setTokenHash(jwtService.hashToken(newRefreshToken));
-        newStored.setExpiresAt(LocalDateTime.now().plusDays(refreshTokenExpiryTime));
-        newStored.setRevoked(false);
-        newStored.setPersistent(persistent);
-        refreshTokenRepository.save(newStored);
-
-        // Set new cookie (same persistence as previous refresh token)
-        setRefreshTokenCookie(res, newRefreshToken, persistent);
-
-        String newAccessToken = jwtService.generateAccessToken(
-                stored.getUserId(),
-                stored.getTenantId(),
-                user.getEmail(),
-                user.getRole());
-
-        return AuthResponse.builder()
-                .accessToken(newAccessToken)
-                .tokenType("Bearer")
-                .expiresIn(jwtService.getAccessTokenExpirySeconds())
-                .user(AuthResponse.UserInfo.builder()
-                        .userId(stored.getUserId().toString())
-                        .tenantId(stored.getTenantId().toString())
-                        .email(user.getEmail())
-                        .fullName(user.getFullName())
-                        .role(user.getRole())
-                        .plan(user.getPlan())
-                        .build())
-                .build();
+    private UnauthorizedException refreshFailure(boolean genericErrors, String browserMessage) {
+        return new UnauthorizedException(genericErrors ? "Invalid refresh token" : browserMessage);
     }
 
     @Override
     public boolean isEmailExist(String email) {
         return tenantModuleApi.existsByEmail(email);
-    }
-
-    @Override
-    public void deleteRefreshTokensByUserId(UUID userId) {
-        refreshTokenRepository.deleteByUserId(userId);
     }
 
     @Override
@@ -367,6 +393,7 @@ public class AuthServiceImpl implements AuthService {
         if (resendState != null && resendState.getAttemptCount() >= maxVerificationResendAttempts) {
             // Suspend the user
             tenantModuleApi.suspendUser(userId);
+            refreshTokenRepository.revokeAllByUserId(userId);
 
             // Create suspension record
             UserSuspensionState newSuspension = new UserSuspensionState();
@@ -469,21 +496,37 @@ public class AuthServiceImpl implements AuthService {
     @Override
     @Transactional
     public AuthResponse verifyLogin2FA(String token, HttpServletResponse res) {
-        // 1. Validate the 2FA token
+        UserAuthDto user = verifyLogin2FALinkUser(token);
+        return deliverBrowserCredentials(issueCredentialPair(user, true), res);
+    }
+
+    @Override
+    @Transactional
+    public MobileAuthResponse mobileVerifyLogin2FA(String email, String code) {
+        UserAuthDto user = verifyLogin2FACodeUser(email, code);
+        return toMobileResponse(issueCredentialPair(user, true));
+    }
+
+    private UserAuthDto verifyLogin2FALinkUser(String token) {
         Claims claims = jwtService.validateVerificationToken(token);
         UUID userId = UUID.fromString(claims.get("userId", String.class));
         String email = claims.getSubject();
 
-        // 2. Find the login 2FA state
         Login2FAState state = login2FAStateRepository.findByEmail(email)
                 .orElseThrow(() -> new UnauthorizedException("Invalid or expired login verification"));
 
-        // 3. Check if already used
+        if (state.getChallengeType() != Login2FAChallengeType.LINK) {
+            throw new UnauthorizedException("Invalid or expired login verification");
+        }
+
+        if (!userId.equals(state.getUserId())) {
+            throw new UnauthorizedException("Invalid verification token");
+        }
+
         if (state.isUsed()) {
             throw new UnauthorizedException("This verification link has already been used");
         }
 
-        // 4. Check if user is suspended
         UserSuspensionState suspensionState = userSuspensionStateRepository.findByUserId(userId)
                 .orElse(null);
         if (suspensionState != null) {
@@ -491,28 +534,61 @@ public class AuthServiceImpl implements AuthService {
                     "Account suspended due to verification abuse. Please contact " + supportEmail + " for assistance.");
         }
 
-        // 5. Check if expired
-        if (state.getExpiresAt().isBefore(LocalDateTime.now())) {
+        if (!state.getExpiresAt().isAfter(LocalDateTime.now())) {
             throw new UnauthorizedException("Login verification link has expired");
         }
 
-        // 6. Verify token hash matches
         String tokenHash = jwtService.hashToken(token);
         if (!tokenHash.equals(state.getTokenHash())) {
             throw new UnauthorizedException("Invalid verification token");
         }
 
-        // 7. Get user info
         UserAuthDto user = tenantModuleApi.findUserById(userId);
-        if (user == null) {
-            throw new UnauthorizedException("User not found");
+        validateActiveUser(user, userId, null);
+
+        if (login2FAStateRepository.consumeIfActive(state.getId(), LocalDateTime.now()) != 1) {
+            throw new UnauthorizedException("This verification link has already been used");
         }
 
-        // 8. Mark state as used
-        state.setUsed(true);
-        login2FAStateRepository.save(state);
+        publishLogin2FAVerified(state, user, email);
+        return user;
+    }
 
-        // 9. Publish audit log event
+    private UserAuthDto verifyLogin2FACodeUser(String email, String code) {
+        Login2FAState state = login2FAStateRepository.findByEmail(email)
+                .orElseThrow(() -> invalidMobileCode());
+
+        LocalDateTime now = LocalDateTime.now();
+        if (state.getChallengeType() != Login2FAChallengeType.CODE
+                || state.isUsed()
+                || !state.getExpiresAt().isAfter(now)) {
+            throw invalidMobileCode();
+        }
+
+        if (!passwordEncoder.matches(code, state.getTokenHash())) {
+            login2FAAttemptService.recordIncorrectAttempt(
+                    state.getId(), now, MAX_MOBILE_CODE_ATTEMPTS);
+            throw invalidMobileCode();
+        }
+
+        UserAuthDto user = tenantModuleApi.findUserById(state.getUserId());
+        validateActiveUser(user, state.getUserId(), null);
+
+        if (login2FAStateRepository.consumeIfActive(state.getId(), now) != 1) {
+            throw invalidMobileCode();
+        }
+
+        publishLogin2FAVerified(state, user, email);
+        return user;
+    }
+
+    private UnauthorizedException invalidMobileCode() {
+        return new UnauthorizedException("Invalid or expired confirmation code");
+    }
+
+    private void publishLogin2FAVerified(Login2FAState state, UserAuthDto user, String email) {
+        UUID userId = state.getUserId();
+
         Map<String, Object> metadata = new HashMap<>();
         metadata.put("attemptCount", state.getAttemptCount());
         metadata.put("email", email);
@@ -527,8 +603,6 @@ public class AuthServiceImpl implements AuthService {
                         .build());
 
         log.info("Login 2FA verified: userId={}, email={}", userId, email);
-
-        return issueAuthTokens(user, res, true);
     }
 
     private boolean isLogin2FABypassed(String email) {
@@ -548,8 +622,14 @@ public class AuthServiceImpl implements AuthService {
     @Override
     @Transactional
     public AuthResponse issueAuthTokens(UserAuthDto user, HttpServletResponse res, boolean persistent) {
-        deleteRefreshTokensByUserId(user.getUserId());
+        if (user == null) {
+            throw new UnauthorizedException("User account is disabled");
+        }
+        validateActiveUser(user, user.getUserId(), user.getTenantId());
+        return deliverBrowserCredentials(issueCredentialPair(user, persistent), res);
+    }
 
+    private CredentialPair issueCredentialPair(UserAuthDto user, boolean persistent) {
         String accessToken = jwtService.generateAccessToken(
                 user.getUserId(),
                 user.getTenantId(),
@@ -567,21 +647,54 @@ public class AuthServiceImpl implements AuthService {
         refreshToken.setPersistent(persistent);
         refreshTokenRepository.save(refreshToken);
 
-        setRefreshTokenCookie(res, refreshTokenValue, persistent);
+        return new CredentialPair(
+                accessToken,
+                refreshTokenValue,
+                jwtService.getAccessTokenExpirySeconds(),
+                persistent,
+                toUserInfo(user));
+    }
 
+    private AuthResponse deliverBrowserCredentials(CredentialPair credentials, HttpServletResponse res) {
+        setRefreshTokenCookie(res, credentials.refreshToken(), credentials.persistent());
         return AuthResponse.builder()
-                .accessToken(accessToken)
+                .accessToken(credentials.accessToken())
                 .tokenType("Bearer")
-                .expiresIn(jwtService.getAccessTokenExpirySeconds())
-                .user(AuthResponse.UserInfo.builder()
-                        .userId(user.getUserId().toString())
-                        .tenantId(user.getTenantId().toString())
-                        .email(user.getEmail())
-                        .fullName(user.getFullName())
-                        .role(user.getRole())
-                        .plan(user.getPlan())
-                        .build())
+                .expiresIn(credentials.expiresIn())
+                .user(credentials.user())
                 .build();
+    }
+
+    private MobileAuthResponse toMobileResponse(CredentialPair credentials) {
+        return MobileAuthResponse.builder()
+                .accessToken(credentials.accessToken())
+                .refreshToken(credentials.refreshToken())
+                .tokenType("Bearer")
+                .expiresIn(credentials.expiresIn())
+                .user(credentials.user())
+                .build();
+    }
+
+    private AuthResponse.UserInfo toUserInfo(UserAuthDto user) {
+        return AuthResponse.UserInfo.builder()
+                .userId(user.getUserId().toString())
+                .tenantId(user.getTenantId().toString())
+                .email(user.getEmail())
+                .fullName(user.getFullName())
+                .role(user.getRole())
+                .plan(user.getPlan())
+                .build();
+    }
+
+    private void validateActiveUser(UserAuthDto user, UUID expectedUserId, UUID expectedTenantId) {
+        if (user == null || !"ACTIVE".equals(user.getStatus())) {
+            throw new UnauthorizedException("User account is disabled");
+        }
+        if (user.getUserId() == null || user.getTenantId() == null
+                || !user.getUserId().equals(expectedUserId)
+                || (expectedTenantId != null && !user.getTenantId().equals(expectedTenantId))) {
+            throw new UnauthorizedException("Refresh token scope is invalid");
+        }
     }
 
     @Override
@@ -590,6 +703,7 @@ public class AuthServiceImpl implements AuthService {
         // 1. Find existing 2FA state
         Login2FAState state = login2FAStateRepository.findByEmail(email)
                 .orElseThrow(() -> new UnauthorizedException("No pending login verification found"));
+        Login2FAChallengeType challengeType = state.getChallengeType();
 
         // 2. Check if user is suspended
         UserSuspensionState suspensionState = userSuspensionStateRepository.findByUserId(state.getUserId())
@@ -616,6 +730,7 @@ public class AuthServiceImpl implements AuthService {
         if (state.getAttemptCount() >= maxVerificationResendAttempts) {
             // Suspend the user account
             tenantModuleApi.suspendUser(userId);
+            refreshTokenRepository.revokeAllByUserId(userId);
 
             // Create suspension record
             UserSuspensionState newSuspension = new UserSuspensionState();
@@ -663,24 +778,28 @@ public class AuthServiceImpl implements AuthService {
                             .build());
 
             return ResendVerificationResponse.builder()
-                    .message("Please wait before requesting another verification email")
+                    .message(challengeType == Login2FAChallengeType.CODE
+                            ? "Please wait before requesting another confirmation code"
+                            : "Please wait before requesting another verification email")
                     .canRetryAfterSeconds(remainingSeconds)
                     .build();
         }
 
-        // 7. Generate new 2FA token
-        String verificationToken = jwtService.generateVerificationToken(userId, email);
+        // 7. Generate a replacement challenge of the same type.
+        String verificationSecret = createLoginChallengeSecret(challengeType, userId, email);
 
         // 8. Update state
         state.setAttemptCount(state.getAttemptCount() + 1);
-        state.setTokenHash(jwtService.hashToken(verificationToken));
-        state.setExpiresAt(LocalDateTime.now().plusMinutes(login2FAExpiryMinutes));
+        state.setTokenHash(hashLoginChallenge(challengeType, verificationSecret));
+        state.setExpiresAt(LocalDateTime.now().plusMinutes(challengeExpiryMinutes(challengeType)));
+        state.setVerificationAttemptCount(0);
+        state.setUsed(false);
         login2FAStateRepository.save(state);
 
         // 9. Publish event to send 2FA email
         eventPublisher.publishEvent(
                 new Login2FARequestedEvent(this, userId, tenantId,
-                        email, user.getFullName(), verificationToken));
+                        email, user.getFullName(), verificationSecret, challengeType));
 
         // 10. Publish audit log event
         Map<String, Object> metadata = new HashMap<>();
@@ -700,7 +819,21 @@ public class AuthServiceImpl implements AuthService {
                 state.getAttemptCount());
 
         return ResendVerificationResponse.builder()
-                .message("Verification email sent. Please check your inbox.")
+                .message(challengeType == Login2FAChallengeType.CODE
+                        ? "A new confirmation code was sent. Please check your inbox."
+                        : "Verification email sent. Please check your inbox.")
+                .canRetryAfterSeconds(verificationResendCooldownSeconds)
                 .build();
+    }
+
+    private record LoginOutcome(LoginStep1Response challenge, UserAuthDto user) {
+    }
+
+    private record CredentialPair(
+            String accessToken,
+            String refreshToken,
+            long expiresIn,
+            boolean persistent,
+            AuthResponse.UserInfo user) {
     }
 }

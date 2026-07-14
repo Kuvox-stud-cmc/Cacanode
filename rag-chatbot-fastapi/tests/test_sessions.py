@@ -40,6 +40,23 @@ class FakeConnection:
         return self.fake_cursor
 
 
+class FakeListCursor(FakeCursor):
+    def __init__(self, rows: list[dict[str, Any]]) -> None:
+        super().__init__({})
+        self.rows = rows
+
+    def fetchall(self) -> list[dict[str, Any]]:
+        return self.rows
+
+
+class MissingCursor(FakeCursor):
+    def __init__(self) -> None:
+        super().__init__({})
+
+    def fetchone(self) -> None:
+        return None
+
+
 def test_postgres_session_lookup_loads_current_tenant_prompt() -> None:
     cursor = FakeCursor(
         {
@@ -68,3 +85,67 @@ def test_postgres_session_lookup_loads_current_tenant_prompt() -> None:
     assert "JOIN tenants t ON t.id = s.tenant_id" in cursor.query
     assert "t.customer_answer_prompt" in cursor.query
     assert cursor.params == ("session-1", "tenant-1")
+
+
+def test_external_conversation_list_filters_in_postgres_with_stable_paging() -> None:
+    rows = [
+        {
+            "id": "conversation-2",
+            "channel": "CUSTOM_API",
+            "status": "CLOSED",
+            "message_count": 4,
+        }
+    ]
+    cursor = FakeListCursor(rows)
+    store = PostgresChatSessionStore("postgresql://unused")
+    store._connect = lambda: FakeConnection(cursor)  # type: ignore[method-assign]
+
+    result = store.list_external_conversations(
+        tenant_id="tenant-1",
+        status="CLOSED",
+        channel="CUSTOM_API",
+        limit=25,
+        offset=50,
+    )
+
+    assert result == rows
+    assert "s.tenant_id = %s" in cursor.query
+    assert "s.channel IN ('WIDGET', 'CUSTOM_API')" in cursor.query
+    assert "s.status = %s" in cursor.query
+    assert "s.channel = %s" in cursor.query
+    assert "ORDER BY s.created_at DESC, s.id DESC" in cursor.query
+    assert cursor.params == ("tenant-1", "CLOSED", "CUSTOM_API", 25, 50)
+
+
+def test_external_conversation_store_clamps_defensive_paging_bounds() -> None:
+    cursor = FakeListCursor([])
+    store = PostgresChatSessionStore("postgresql://unused")
+    store._connect = lambda: FakeConnection(cursor)  # type: ignore[method-assign]
+
+    store.list_external_conversations(
+        tenant_id="tenant-1",
+        status=None,
+        channel=None,
+        limit=1000,
+        offset=-10,
+    )
+
+    assert cursor.params == ("tenant-1", 100, 0)
+    assert "s.status = %s" not in cursor.query
+    assert "s.channel = %s" not in cursor.query
+
+
+def test_external_conversation_detail_is_tenant_scoped() -> None:
+    cursor = MissingCursor()
+    store = PostgresChatSessionStore("postgresql://unused")
+    store._connect = lambda: FakeConnection(cursor)  # type: ignore[method-assign]
+
+    result = store.get_external_conversation(
+        tenant_id="tenant-1",
+        session_id="conversation-from-tenant-2",
+    )
+
+    assert result is None
+    assert "id = %s AND tenant_id = %s" in cursor.query
+    assert "channel IN ('WIDGET', 'CUSTOM_API')" in cursor.query
+    assert cursor.params == ("conversation-from-tenant-2", "tenant-1")

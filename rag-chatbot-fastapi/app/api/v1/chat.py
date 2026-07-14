@@ -1,7 +1,7 @@
-from typing import Any
+from typing import Annotated, Any, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Header, status
+from fastapi import APIRouter, Depends, Header, Query, status
 from pydantic import BaseModel, Field
 
 from app.core.config import settings
@@ -33,6 +33,9 @@ from app.rag.sessions import PostgresChatSessionStore
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 _chat_service: RagChatService | None = None
+
+ConversationStatus = Literal["OPEN", "CLOSED"]
+ConversationChannel = Literal["WIDGET", "CUSTOM_API"]
 
 
 class CreateSessionRequest(BaseModel):
@@ -404,15 +407,17 @@ async def hide_playground_session(
 
 @router.get("/conversations", response_model=list[ConversationListItemResponse])
 async def list_conversations(
-    conversation_status: str | None = None,
-    limit: int = 50,
-    offset: int = 0,
+    conversation_status: ConversationStatus | None = None,
+    channel: ConversationChannel | None = None,
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
     tenant: dict[str, Any] = current_tenant_dependency,
     chat_service: RagChatService = chat_service_dependency,
 ) -> list[ConversationListItemResponse]:
     rows = chat_service.list_external_conversations(
         tenant_id=str(tenant["tenant_id"]),
         status=conversation_status,
+        channel=channel,
         limit=limit,
         offset=offset,
     )

@@ -132,10 +132,11 @@ class RagChatService:
             and session.integration_token_id != integration_token_id
         ):
             raise ChatSessionNotFoundError(session_id)
-        if user_id is not None and (
-            session.channel != "EMPLOYEE_PLAYGROUND" or session.user_id != user_id
-        ):
-            raise ChatSessionNotFoundError(session_id)
+        if user_id is not None:
+            if session.channel == "EMPLOYEE_PLAYGROUND" and session.user_id != user_id:
+                raise ChatSessionNotFoundError(session_id)
+            if session.channel not in {"EMPLOYEE_PLAYGROUND", "WIDGET", "CUSTOM_API"}:
+                raise ChatSessionNotFoundError(session_id)
         if not self._sessions.close_for_tenant(session_id, tenant_id):
             raise ChatSessionNotFoundError(session_id)
 
@@ -157,13 +158,20 @@ class RagChatService:
         *,
         tenant_id: str,
         status: str | None,
+        channel: str | None,
         limit: int,
         offset: int,
     ) -> list[dict[str, Any]]:
         method = getattr(self._sessions, "list_external_conversations", None)
         if method is None:
             return []
-        return method(tenant_id=tenant_id, status=status, limit=limit, offset=offset)
+        return method(
+            tenant_id=tenant_id,
+            status=status,
+            channel=channel,
+            limit=limit,
+            offset=offset,
+        )
 
     def get_external_conversation(
         self, *, tenant_id: str, session_id: str

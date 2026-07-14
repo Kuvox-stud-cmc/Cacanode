@@ -62,6 +62,18 @@ class EmailServiceTest {
     }
 
     @Test
+    void mobileCodeEmailContainsCodeAndNoBrowserLink() {
+        emailService.sendLogin2FACodeEmail("user@example.com", "Ada Lovelace", "123456");
+
+        ArgumentCaptor<EmailMessage> messageCaptor = ArgumentCaptor.forClass(EmailMessage.class);
+        verify(sendGridProvider).send(messageCaptor.capture());
+        EmailMessage message = messageCaptor.getValue();
+        assertEquals("Your CacaNode confirmation code", message.subject());
+        org.junit.jupiter.api.Assertions.assertTrue(message.htmlContent().contains("123456"));
+        org.junit.jupiter.api.Assertions.assertFalse(message.htmlContent().contains("verify-login?token="));
+    }
+
+    @Test
     void bothProvidersFailThrowsDeliveryException() {
         doThrow(new EmailDeliveryException("sendgrid down"))
                 .when(sendGridProvider)

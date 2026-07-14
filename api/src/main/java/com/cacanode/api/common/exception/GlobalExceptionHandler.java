@@ -73,13 +73,19 @@ public class GlobalExceptionHandler {
     public ErrorResponse handleValidationException(
             MethodArgumentNotValidException e, WebRequest request
     ) {
-        log.error("Validation error: {}", e.getMessage());
-
         List<String> errors = e.getBindingResult()
                 .getFieldErrors()
                 .stream()
                 .map(FieldError::getDefaultMessage)
                 .toList();
+        List<String> fields = e.getBindingResult()
+                .getFieldErrors()
+                .stream()
+                .map(FieldError::getField)
+                .distinct()
+                .toList();
+        log.warn("Validation failed: path={}, fields={}",
+                request.getDescription(false).replace("uri=", ""), fields);
 
         return ErrorResponse.builder()
                 .timestamp(LocalDateTime.now())

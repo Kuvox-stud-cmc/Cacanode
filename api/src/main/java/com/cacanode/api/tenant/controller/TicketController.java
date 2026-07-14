@@ -2,13 +2,14 @@ package com.cacanode.api.tenant.controller;
 
 import com.cacanode.api.common.controller.BaseController;
 import com.cacanode.api.tenant.dto.TicketDtos;
+import com.cacanode.api.tenant.enums.TicketPriority;
+import com.cacanode.api.tenant.enums.TicketSource;
 import com.cacanode.api.tenant.enums.TicketStatus;
 import com.cacanode.api.tenant.service.TicketService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
-import org.springframework.data.domain.Pageable;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -30,10 +31,18 @@ public class TicketController extends BaseController {
     @GetMapping
     public Page<TicketDtos.Response> list(
             @RequestParam(required = false) TicketStatus status,
-            Pageable pageable,
+            @RequestParam(required = false) TicketPriority priority,
+            @RequestParam(required = false) TicketSource source,
+            @RequestParam(required = false) UUID assignedTo,
+            @RequestParam(required = false) Boolean unassigned,
+            @RequestParam(required = false) Integer page,
+            @RequestParam(required = false) Integer size,
             HttpServletRequest request
     ) {
-        return ticketService.list(getTenantId(request), status, pageable);
+        return ticketService.list(
+                getTenantId(request), status, priority, source, assignedTo,
+                Boolean.TRUE.equals(unassigned), page, size
+        );
     }
 
     @GetMapping("/assignees")

@@ -1,5 +1,6 @@
 package com.cacanode.api.auth.model;
 
+import com.cacanode.api.auth.enums.Login2FAChallengeType;
 import jakarta.persistence.*;
 import lombok.AccessLevel;
 import lombok.Getter;
@@ -43,10 +44,23 @@ public class Login2FAState extends BaseEntity {
     @Column(name = "attempt_count", nullable = false)
     private Integer attemptCount = 0;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "challenge_type", nullable = false, length = 16)
+    private Login2FAChallengeType challengeType = Login2FAChallengeType.LINK;
+
+    @Column(name = "verification_attempt_count", nullable = false)
+    private Integer verificationAttemptCount = 0;
+
     @PrePersist
     protected void onCreate() {
         if (attemptCount == null) {
             attemptCount = 0;
+        }
+        if (challengeType == null) {
+            challengeType = Login2FAChallengeType.LINK;
+        }
+        if (verificationAttemptCount == null) {
+            verificationAttemptCount = 0;
         }
     }
 }

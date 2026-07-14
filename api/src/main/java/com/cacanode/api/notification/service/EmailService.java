@@ -105,6 +105,16 @@ public class EmailService {
         sendWithFallback(message);
     }
 
+    public void sendLogin2FACodeEmail(String toEmail, String fullName, String confirmationCode) {
+        EmailMessage message = new EmailMessage(
+                toEmail,
+                fullName,
+                "Your CacaNode confirmation code",
+                buildLogin2FACodeEmailHtml(fullName, confirmationCode)
+        );
+        sendWithFallback(message);
+    }
+
     public void sendInvitationEmail(String toEmail, String tenantName, String role,
                                     String token, LocalDateTime expiresAt) {
         String inviteUrl = invitationLink + "?token=" + token;
@@ -209,5 +219,30 @@ public class EmailService {
                 </html>
                 """
                 .formatted(fullName, verifyUrl);
+    }
+
+    private String buildLogin2FACodeEmailHtml(String fullName, String confirmationCode) {
+        return """
+                <!DOCTYPE html>
+                <html>
+                <head><meta charset="UTF-8"><style>
+                body { font-family: Arial, sans-serif; background:#f9f9f9; margin:0; padding:0; }
+                .container { max-width:600px; margin:40px auto; background:#fff; border-radius:8px;
+                  padding:40px; box-shadow:0 2px 8px rgba(0,0,0,.08); }
+                .logo { font-size:24px; font-weight:bold; color:#4f46e5; margin-bottom:24px; }
+                h1 { font-size:22px; color:#111827; } p { color:#6b7280; line-height:1.6; }
+                .code { display:inline-block; padding:16px 24px; margin:20px 0; border-radius:8px;
+                  background:#eef2ff; color:#312e81; font-size:32px; font-weight:bold;
+                  letter-spacing:8px; }
+                .footer { margin-top:32px; font-size:12px; color:#9ca3af; }
+                </style></head><body><div class="container">
+                <div class="logo">CacaNode</div>
+                <h1>Hello, %s!</h1>
+                <p>Enter this confirmation code in the CacaNode mobile app to complete sign-in:</p>
+                <div class="code">%s</div>
+                <p>If you did not attempt to sign in, you can safely ignore this email.</p>
+                <div class="footer">This code expires in 10 minutes and can be used once.</div>
+                </div></body></html>
+                """.formatted(fullName, confirmationCode);
     }
 }

@@ -12,7 +12,7 @@ from app.rag.errors import (
     ChatModelTimeoutError,
     ChatSessionStoreUnavailableError,
 )
-from app.rag.models import AssistantMessage, ChatSession, Citation
+from app.rag.models import AssistantMessage, ChatMessage, ChatSession, Citation
 
 
 def auth_headers(tenant_id: str = "tenant-1", user_id: str = "user-1") -> dict[str, str]:
@@ -30,6 +30,95 @@ def auth_headers(tenant_id: str = "tenant-1", user_id: str = "user-1") -> dict[s
 
 
 class FakeChatService:
+    def list_external_conversations(
+        self,
+        *,
+        tenant_id: str,
+        status: str | None,
+        channel: str | None,
+        limit: int,
+        offset: int,
+    ):
+        self.listed_conversations = {
+            "tenant_id": tenant_id,
+            "status": status,
+            "channel": channel,
+            "limit": limit,
+            "offset": offset,
+        }
+        now = datetime.now(UTC)
+        return [
+            {
+                "id": "conversation-1",
+                "channel": channel or "WIDGET",
+                "external_user_id": "visitor-1",
+                "customer_name": "Ada",
+                "customer_email": "ada@example.com",
+                "status": status or "OPEN",
+                "message_count": 2,
+                "created_at": now,
+                "updated_at": now,
+                "closed_at": None,
+            }
+        ]
+
+    def get_external_conversation(self, *, tenant_id: str, session_id: str):
+        self.loaded_conversation = {"tenant_id": tenant_id, "session_id": session_id}
+        now = datetime.now(UTC)
+        return (
+            {
+                "id": session_id,
+                "channel": "CUSTOM_API",
+                "external_user_id": "external-1",
+                "customer_name": None,
+                "customer_email": "customer@example.com",
+                "customer_metadata": {"plan": "pro", "nested": {"ignored": True}},
+                "status": "OPEN",
+                "created_at": now,
+                "updated_at": now,
+                "closed_at": None,
+            },
+            [
+                ChatMessage(role="system", content="System note", sequence_number=1),
+                ChatMessage(
+                    role="assistant",
+                    content="Draft prepared [S1].",
+                    citations=[
+                        Citation(
+                            id="S1",
+                            document_id="doc-1",
+                            source_name="policy.pdf",
+                            page_number=2,
+                            chunk_index=3,
+                            score=0.9,
+                            snippet="Relevant policy",
+                        )
+                    ],
+                    sequence_number=2,
+                    action={
+                        "type": "ticket_draft",
+                        "title": "Follow up",
+                        "description": "Contact the customer.",
+                    },
+                ),
+            ],
+        )
+
+    def close_session(
+        self,
+        *,
+        tenant_id: str,
+        session_id: str,
+        integration_token_id: str | None = None,
+        user_id: str | None = None,
+    ) -> None:
+        self.closed = {
+            "tenant_id": tenant_id,
+            "session_id": session_id,
+            "integration_token_id": integration_token_id,
+            "user_id": user_id,
+        }
+
     def list_playground_sessions(self, *, tenant_id: str, user_id: str, limit: int, offset: int):
         self.listed = {"tenant_id": tenant_id, "user_id": user_id, "limit": limit, "offset": offset}
         now = datetime.now(UTC)
@@ -267,6 +356,93 @@ def test_hiding_playground_session_uses_current_employee_identity() -> None:
         }
     finally:
         app.dependency_overrides.clear()
+
+
+def test_conversation_list_passes_validated_filters_and_pagination() -> None:
+    service = with_fake_service()
+    try:
+        with TestClient(app) as client:
+            response = client.get(
+                "/api/v1/chat/conversations"
+                "?conversation_status=CLOSED&channel=CUSTOM_API&limit=25&offset=50",
+                headers=auth_headers(tenant_id="tenant-123", user_id="employee-7"),
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()[0]["channel"] == "CUSTOM_API"
+    assert response.json()[0]["status"] == "CLOSED"
+    assert service.listed_conversations == {
+        "tenant_id": "tenant-123",
+        "status": "CLOSED",
+        "channel": "CUSTOM_API",
+        "limit": 25,
+        "offset": 50,
+    }
+
+
+def test_conversation_list_rejects_invalid_filters_and_pagination_bounds() -> None:
+    with TestClient(app) as client:
+        for query in (
+            "conversation_status=PENDING",
+            "channel=EMAIL",
+            "limit=0",
+            "limit=101",
+            "offset=-1",
+        ):
+            response = client.get(
+                f"/api/v1/chat/conversations?{query}",
+                headers=auth_headers(),
+            )
+            assert response.status_code == 422
+
+
+def test_conversation_detail_preserves_metadata_citations_and_actions() -> None:
+    service = with_fake_service()
+    try:
+        with TestClient(app) as client:
+            response = client.get(
+                "/api/v1/chat/conversations/conversation-1",
+                headers=auth_headers(tenant_id="tenant-123"),
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["customer_metadata"] == {"plan": "pro", "nested": {"ignored": True}}
+    assert body["messages"][0]["role"] == "system"
+    assert body["messages"][1]["citations"][0]["document_id"] == "doc-1"
+    assert body["messages"][1]["action"] == {
+        "type": "ticket_draft",
+        "title": "Follow up",
+        "description": "Contact the customer.",
+    }
+    assert service.loaded_conversation == {
+        "tenant_id": "tenant-123",
+        "session_id": "conversation-1",
+    }
+
+
+def test_tenant_member_can_close_external_conversation() -> None:
+    service = with_fake_service()
+    try:
+        with TestClient(app) as client:
+            response = client.delete(
+                "/api/v1/chat/sessions/conversation-1",
+                headers=auth_headers(tenant_id="tenant-123", user_id="employee-7"),
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 204
+    assert service.closed == {
+        "tenant_id": "tenant-123",
+        "session_id": "conversation-1",
+        "integration_token_id": None,
+        "user_id": "employee-7",
+    }
 
 def test_chat_message_returns_structured_citations() -> None:
     service = with_fake_service()

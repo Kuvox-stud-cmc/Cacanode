@@ -1,5 +1,6 @@
 package com.cacanode.api.common.event;
 
+import com.cacanode.api.auth.enums.Login2FAChallengeType;
 import lombok.Getter;
 import org.springframework.context.ApplicationEvent;
 
@@ -12,7 +13,8 @@ public class Login2FARequestedEvent extends ApplicationEvent {
     private UUID tenantId;
     private String email;
     private String fullName;
-    private String verificationToken;
+    private String verificationSecret;
+    private Login2FAChallengeType challengeType;
 
     public Login2FARequestedEvent(
             Object source,
@@ -20,13 +22,15 @@ public class Login2FARequestedEvent extends ApplicationEvent {
             UUID tenantId,
             String email,
             String fullName,
-            String verificationToken) {
+            String verificationSecret,
+            Login2FAChallengeType challengeType) {
         super(source);
         this.userId = userId;
         this.tenantId = tenantId;
         this.email = email;
         this.fullName = fullName;
-        this.verificationToken = verificationToken;
+        this.verificationSecret = verificationSecret;
+        this.challengeType = challengeType;
     }
 
 }

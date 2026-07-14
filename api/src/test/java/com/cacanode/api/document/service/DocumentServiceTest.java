@@ -22,6 +22,9 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -312,7 +315,8 @@ class DocumentServiceTest {
     @Test
     void listReturnsTenantKnowledgeBaseDocumentsNewestFirst() {
         Document document = document();
-        when(documentRepository.findByTenantIdAndKnowledgeBaseIdOrderByCreatedAtDesc(tenantId, knowledgeBaseId))
+        when(documentRepository.findByTenantIdAndKnowledgeBaseIdOrderByCreatedAtDescIdDesc(
+                tenantId, knowledgeBaseId))
                 .thenReturn(List.of(document));
 
         var response = documentService.list(tenantId, knowledgeBaseId);
@@ -331,6 +335,45 @@ class DocumentServiceTest {
                 .thenReturn(Optional.empty());
 
         assertThrows(BadRequestException.class, () -> documentService.list(tenantId, knowledgeBaseId));
+    }
+
+    @SuppressWarnings("unchecked")
+    @Test
+    void pagedListUsesRequestedPageSizeAndDeterministicOrdering() {
+        Document document = document();
+        when(documentRepository.findAll(any(Specification.class), any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of(document)));
+
+        var response = documentService.list(
+                tenantId,
+                knowledgeBaseId,
+                2,
+                20,
+                " notes ",
+                DocumentStatus.PENDING,
+                DocumentType.TXT,
+                DocumentVisibility.EMPLOYEE_ONLY
+        );
+
+        assertEquals(1, response.size());
+        ArgumentCaptor<Pageable> pageableCaptor = ArgumentCaptor.forClass(Pageable.class);
+        verify(documentRepository).findAll(any(Specification.class), pageableCaptor.capture());
+        Pageable pageable = pageableCaptor.getValue();
+        assertEquals(2, pageable.getPageNumber());
+        assertEquals(20, pageable.getPageSize());
+        assertEquals("createdAt: DESC,id: DESC", pageable.getSort().toString());
+    }
+
+    @Test
+    void pagedListRejectsBoundsAndOverlongTrimmedSearch() {
+        assertThrows(BadRequestException.class, () -> documentService.list(
+                tenantId, knowledgeBaseId, -1, 20, null, null, null, null));
+        assertThrows(BadRequestException.class, () -> documentService.list(
+                tenantId, knowledgeBaseId, 0, 0, null, null, null, null));
+        assertThrows(BadRequestException.class, () -> documentService.list(
+                tenantId, knowledgeBaseId, 0, 101, null, null, null, null));
+        assertThrows(BadRequestException.class, () -> documentService.list(
+                tenantId, knowledgeBaseId, 0, 20, "x".repeat(201), null, null, null));
     }
 
     @Test

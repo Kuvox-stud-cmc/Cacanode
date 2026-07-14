@@ -96,6 +96,23 @@ class PublicRateLimitFilterTest {
         );
     }
 
+    @Test
+    void nativeAndBrowserAuthRoutesShareCanonicalBuckets() {
+        String[] routes = {"login", "verify-login-2fa", "refresh", "logout"};
+
+        for (String route : routes) {
+            String browser = ReflectionTestUtils.invokeMethod(
+                    filter, "routeGroup", "/api/v1/auth/" + route);
+            String legacyBrowser = ReflectionTestUtils.invokeMethod(
+                    filter, "routeGroup", "/api/auth/" + route);
+            String mobile = ReflectionTestUtils.invokeMethod(
+                    filter, "routeGroup", "/api/v1/auth/mobile/" + route);
+
+            assertEquals(browser, mobile);
+            assertEquals(browser, legacyBrowser);
+        }
+    }
+
     private MockHttpServletRequest request(String method, String path) {
         MockHttpServletRequest request = new MockHttpServletRequest(method, path);
         request.setRemoteAddr("203.0.113.10");

@@ -44,6 +44,7 @@ spring:
     template-id: test-template
     verification-link: http://localhost:3000/verify
     login-2fa-link: http://localhost:3000/verify-login
+    mobile-login-2fa-expiry-minutes: 10
   brevo:
     api-key: test-brevo-key
   rabbitmq:

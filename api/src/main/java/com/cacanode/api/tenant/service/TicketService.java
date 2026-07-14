@@ -19,7 +19,9 @@ import com.cacanode.api.tenant.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.data.domain.Page;
-import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -34,6 +36,9 @@ import java.util.UUID;
 @Service
 @RequiredArgsConstructor
 public class TicketService {
+    private static final int DEFAULT_PAGE_SIZE = 50;
+    private static final int MAX_PAGE_SIZE = 100;
+
     private final TicketRepository ticketRepository;
     private final TicketNoteRepository noteRepository;
     private final TenantRepository tenantRepository;
@@ -85,11 +90,57 @@ public class TicketService {
     }
 
     @Transactional(readOnly = true)
-    public Page<TicketDtos.Response> list(UUID tenantId, TicketStatus status, Pageable pageable) {
-        Page<Ticket> tickets = status == null
-                ? ticketRepository.findByTenant_Id(tenantId, pageable)
-                : ticketRepository.findByTenant_IdAndStatus(tenantId, status, pageable);
-        return tickets.map(ticket -> toResponse(ticket, List.of()));
+    public Page<TicketDtos.Response> list(
+            UUID tenantId,
+            TicketStatus status,
+            TicketPriority priority,
+            TicketSource source,
+            UUID assignedTo,
+            boolean unassigned,
+            Integer page,
+            Integer size
+    ) {
+        int requestedPage = page == null ? 0 : page;
+        int requestedSize = size == null ? DEFAULT_PAGE_SIZE : size;
+        if (requestedPage < 0) {
+            throw new BadRequestException("Page must be zero or greater");
+        }
+        if (requestedSize < 1 || requestedSize > MAX_PAGE_SIZE) {
+            throw new BadRequestException("Size must be between 1 and 100");
+        }
+        if (assignedTo != null && unassigned) {
+            throw new BadRequestException("Assigned user and unassigned filters cannot be combined");
+        }
+
+        Specification<Ticket> specification = (root, criteriaQuery, builder) ->
+                builder.equal(root.get("tenant").get("id"), tenantId);
+        if (status != null) {
+            specification = specification.and((root, criteriaQuery, builder) ->
+                    builder.equal(root.get("status"), status));
+        }
+        if (priority != null) {
+            specification = specification.and((root, criteriaQuery, builder) ->
+                    builder.equal(root.get("priority"), priority));
+        }
+        if (source != null) {
+            specification = specification.and((root, criteriaQuery, builder) ->
+                    builder.equal(root.get("source"), source));
+        }
+        if (assignedTo != null) {
+            specification = specification.and((root, criteriaQuery, builder) ->
+                    builder.equal(root.get("assignedTo").get("id"), assignedTo));
+        } else if (unassigned) {
+            specification = specification.and((root, criteriaQuery, builder) ->
+                    builder.isNull(root.get("assignedTo")));
+        }
+
+        var pageable = PageRequest.of(
+                requestedPage,
+                requestedSize,
+                Sort.by(Sort.Order.desc("createdAt"), Sort.Order.desc("id"))
+        );
+        return ticketRepository.findAll(specification, pageable)
+                .map(ticket -> toResponse(ticket, List.of()));
     }
 
     @Transactional(readOnly = true)

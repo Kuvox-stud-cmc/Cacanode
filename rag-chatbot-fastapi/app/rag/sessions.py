@@ -553,6 +553,7 @@ class PostgresChatSessionStore:
         *,
         tenant_id: str,
         status: str | None,
+        channel: str | None,
         limit: int,
         offset: int,
     ) -> list[dict[str, Any]]:
@@ -561,6 +562,9 @@ class PostgresChatSessionStore:
         if status:
             conditions.append("s.status = %s")
             params.append(status)
+        if channel:
+            conditions.append("s.channel = %s")
+            params.append(channel)
         params.extend([min(max(limit, 1), 100), max(offset, 0)])
         with self._connect() as conn:
             with conn.cursor(row_factory=self._dict_row) as cur:
@@ -573,7 +577,7 @@ class PostgresChatSessionStore:
                     LEFT JOIN chat_messages m ON m.session_id = s.id
                     WHERE {' AND '.join(conditions)}
                     GROUP BY s.id
-                    ORDER BY s.created_at DESC
+                    ORDER BY s.created_at DESC, s.id DESC
                     LIMIT %s OFFSET %s
                     """,
                     tuple(params),
