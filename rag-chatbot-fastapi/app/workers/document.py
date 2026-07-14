@@ -41,6 +41,9 @@ class DocumentWorker:
         connection: Any | None = None,
     ):
         self._settings = settings
+        extraction_settings = settings.model_copy(
+            update={"LLM_MAX_OUTPUT_TOKENS": settings.GRAPH_EXTRACTION_MAX_OUTPUT_TOKENS}
+        )
         self._pipeline = pipeline or DocumentIngestionPipeline(
             store=SeaweedS3DocumentStore(settings),
             extractor=DocumentTextExtractor(),
@@ -49,7 +52,11 @@ class DocumentWorker:
             vector_store=QdrantChunkStore(settings),
             graph_store=GraphServiceClient(settings),
             graph_extractor=EntityRelationExtractor(
-                create_chat_model(settings), batch_size=settings.GRAPH_EXTRACTION_BATCH_SIZE
+                create_chat_model(
+                    extraction_settings,
+                    reasoning_effort=settings.GRAPH_EXTRACTION_REASONING_EFFORT,
+                ),
+                batch_size=settings.GRAPH_EXTRACTION_BATCH_SIZE,
             ),
         )
         self._connection: Any | None = connection

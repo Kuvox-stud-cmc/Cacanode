@@ -15,6 +15,7 @@ import com.cacanode.api.common.exception.custom.BadRequestException;
 import com.cacanode.api.common.exception.custom.InternalServerErrorException;
 import com.cacanode.api.common.exception.custom.ResourceNotFoundException;
 import com.cacanode.api.document.dto.DocumentListItemResponse;
+import com.cacanode.api.document.dto.DocumentDownloadResponse;
 import com.cacanode.api.document.dto.DocumentStatusResponse;
 import com.cacanode.api.document.dto.DocumentUploadResponse;
 import com.cacanode.api.document.enums.DocumentStatus;
@@ -161,6 +162,27 @@ public class DocumentService {
     }
 
     @Transactional(readOnly = true)
+    public DocumentDownloadResponse download(UUID tenantId, UUID documentId) {
+        Document document = documentRepository.findByIdAndTenantId(documentId, tenantId)
+                .orElseThrow(() -> new ResourceNotFoundException("Document not found"));
+        try {
+            var stored = documentStorage.load(document.getStoragePath());
+            String contentType = StringUtils.hasText(stored.contentType())
+                    ? stored.contentType()
+                    : contentTypeFor(document.getFileType());
+            return new DocumentDownloadResponse(
+                    document.getFileName(),
+                    contentType,
+                    stored.content()
+            );
+        } catch (InternalServerErrorException e) {
+            throw e;
+        } catch (RuntimeException e) {
+            throw new InternalServerErrorException("Unable to download document", e);
+        }
+    }
+
+    @Transactional(readOnly = true)
     public List<DocumentListItemResponse> list(UUID tenantId, UUID knowledgeBaseId) {
         var knowledgeBase = knowledgeBaseRepository.findByIdAndTenantId(knowledgeBaseId, tenantId)
                 .orElseThrow(() -> new BadRequestException("Knowledge base is not active or not found"));
@@ -246,6 +268,18 @@ public class DocumentService {
                 .formatted(tenantId, knowledgeBaseId, documentId, fileName);
     }
 
+    private String contentTypeFor(DocumentType type) {
+        return switch (type) {
+            case PDF -> "application/pdf";
+            case DOCX -> "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+            case TXT -> "text/plain";
+            case MARKDOWN -> "text/markdown";
+            case HTML -> "text/html";
+            case XLSX -> "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+            case CSV -> "text/csv";
+        };
+    }
+
     private DocumentStatus parseStatus(String status) {
         try {
             return DocumentStatus.valueOf(status);
@@ -269,6 +303,9 @@ public class DocumentService {
                 document.getId(),
                 UUID.fromString(document.getJobId()),
                 document.getFileName(),
+                document.getFileType(),
+                document.getFileSizeBytes(),
+                document.getCreatedAt(),
                 document.getKnowledgeBaseId(),
                 document.getStatus(),
                 document.getVisibility(),

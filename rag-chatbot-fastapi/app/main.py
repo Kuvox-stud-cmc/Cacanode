@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from prometheus_client import make_asgi_app
 
 from app.api.v1.chat import router as chat_router
+from app.api.v1.documents import router as documents_router
 from app.api.v1.external_chat import external_router, widget_router
 from app.api.v1.health import router as health_router
 from app.api.v1.ingestion import router as ingestion_router
@@ -74,6 +75,7 @@ def create_app() -> FastAPI:
 
     application.include_router(health_router)
     application.include_router(chat_router, prefix="/api/v1")
+    application.include_router(documents_router, prefix="/api/v1")
     application.include_router(widget_router, prefix="/api/v1")
     application.include_router(external_router, prefix="/api/v1")
     application.include_router(ingestion_router, prefix="/api/v1")

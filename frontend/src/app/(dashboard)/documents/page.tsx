@@ -8,6 +8,7 @@ import {
   type DragEvent,
 } from "react";
 import toast from "react-hot-toast";
+import { useRouter } from "next/navigation";
 import type { Document, DocumentStatus, DocumentVisibility, TenantWorkspace } from "@/types";
 import { useAuthStore } from "@/components/providers/StoreProvider";
 import { Button } from "@/components/ui/button";
@@ -72,7 +73,16 @@ function StatusBadge({
     FAILED: "Failed",
   };
   return (
-    <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${classes[status]}`}>
+    <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium ${classes[status]}`}>
+      {status === "PENDING" && (
+        <span className="relative flex size-2" aria-hidden="true">
+          <span className="absolute inline-flex size-full animate-ping rounded-full bg-yellow-500 opacity-60" />
+          <span className="relative inline-flex size-2 rounded-full bg-yellow-600" />
+        </span>
+      )}
+      {status === "PROCESSING" && (
+        <Loader2 className="size-3 animate-spin" aria-hidden="true" />
+      )}
       {labels[status]}
     </span>
   );
@@ -117,6 +127,7 @@ function TableSkeleton() {
 }
 
 export default function DocumentsPage() {
+  const router = useRouter();
   const { request } = useApiClient();
   const user = useAuthStore((state) => state.user);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -384,7 +395,21 @@ export default function DocumentsPage() {
             </TableHeader>
             <TableBody>
               {documents.map((doc) => (
-                <TableRow key={doc.localId ?? doc.id}>
+                <TableRow
+                  key={doc.localId ?? doc.id}
+                  className={!doc.uploadState ? "cursor-pointer hover:bg-slate-50" : undefined}
+                  tabIndex={!doc.uploadState ? 0 : undefined}
+                  role={!doc.uploadState ? "link" : undefined}
+                  onClick={() => {
+                    if (!doc.uploadState) router.push(`/documents/${doc.id}`);
+                  }}
+                  onKeyDown={(event) => {
+                    if (!doc.uploadState && (event.key === "Enter" || event.key === " ")) {
+                      event.preventDefault();
+                      router.push(`/documents/${doc.id}`);
+                    }
+                  }}
+                >
                   <TableCell className="font-medium">{doc.fileName}</TableCell>
                   <TableCell>
                     <Badge variant="secondary" className="text-xs uppercase">
@@ -396,7 +421,13 @@ export default function DocumentsPage() {
                   </TableCell>
                   <TableCell>
                     {user?.role === "TENANT_ADMIN" && !doc.uploadState ? (
-                      <select className="h-8 rounded-md border border-slate-200 bg-white px-2 text-xs" value={doc.visibility} onChange={(event) => void changeVisibility(doc.id, event.target.value as DocumentVisibility)}>
+                      <select
+                        className="h-8 rounded-md border border-slate-200 bg-white px-2 text-xs"
+                        value={doc.visibility}
+                        onClick={(event) => event.stopPropagation()}
+                        onKeyDown={(event) => event.stopPropagation()}
+                        onChange={(event) => void changeVisibility(doc.id, event.target.value as DocumentVisibility)}
+                      >
                         <option value="EMPLOYEE_ONLY">Employees only</option>
                         <option value="CUSTOMER_AND_EMPLOYEE">Everyone</option>
                       </select>
@@ -413,8 +444,8 @@ export default function DocumentsPage() {
                     {formatDate(doc.uploadedAt)}
                   </TableCell>
                   <TableCell className="max-w-xs text-sm text-slate-500">
-                    {doc.status === "COMPLETED" && doc.chunkCount
-                      ? `${doc.chunkCount} chunks`
+                    {doc.status === "COMPLETED"
+                      ? "Ready to answer"
                       : doc.status === "FAILED"
                         ? doc.errorMessage ?? "Indexing failed"
                         : "Waiting for indexing"}
@@ -427,7 +458,11 @@ export default function DocumentsPage() {
                         className="text-slate-400 hover:text-red-600"
                         aria-label={`Delete ${doc.fileName}`}
                         disabled={Boolean(doc.uploadState) || deletingId === doc.id || doc.status === "PENDING" || doc.status === "PROCESSING"}
-                        onClick={() => setDeleteTarget(doc)}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setDeleteTarget(doc);
+                        }}
+                        onKeyDown={(event) => event.stopPropagation()}
                       >
                         {deletingId === doc.id ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />}
                       </Button>

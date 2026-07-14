@@ -207,6 +207,40 @@ def test_openai_chat_model_preserves_larger_reasoning_model_token_budget(
     assert FakeChatOpenAI.last_kwargs["max_completion_tokens"] == 2048
 
 
+def test_openai_chat_model_passes_reasoning_effort_for_reasoning_models(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("app.infrastructure.model_gateway.ChatOpenAI", FakeChatOpenAI)
+
+    create_chat_model(
+        settings(
+            LLM_PROVIDER="openai",
+            OPENAI_API_KEY="test-key",
+            OPENAI_MODEL="o4-mini",
+        ),
+        reasoning_effort="low",
+    )
+
+    assert FakeChatOpenAI.last_kwargs["reasoning_effort"] == "low"
+
+
+def test_openai_chat_model_ignores_reasoning_effort_for_non_reasoning_models(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("app.infrastructure.model_gateway.ChatOpenAI", FakeChatOpenAI)
+
+    create_chat_model(
+        settings(
+            LLM_PROVIDER="openai",
+            OPENAI_API_KEY="test-key",
+            OPENAI_MODEL="gpt-test",
+        ),
+        reasoning_effort="low",
+    )
+
+    assert "reasoning_effort" not in FakeChatOpenAI.last_kwargs
+
+
 @pytest.mark.asyncio
 async def test_openai_empty_response_is_provider_error(
     monkeypatch: pytest.MonkeyPatch,

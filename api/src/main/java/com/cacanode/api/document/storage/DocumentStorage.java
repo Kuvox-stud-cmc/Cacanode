@@ -5,5 +5,7 @@ import org.springframework.web.multipart.MultipartFile;
 public interface DocumentStorage {
     void store(String key, MultipartFile file);
 
+    StoredDocument load(String key);
+
     void delete(String key);
 }

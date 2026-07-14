@@ -23,16 +23,19 @@ function initialsFrom(fullName: string | undefined): string {
 type AppShellProps = {
   children: ReactNode
   contentClassName?: string
+  mobileNavContent?: ReactNode
 }
 
-export function AppShell({ children, contentClassName }: AppShellProps) {
+export function AppShell({ children, contentClassName, mobileNavContent }: AppShellProps) {
   const pathname = usePathname()
   const router = useRouter()
   const user = useAuthStore((state) => state.user)
   const clearAuth = useAuthStore((state) => state.clearAuth)
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const pageTitle =
-    appNavigation.find((item) => item.href === pathname)?.label ?? "Dashboard"
+    appNavigation.find(
+      (item) => item.href === pathname || pathname.startsWith(`${item.href}/`),
+    )?.label ?? "Dashboard"
 
   async function handleLogout() {
     try {
@@ -48,7 +51,7 @@ export function AppShell({ children, contentClassName }: AppShellProps) {
     <div className="min-h-dvh bg-slate-100">
       <aside
         className={cn(
-          "fixed inset-y-0 left-0 z-40 flex w-60 flex-col bg-slate-900 text-white transition-transform duration-200 lg:translate-x-0",
+          "fixed inset-y-0 left-0 z-40 flex w-60 flex-col bg-slate-900 text-white transition-transform duration-200 xl:translate-x-0",
           sidebarOpen ? "translate-x-0" : "-translate-x-full",
         )}
       >
@@ -59,7 +62,7 @@ export function AppShell({ children, contentClassName }: AppShellProps) {
           </Link>
           <button
             type="button"
-            className="ml-auto rounded-md p-1 text-slate-300 hover:bg-slate-800 lg:hidden"
+            className="ml-auto rounded-md p-1 text-slate-300 hover:bg-slate-800 xl:hidden"
             onClick={() => setSidebarOpen(false)}
             aria-label="Close navigation"
           >
@@ -87,6 +90,17 @@ export function AppShell({ children, contentClassName }: AppShellProps) {
               </Link>
             )
           })}
+          {mobileNavContent && (
+            <div
+              className="mt-3 border-t border-slate-700 pt-3 xl:hidden"
+              onClick={(event) => {
+                const target = event.target as HTMLElement
+                if (target.closest("button, a")) setSidebarOpen(false)
+              }}
+            >
+              {mobileNavContent}
+            </div>
+          )}
         </nav>
 
         <div className="border-t border-slate-700 p-3">
@@ -113,25 +127,25 @@ export function AppShell({ children, contentClassName }: AppShellProps) {
       {sidebarOpen && (
         <button
           type="button"
-          className="fixed inset-0 z-30 bg-black/50 lg:hidden"
+          className="fixed inset-0 z-30 bg-black/50 xl:hidden"
           onClick={() => setSidebarOpen(false)}
           aria-label="Close navigation"
         />
       )}
 
-      <div className="min-h-dvh lg:ml-60">
+      <div className="min-h-dvh xl:ml-60">
         <header className="sticky top-0 z-20 flex h-14 items-center gap-3 border-b border-slate-200 bg-white px-4">
           <button
             type="button"
             onClick={() => setSidebarOpen(true)}
-            className="rounded-md p-1.5 text-slate-600 hover:bg-slate-100 lg:hidden"
+            className="rounded-md p-1.5 text-slate-600 hover:bg-slate-100 xl:hidden"
             aria-label="Open navigation"
           >
             <Menu className="size-5" />
           </button>
           <h1 className="font-semibold text-slate-800">{pageTitle}</h1>
         </header>
-        <main className={cn("p-6", contentClassName)}>{children}</main>
+        <main className={cn("p-4 sm:p-6", contentClassName)}>{children}</main>
       </div>
     </div>
   )

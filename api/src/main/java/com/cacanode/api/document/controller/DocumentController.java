@@ -2,7 +2,10 @@ package com.cacanode.api.document.controller;
 
 import java.util.List;
 import java.util.UUID;
+import java.nio.charset.StandardCharsets;
 
+import org.springframework.http.ContentDisposition;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -67,6 +70,22 @@ public class DocumentController extends BaseController {
             HttpServletRequest request
     ) {
         return documentService.get(getTenantId(request), documentId);
+    }
+
+    @GetMapping("/{documentId}/download")
+    public ResponseEntity<byte[]> download(
+            @PathVariable UUID documentId,
+            HttpServletRequest request
+    ) {
+        var download = documentService.download(getTenantId(request), documentId);
+        ContentDisposition disposition = ContentDisposition.attachment()
+                .filename(download.fileName(), StandardCharsets.UTF_8)
+                .build();
+        return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType(download.contentType()))
+                .contentLength(download.content().length)
+                .header(HttpHeaders.CONTENT_DISPOSITION, disposition.toString())
+                .body(download.content());
     }
 
     @PatchMapping("/{documentId}/visibility")

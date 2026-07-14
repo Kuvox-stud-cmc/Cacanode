@@ -1,6 +1,7 @@
 package com.cacanode.api.document.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -13,6 +14,7 @@ import static org.mockito.Mockito.when;
 import java.util.Optional;
 import java.util.List;
 import java.util.UUID;
+import java.time.LocalDateTime;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -35,6 +37,7 @@ import com.cacanode.api.document.messaging.DocumentStatusEvent;
 import com.cacanode.api.document.model.Document;
 import com.cacanode.api.document.repository.DocumentRepository;
 import com.cacanode.api.document.storage.DocumentStorage;
+import com.cacanode.api.document.storage.StoredDocument;
 import com.cacanode.api.tenant.enums.KnowledgeBaseStatus;
 import com.cacanode.api.tenant.model.KnowledgeBase;
 import com.cacanode.api.tenant.repository.KnowledgeBaseRepository;
@@ -245,6 +248,59 @@ class DocumentServiceTest {
         when(documentRepository.findByIdAndTenantId(documentId, tenantId)).thenReturn(Optional.empty());
 
         assertThrows(ResourceNotFoundException.class, () -> documentService.get(tenantId, documentId));
+    }
+
+    @Test
+    void getIncludesDocumentViewerMetadata() {
+        Document document = document();
+        LocalDateTime uploadedAt = LocalDateTime.of(2026, 7, 14, 9, 30);
+        document.setCreatedAt(uploadedAt);
+        when(documentRepository.findByIdAndTenantId(documentId, tenantId))
+                .thenReturn(Optional.of(document));
+
+        var response = documentService.get(tenantId, documentId);
+
+        assertEquals(DocumentType.TXT, response.fileType());
+        assertEquals(5L, response.fileSizeBytes());
+        assertEquals(uploadedAt, response.uploadedAt());
+    }
+
+    @Test
+    void downloadReturnsTenantScopedOriginalFile() {
+        Document document = document();
+        byte[] content = "hello".getBytes();
+        when(documentRepository.findByIdAndTenantId(documentId, tenantId))
+                .thenReturn(Optional.of(document));
+        when(documentStorage.load("storage-key"))
+                .thenReturn(new StoredDocument(content, "text/x-original"));
+
+        var response = documentService.download(tenantId, documentId);
+
+        assertEquals("notes.txt", response.fileName());
+        assertEquals("text/x-original", response.contentType());
+        assertArrayEquals(content, response.content());
+    }
+
+    @Test
+    void downloadRejectsMissingOrOtherTenantDocument() {
+        when(documentRepository.findByIdAndTenantId(documentId, tenantId))
+                .thenReturn(Optional.empty());
+
+        assertThrows(ResourceNotFoundException.class,
+                () -> documentService.download(tenantId, documentId));
+        verify(documentStorage, never()).load(any());
+    }
+
+    @Test
+    void downloadReportsStorageFailure() {
+        Document document = document();
+        when(documentRepository.findByIdAndTenantId(documentId, tenantId))
+                .thenReturn(Optional.of(document));
+        when(documentStorage.load("storage-key"))
+                .thenThrow(new InternalServerErrorException("storage unavailable"));
+
+        assertThrows(InternalServerErrorException.class,
+                () -> documentService.download(tenantId, documentId));
     }
 
     @Test

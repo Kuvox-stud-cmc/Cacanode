@@ -15,6 +15,7 @@ from app.core.config import Settings
 from app.ingestion.chunking import TextChunk
 from app.ingestion.errors import PermanentIngestionError, TransientIngestionError
 from app.ingestion.events import DocumentIngestRequestedEvent
+from app.rag.errors import ChatModelProviderError
 
 
 class EntityMention(BaseModel):
@@ -280,9 +281,12 @@ class GraphServiceClient:
 
 
 class EntityRelationExtractor:
-    def __init__(self, model: Any, *, batch_size: int = 12):
+    def __init__(self, model: Any, *, batch_size: int = 12, output_limit_retries: int = 1):
+        if output_limit_retries < 0:
+            raise ValueError("output_limit_retries must be non-negative")
         self._model = model
         self._batch_size = batch_size
+        self._output_limit_retries = output_limit_retries
 
     async def extract(
         self, event: DocumentIngestRequestedEvent, chunks: Sequence[TextChunk]
@@ -292,6 +296,28 @@ class EntityRelationExtractor:
         relations: list[EvidenceRelation] = []
         for start in range(0, len(chunks), self._batch_size):
             selected = chunks[start : start + self._batch_size]
+            batch_entities, batch_relations = await self._extract_batch(selected)
+            entities.extend(batch_entities)
+            relations.extend(batch_relations)
+        entities, relations = _filter_grounded_extraction(
+            units,
+            _deduplicate_entities(entities),
+            _deduplicate_relations(relations),
+        )
+        return GraphBatch(
+            tenant_id=str(event.tenant_id),
+            knowledge_base_id=str(event.knowledge_base_id),
+            source_id=str(event.document_id),
+            source_name=event.file_name,
+            units=units,
+            entities=tuple(entities),
+            relations=tuple(relations),
+        )
+
+    async def _extract_batch(
+        self, selected: Sequence[TextChunk], *, output_limit_attempt: int = 0
+    ) -> tuple[list[EntityMention], list[EvidenceRelation]]:
+        try:
             raw = await self._model.complete(
                 [
                     {"role": "system", "content": _EXTRACTION_PROMPT},
@@ -303,27 +329,80 @@ class EntityRelationExtractor:
                     },
                 ]
             )
-            try:
-                payload = json.loads(re.sub(r"^```(?:json)?\s*|\s*```$", "", raw.strip()))
-                entities.extend(
-                    EntityMention.model_validate(item) for item in payload.get("entities", [])
-                )
-                relations.extend(
-                    EvidenceRelation.model_validate(item) for item in payload.get("relations", [])
-                )
-            except (ValueError, TypeError, json.JSONDecodeError) as exc:
+        except ChatModelProviderError as exc:
+            if len(selected) > 1 and "finish_reason=length" in str(exc):
+                midpoint = len(selected) // 2
+                left_entities, left_relations = await self._extract_batch(selected[:midpoint])
+                right_entities, right_relations = await self._extract_batch(selected[midpoint:])
+                return left_entities + right_entities, left_relations + right_relations
+            if "finish_reason=length" in str(exc):
+                if output_limit_attempt < self._output_limit_retries:
+                    return await self._extract_batch(
+                        selected,
+                        output_limit_attempt=output_limit_attempt + 1,
+                    )
                 raise PermanentIngestionError(
-                    "Entity extraction returned invalid structured JSON"
+                    "Graph extraction exceeded the configured model output limit"
                 ) from exc
-        return GraphBatch(
-            tenant_id=str(event.tenant_id),
-            knowledge_base_id=str(event.knowledge_base_id),
-            source_id=str(event.document_id),
-            source_name=event.file_name,
-            units=units,
-            entities=tuple(entities),
-            relations=tuple(relations),
+            raise TransientIngestionError("Graph extraction model request failed") from exc
+        try:
+            payload = json.loads(re.sub(r"^```(?:json)?\s*|\s*```$", "", raw.strip()))
+            entities = [
+                EntityMention.model_validate(item) for item in payload.get("entities", [])
+            ]
+            relations = [
+                EvidenceRelation.model_validate(item) for item in payload.get("relations", [])
+            ]
+            return entities, relations
+        except (ValueError, TypeError, json.JSONDecodeError) as exc:
+            if len(selected) > 1:
+                midpoint = len(selected) // 2
+                left_entities, left_relations = await self._extract_batch(selected[:midpoint])
+                right_entities, right_relations = await self._extract_batch(selected[midpoint:])
+                return left_entities + right_entities, left_relations + right_relations
+            raise PermanentIngestionError(
+                "Entity extraction returned invalid structured JSON"
+            ) from exc
+
+
+def _deduplicate_entities(entities: Sequence[EntityMention]) -> list[EntityMention]:
+    unique: dict[tuple[str, str], EntityMention] = {}
+    for entity in entities:
+        unique.setdefault((entity.normalized_name, entity.evidence_unit_id), entity)
+    return list(unique.values())
+
+
+def _deduplicate_relations(relations: Sequence[EvidenceRelation]) -> list[EvidenceRelation]:
+    unique: dict[tuple[str, str, str, str], EvidenceRelation] = {}
+    for relation in relations:
+        key = (
+            relation.subject_normalized_name,
+            relation.predicate,
+            relation.object_normalized_name,
+            relation.evidence_unit_id,
         )
+        unique.setdefault(key, relation)
+    return list(unique.values())
+
+
+def _filter_grounded_extraction(
+    units: Sequence[dict[str, Any]],
+    entities: Sequence[EntityMention],
+    relations: Sequence[EvidenceRelation],
+) -> tuple[list[EntityMention], list[EvidenceRelation]]:
+    unit_ids = {str(unit.get("unit_id")) for unit in units}
+    grounded_entities = [
+        entity for entity in entities if entity.evidence_unit_id in unit_ids
+    ]
+    entity_names = {entity.normalized_name for entity in grounded_entities}
+    grounded_relations = [
+        relation
+        for relation in relations
+        if relation.evidence_unit_id in unit_ids
+        and relation.subject_normalized_name in entity_names
+        and relation.object_normalized_name in entity_names
+    ]
+    return grounded_entities, grounded_relations
 
 
 def _unit_payload(chunk: TextChunk) -> dict[str, Any]:
@@ -350,4 +429,5 @@ Return strict JSON: {"entities":[{"name":"","normalized_name":"","entity_type":"
 "aliases":[],"evidence_unit_id":""}],"relations":[{"subject_normalized_name":"",
 "predicate":"","object_normalized_name":"","evidence_unit_id":""}]}.
 Every item must cite one supplied unit_id. Do not infer unsupported facts.
+Every relation subject and object must exactly match an entity normalized_name in the response.
 Use empty arrays when none."""

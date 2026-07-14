@@ -28,11 +28,31 @@ export interface DocumentStatusResponse {
   id: string;
   jobId: string;
   fileName: string;
+  fileType: string;
+  fileSizeBytes: number;
+  uploadedAt: string;
   knowledgeBaseId: string;
   status: DocumentStatus;
   visibility: DocumentVisibility;
   chunkCount?: number | null;
   errorMessage?: string | null;
+}
+
+export interface DocumentUnit {
+  unit_id: string | null;
+  chunk_index: number;
+  text: string;
+  source_name: string | null;
+  modality: string | null;
+  block_type: string | null;
+  section_path: string[];
+  heading_context: string | null;
+  page_number: number | null;
+  sheet_name: string | null;
+  cell_range: string | null;
+  table_id: string | null;
+  source_start: number | null;
+  source_end: number | null;
 }
 
 export interface User {

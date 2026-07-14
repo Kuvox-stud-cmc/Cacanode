@@ -20,7 +20,6 @@ import {
   Sparkles,
   Square,
   Upload,
-  Menu,
   Plus,
   Trash2,
   AlertCircle,
@@ -28,6 +27,7 @@ import {
   ChevronRight,
 } from "lucide-react"
 import { AppShell } from "@/components/app/AppShell"
+import { AssistantResponse } from "@/components/chat/AssistantResponse"
 import { useAuthStore } from "@/components/providers/StoreProvider"
 import { useTokenRehydration } from "@/hooks/useTokenRehydration"
 import { useApiClient } from "@/hooks/useApiClient"
@@ -175,7 +175,8 @@ function Playground({ authenticated }: { authenticated: boolean }) {
   const [historyLoading, setHistoryLoading] = useState(false)
   const [historyError, setHistoryError] = useState<string | null>(null)
   const [historyCollapsed, setHistoryCollapsed] = useState(false)
-  const [drawerOpen, setDrawerOpen] = useState(false)
+  const [deleteTarget, setDeleteTarget] = useState<PlaygroundSession | null>(null)
+  const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null)
 
   const hasCompletedSource = sources.some((source) => source.status === "COMPLETED")
   const hasIndexingSource = sources.some(
@@ -272,7 +273,7 @@ function Playground({ authenticated }: { authenticated: boolean }) {
   }, [authenticated, request, workspace])
 
   useEffect(() => {
-    if (!authenticated || !workspace || !sessionId) return
+    if (!authenticated || !workspace || !sessionId || sending) return
 
     let cancelled = false
     getChatMessagesApi(request, sessionId)
@@ -301,7 +302,7 @@ function Playground({ authenticated }: { authenticated: boolean }) {
     return () => {
       cancelled = true
     }
-  }, [authenticated, request, sessionId, workspace])
+  }, [authenticated, request, sending, sessionId, workspace])
 
   useEffect(() => {
     return () => {
@@ -408,28 +409,36 @@ function Playground({ authenticated }: { authenticated: boolean }) {
     setSessionId(null)
     setMessages([])
     setMessage("")
-    setDrawerOpen(false)
   }
 
   function switchSession(nextSessionId: string) {
     if (sending || nextSessionId === sessionId) return
     setMessages([])
     setSessionId(nextSessionId)
-    setDrawerOpen(false)
   }
 
-  async function deleteSession(item: PlaygroundSession) {
-    if (sending || !window.confirm(`Hide “${item.title}”? The conversation will remain available for analytics.`)) return
+  function requestDeleteSession(item: PlaygroundSession) {
+    if (sending || deletingSessionId) return
+    setDeleteTarget(item)
+  }
+
+  async function confirmDeleteSession() {
+    const item = deleteTarget
+    if (!item || sending || deletingSessionId) return
+    setDeletingSessionId(item.id)
     try {
       await hidePlaygroundSessionApi(request, item.id)
       const remaining = history.filter((candidate) => candidate.id !== item.id)
       setHistory(remaining)
+      setDeleteTarget(null)
       if (sessionId === item.id) {
         setMessages([])
         setSessionId(remaining[0]?.id ?? null)
       }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Unable to hide conversation")
+    } finally {
+      setDeletingSessionId(null)
     }
   }
 
@@ -483,18 +492,22 @@ function Playground({ authenticated }: { authenticated: boolean }) {
           throw error
         }
       }
-      setMessages((current) =>
-        current.map((item) =>
-          item.id === assistantId
-            ? {
-                id: assistantId,
-                role: "assistant",
-                content: response.content,
-                citations: response.citations,
-              }
-            : item,
-        ),
-      )
+      setMessages((current) => {
+        const assistantMessage: ChatMessage = {
+          id: assistantId,
+          role: "assistant",
+          content: response.content.trim() || "No answer was generated. Please retry.",
+          citations: response.citations,
+          error: response.content.trim().length === 0,
+        }
+        let replaced = false
+        const updated = current.map((item) => {
+          if (item.id !== assistantId) return item
+          replaced = true
+          return assistantMessage
+        })
+        return replaced ? updated : [...updated, assistantMessage]
+      })
       await loadHistory(activeSessionId)
     } catch (error) {
       const aborted = abortController.signal.aborted
@@ -633,14 +646,81 @@ function Playground({ authenticated }: { authenticated: boolean }) {
               <p className="truncate text-sm font-medium">{item.title}</p>
               <p className="mt-0.5 text-xs text-slate-500">{new Date(item.last_activity_at).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</p>
             </button>
-            <button type="button" disabled={sending} onClick={() => void deleteSession(item)} className="m-1 rounded-md p-2 text-slate-400 opacity-0 hover:bg-white hover:text-red-600 group-hover:opacity-100 focus:opacity-100" aria-label={`Hide ${item.title}`}><Trash2 className="size-4" /></button>
+            <button type="button" disabled={sending || Boolean(deletingSessionId)} onClick={() => requestDeleteSession(item)} className="m-1 rounded-md p-2 text-slate-400 opacity-0 hover:bg-white hover:text-red-600 group-hover:opacity-100 focus:opacity-100" aria-label={`Hide ${item.title}`}><Trash2 className="size-4" /></button>
           </div>
         ))}
       </div>
     </div>
   )
 
-  return (
+  const mobileHistoryPanel = (
+    <div>
+      <div className="mb-2 flex items-center justify-between px-2">
+        <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+          Conversations
+        </p>
+        <button
+          type="button"
+          disabled={sending}
+          onClick={startNewChat}
+          className="rounded-md p-1.5 text-slate-300 transition-colors hover:bg-slate-800 hover:text-white disabled:opacity-50"
+          aria-label="Start new chat"
+        >
+          <Plus className="size-4" />
+        </button>
+      </div>
+      <div className="max-h-[min(48dvh,28rem)] overflow-y-auto">
+        {historyLoading ? (
+          Array.from({ length: 4 }).map((_, index) => (
+            <div key={index} className="mx-1 mb-2 h-12 animate-pulse rounded-md bg-slate-800" />
+          ))
+        ) : historyError ? (
+          <div className="px-2 py-3 text-sm text-red-300">
+            <p>{historyError}</p>
+            <button
+              type="button"
+              className="mt-2 text-xs font-medium text-white underline underline-offset-4"
+              onClick={() => void loadHistory()}
+            >
+              Retry
+            </button>
+          </div>
+        ) : history.length === 0 ? (
+          <p className="px-2 py-3 text-sm text-slate-400">No conversations yet.</p>
+        ) : (
+          history.map((item) => (
+            <div
+              key={item.id}
+              className={cn(
+                "group mb-1 flex items-center rounded-md",
+                sessionId === item.id ? "bg-indigo-600 text-white" : "text-slate-300 hover:bg-slate-800 hover:text-white",
+              )}
+            >
+              <button
+                type="button"
+                disabled={sending}
+                onClick={() => switchSession(item.id)}
+                className="min-w-0 flex-1 px-3 py-2 text-left disabled:opacity-50"
+              >
+                <p className="truncate text-sm font-medium">{item.title}</p>
+              </button>
+              <button
+                type="button"
+                disabled={sending || Boolean(deletingSessionId)}
+                onClick={() => requestDeleteSession(item)}
+                className="mr-1 rounded-md p-1.5 text-slate-400 opacity-70 transition-colors hover:bg-slate-700 hover:text-red-300 focus:opacity-100"
+                aria-label={`Hide ${item.title}`}
+              >
+                <Trash2 className="size-3.5" />
+              </button>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  )
+
+  const playgroundContent = (
     <div
       className={cn(
         "flex min-h-[32rem] flex-col bg-white",
@@ -668,7 +748,7 @@ function Playground({ authenticated }: { authenticated: boolean }) {
         {authenticated && (
           <aside
             className={cn(
-              "relative hidden shrink-0 border-r border-slate-200 bg-slate-50 transition-[width] duration-300 ease-in-out lg:block",
+              "relative hidden shrink-0 border-r border-slate-200 bg-slate-50 transition-[width] duration-300 ease-in-out xl:block",
               historyCollapsed ? "w-12" : "w-72",
             )}
           >
@@ -699,9 +779,7 @@ function Playground({ authenticated }: { authenticated: boolean }) {
             </button>
           </aside>
         )}
-        {authenticated && drawerOpen && <div className="fixed inset-0 z-50 lg:hidden"><button aria-label="Close conversations" className="absolute inset-0 bg-slate-950/35" onClick={() => setDrawerOpen(false)} /><aside className="relative h-full w-[min(20rem,85vw)] border-r border-slate-200 shadow-xl">{historyPanel}</aside></div>}
         <div className="flex min-w-0 flex-1 flex-col">
-          {authenticated && <div className="flex h-11 shrink-0 items-center border-b border-slate-100 px-3 lg:hidden"><Button size="sm" variant="ghost" className="gap-2" onClick={() => setDrawerOpen(true)} disabled={sending}><Menu className="size-4" /> Conversations</Button></div>}
 
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto flex min-h-full w-full max-w-3xl flex-col px-4 py-8 sm:px-6">
@@ -729,47 +807,26 @@ function Playground({ authenticated }: { authenticated: boolean }) {
                   key={item.id}
                   className={cn("flex", item.role === "user" ? "justify-end" : "justify-start")}
                 >
-                  <div
-                    className={cn(
-                      "max-w-[85%] whitespace-pre-wrap break-words rounded-2xl px-4 py-3 text-sm leading-6 sm:max-w-[75%]",
-                      item.role === "user"
-                        ? "rounded-br-md bg-indigo-600 text-white"
-                        : item.error
-                          ? "rounded-bl-md bg-red-50 text-red-700"
-                          : "rounded-bl-md bg-slate-100 text-slate-900",
-                    )}
-                  >
-                    {item.loading ? (
+                  {item.role === "user" ? (
+                    <div className="max-w-[85%] whitespace-pre-wrap break-words rounded-2xl rounded-br-md bg-indigo-600 px-4 py-3 text-sm leading-6 text-white sm:max-w-[75%]">
+                      {item.content}
+                    </div>
+                  ) : item.loading ? (
+                    <div className="w-full py-2 text-sm text-slate-500">
                       <span className="inline-flex items-center gap-2">
                         <Loader2 className="size-3.5 animate-spin" />
                         {item.content}
                       </span>
-                    ) : (
-                      item.content
-                    )}
-                    {item.citations && item.citations.length > 0 && (
-                      <div className="mt-3 space-y-2 border-t border-slate-200 pt-3">
-                        {item.citations.map((citation) => (
-                          <div
-                            key={`${citation.id}-${citation.document_id}-${citation.chunk_index}`}
-                            className="rounded-lg border border-slate-200 bg-white p-2 text-xs text-slate-600"
-                          >
-                            <div className="mb-1 flex items-center justify-between gap-2">
-                              <span className="font-semibold text-slate-800">
-                                [{citation.id}] {citation.source_name}
-                              </span>
-                              <span>{citation.score.toFixed(2)}</span>
-                            </div>
-                            <p className="text-slate-500">
-                              {citation.sheet_name ? `${citation.sheet_name}${citation.cell_range ? ` · ${citation.cell_range}` : ""} · ` : citation.page_number ? `Page ${citation.page_number} · ` : citation.section_path?.length ? `${citation.section_path.join(" / ")} · ` : ""}
-                              Chunk {citation.chunk_index}
-                            </p>
-                            <p className="mt-1 line-clamp-3">{citation.snippet}</p>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
+                    </div>
+                  ) : (
+                    <div className="w-full py-1">
+                      <AssistantResponse
+                        content={item.content}
+                        citations={item.citations}
+                        error={item.error}
+                      />
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
@@ -800,7 +857,7 @@ function Playground({ authenticated }: { authenticated: boolean }) {
                     </p>
                     <p className="truncate text-[11px] text-slate-500">
                       {formatBytes(source.fileSizeBytes)}
-                      {source.chunkCount ? ` · ${source.chunkCount} chunks` : ""}
+                      {source.status === "COMPLETED" ? " · Ready to answer" : ""}
                     </p>
                     <span
                       className={cn(
@@ -870,7 +927,7 @@ function Playground({ authenticated }: { authenticated: boolean }) {
                 <button
                   type="button"
                   onClick={cancelMessage}
-                  className="h-9 rounded-lg px-3 text-sm font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+                  className="h-9 rounded-lg px-3 text-sm font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900 hidden"
                 >
                   Cancel
                 </button>
@@ -930,8 +987,51 @@ function Playground({ authenticated }: { authenticated: boolean }) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <Dialog
+        open={deleteTarget !== null}
+        onOpenChange={(open) => {
+          if (!open && !deletingSessionId) setDeleteTarget(null)
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete conversation?</DialogTitle>
+            <DialogDescription>
+              <span className="font-medium text-slate-700">{deleteTarget?.title}</span> will be removed from your conversation history. It may still be retained for workspace analytics.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              disabled={Boolean(deletingSessionId)}
+              onClick={() => setDeleteTarget(null)}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={Boolean(deletingSessionId)}
+              onClick={() => void confirmDeleteSession()}
+            >
+              {deletingSessionId ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <Trash2 className="size-4" />
+              )}
+              Delete conversation
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
+
+  return authenticated ? (
+    <AppShell contentClassName="p-0" mobileNavContent={mobileHistoryPanel}>
+      {playgroundContent}
+    </AppShell>
+  ) : playgroundContent
 }
 
 export default function ChatPlayground() {
@@ -946,11 +1046,7 @@ export default function ChatPlayground() {
   }
 
   if (status === "authenticated") {
-    return (
-      <AppShell contentClassName="p-0">
-        <Playground authenticated />
-      </AppShell>
-    )
+    return <Playground authenticated />
   }
 
   return <Playground authenticated={false} />

@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import json
+from datetime import UTC, datetime
 from io import BytesIO
+from uuid import uuid4
 
 import pytest
 
 from app.graph import (
     EntityMention,
+    EntityRelationExtractor,
     EvidenceRelation,
     GraphBatch,
     GraphSearchRequest,
@@ -13,8 +17,10 @@ from app.graph import (
 )
 from app.ingestion.chunking import DeterministicChunker
 from app.ingestion.errors import PermanentIngestionError
+from app.ingestion.events import DocumentIngestRequestedEvent
 from app.ingestion.extraction import DocumentTextExtractor
 from app.ingestion.spreadsheets import CalculationCommand, PolarsCalculationAdapter, TypedFilter
+from app.rag.errors import ChatModelProviderError
 
 
 def test_markdown_and_html_preserve_structure_and_ignore_active_content() -> None:
@@ -95,6 +101,9 @@ def test_docx_and_xlsx_extract_structures_and_exclude_formulas() -> None:
         file_name="returns.docx",
     )
     assert {block.block_type for block in parsed_docx.blocks} >= {"heading", "paragraph", "table"}
+    docx_chunks = DeterministicChunker(chunk_size=800, overlap=120).chunk(parsed_docx)
+    table_chunk = next(chunk for chunk in docx_chunks if chunk.block_type == "table")
+    assert table_chunk.text == "Item | Days\nSale | 7"
 
     workbook = Workbook()
     sheet = workbook.active
@@ -173,3 +182,177 @@ def test_graph_requires_evidence_and_replacement_is_idempotent(tmp_path: object)
                 ),
             ),
         )
+
+
+@pytest.mark.asyncio
+async def test_graph_extraction_splits_batches_when_model_hits_output_limit() -> None:
+    class LengthLimitedModel:
+        def __init__(self) -> None:
+            self.batch_sizes: list[int] = []
+
+        async def complete(self, messages: list[dict[str, object]]) -> str:
+            import json
+
+            payload = json.loads(str(messages[1]["content"]))
+            self.batch_sizes.append(len(payload))
+            if len(payload) > 1:
+                raise ChatModelProviderError(
+                    "Model provider returned an empty response (finish_reason=length)"
+                )
+            return '{"entities":[],"relations":[]}'
+
+    parsed = DocumentTextExtractor().parse(
+        b"First paragraph.\n\nSecond paragraph.",
+        content_type="text/plain",
+        file_name="notes.txt",
+    )
+    chunks = DeterministicChunker().chunk(parsed)
+    model = LengthLimitedModel()
+
+    entities, relations = await EntityRelationExtractor(model, batch_size=4)._extract_batch(chunks)
+
+    assert entities == []
+    assert relations == []
+    assert model.batch_sizes == [2, 1, 1]
+
+
+@pytest.mark.asyncio
+async def test_graph_extraction_retries_single_unit_after_output_limit() -> None:
+    class InitiallyLengthLimitedModel:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def complete(self, messages: list[dict[str, object]]) -> str:
+            del messages
+            self.calls += 1
+            if self.calls == 1:
+                raise ChatModelProviderError(
+                    "Model provider returned an empty response (finish_reason=length)"
+                )
+            return '{"entities":[],"relations":[]}'
+
+    parsed = DocumentTextExtractor().parse(
+        b"One paragraph.",
+        content_type="text/plain",
+        file_name="notes.txt",
+    )
+    chunks = DeterministicChunker().chunk(parsed)
+    model = InitiallyLengthLimitedModel()
+
+    entities, relations = await EntityRelationExtractor(model)._extract_batch(chunks)
+
+    assert entities == []
+    assert relations == []
+    assert model.calls == 2
+
+
+@pytest.mark.asyncio
+async def test_graph_extraction_fails_after_single_unit_output_limit_retry() -> None:
+    class AlwaysLengthLimitedModel:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def complete(self, messages: list[dict[str, object]]) -> str:
+            del messages
+            self.calls += 1
+            raise ChatModelProviderError(
+                "Model provider returned an empty response (finish_reason=length)"
+            )
+
+    parsed = DocumentTextExtractor().parse(
+        b"One paragraph.",
+        content_type="text/plain",
+        file_name="notes.txt",
+    )
+    chunks = DeterministicChunker().chunk(parsed)
+    model = AlwaysLengthLimitedModel()
+
+    with pytest.raises(PermanentIngestionError, match="configured model output limit"):
+        await EntityRelationExtractor(model)._extract_batch(chunks)
+
+    assert model.calls == 2
+
+
+@pytest.mark.asyncio
+async def test_graph_extraction_discards_ungrounded_entities_and_relations() -> None:
+    class UngroundedModel:
+        async def complete(self, messages: list[dict[str, object]]) -> str:
+            units = json.loads(str(messages[1]["content"]))
+            unit_id = units[0]["unit_id"]
+            return json.dumps(
+                {
+                    "entities": [
+                        {
+                            "name": "Acme",
+                            "normalized_name": "acme",
+                            "entity_type": "organization",
+                            "evidence_unit_id": unit_id,
+                        },
+                        {
+                            "name": "Policy",
+                            "normalized_name": "policy",
+                            "entity_type": "document",
+                            "evidence_unit_id": unit_id,
+                        },
+                        {
+                            "name": "Ghost",
+                            "normalized_name": "ghost",
+                            "entity_type": "unknown",
+                            "evidence_unit_id": "invented-unit",
+                        },
+                    ],
+                    "relations": [
+                        {
+                            "subject_normalized_name": "acme",
+                            "predicate": "has",
+                            "object_normalized_name": "policy",
+                            "evidence_unit_id": unit_id,
+                        },
+                        {
+                            "subject_normalized_name": "acme",
+                            "predicate": "owns",
+                            "object_normalized_name": "missing",
+                            "evidence_unit_id": unit_id,
+                        },
+                        {
+                            "subject_normalized_name": "ghost",
+                            "predicate": "haunts",
+                            "object_normalized_name": "acme",
+                            "evidence_unit_id": unit_id,
+                        },
+                        {
+                            "subject_normalized_name": "acme",
+                            "predicate": "has",
+                            "object_normalized_name": "policy",
+                            "evidence_unit_id": "invented-unit",
+                        },
+                    ],
+                }
+            )
+
+    parsed = DocumentTextExtractor().parse(
+        b"Acme has a policy.",
+        content_type="text/plain",
+        file_name="notes.txt",
+    )
+    chunks = DeterministicChunker().chunk(parsed)
+    event = DocumentIngestRequestedEvent(
+        schema_version="1.0",
+        event_id=uuid4(),
+        job_id=uuid4(),
+        tenant_id=uuid4(),
+        knowledge_base_id=uuid4(),
+        document_id=uuid4(),
+        uploader_id=uuid4(),
+        storage_key="documents/notes.txt",
+        file_name="notes.txt",
+        content_type="text/plain",
+        file_size_bytes=18,
+        occurred_at=datetime.now(UTC),
+    )
+
+    batch = await EntityRelationExtractor(UngroundedModel()).extract(event, chunks)
+
+    assert [entity.normalized_name for entity in batch.entities] == ["acme", "policy"]
+    assert len(batch.relations) == 1
+    assert batch.relations[0].predicate == "has"

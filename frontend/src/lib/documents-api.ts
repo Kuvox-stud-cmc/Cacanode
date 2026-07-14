@@ -1,10 +1,11 @@
 import type {
   Document,
+  DocumentUnit,
   DocumentStatusResponse,
   DocumentUploadResponse,
   DocumentVisibility,
 } from "@/types";
-import { getApiBase } from "@/lib/auth-api";
+import { getAiApiBase, getApiBase } from "@/lib/auth-api";
 import { readJsonOrThrow } from "@/lib/api-error";
 
 export type ApiRequest = (endpoint: string, options?: RequestInit) => Promise<Response>;
@@ -54,6 +55,27 @@ export async function getDocumentStatusApi(
 ): Promise<DocumentStatusResponse> {
   const res = await request(`${getApiBase()}/documents/${documentId}`);
   return readJsonOrThrow<DocumentStatusResponse>(res);
+}
+
+export async function getDocumentUnitsApi(
+  request: ApiRequest,
+  documentId: string,
+): Promise<DocumentUnit[]> {
+  const res = await request(`${getAiApiBase()}/documents/${documentId}/units`);
+  return readJsonOrThrow<DocumentUnit[]>(res);
+}
+
+export async function downloadDocumentApi(
+  request: ApiRequest,
+  documentId: string,
+): Promise<{ blob: Blob; fileName: string }> {
+  const res = await request(`${getApiBase()}/documents/${documentId}/download`);
+  if (!res.ok) await readJsonOrThrow<unknown>(res);
+  const disposition = res.headers.get("Content-Disposition") ?? "";
+  const encoded = disposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
+  const quoted = disposition.match(/filename="([^"]+)"/i)?.[1];
+  const fileName = encoded ? decodeURIComponent(encoded) : quoted ?? "document";
+  return { blob: await res.blob(), fileName };
 }
 
 export async function deleteDocumentApi(

@@ -57,7 +57,9 @@ class Settings(BaseSettings):
     GRAPH_INTERNAL_TOKEN: str = "development-graph-token"
     INGESTION_INTERNAL_TOKEN: str = "development-ingestion-token"
     GRAPH_TIMEOUT_SECONDS: float = 30.0
-    GRAPH_EXTRACTION_BATCH_SIZE: int = 12
+    GRAPH_EXTRACTION_BATCH_SIZE: int = 4
+    GRAPH_EXTRACTION_MAX_OUTPUT_TOKENS: int = 25_000
+    GRAPH_EXTRACTION_REASONING_EFFORT: Literal["low", "medium", "high"] = "low"
     PARSER_VERSION: str = "digital-v1"
     CHUNKER_VERSION: str = "structural-v1"
     SPREADSHEET_MAX_ROWS: int = 250_000

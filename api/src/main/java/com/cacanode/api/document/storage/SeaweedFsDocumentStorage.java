@@ -13,6 +13,7 @@ import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.CreateBucketRequest;
 import software.amazon.awssdk.services.s3.model.DeleteObjectRequest;
+import software.amazon.awssdk.services.s3.model.GetObjectRequest;
 import software.amazon.awssdk.services.s3.model.HeadBucketRequest;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 import software.amazon.awssdk.services.s3.model.S3Exception;
@@ -42,6 +43,20 @@ public class SeaweedFsDocumentStorage implements DocumentStorage {
             throw new InternalServerErrorException("Unable to read uploaded document");
         } catch (RuntimeException e) {
             throw new InternalServerErrorException("Unable to store uploaded document", e);
+        }
+    }
+
+    @Override
+    public StoredDocument load(String key) {
+        try {
+            ensureBucketExists();
+            var response = seaweedFsS3Client.getObjectAsBytes(GetObjectRequest.builder()
+                    .bucket(properties.bucket())
+                    .key(key)
+                    .build());
+            return new StoredDocument(response.asByteArray(), response.response().contentType());
+        } catch (RuntimeException e) {
+            throw new InternalServerErrorException("Unable to read document from object storage", e);
         }
     }
 

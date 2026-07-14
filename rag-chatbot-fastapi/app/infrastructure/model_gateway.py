@@ -154,7 +154,7 @@ class OpenAIChatModel:
 
     provider = "openai"
 
-    def __init__(self, settings: Settings):
+    def __init__(self, settings: Settings, *, reasoning_effort: str | None = None):
         if not settings.OPENAI_API_KEY:
             raise RuntimeError("OPENAI_API_KEY is required when LLM_PROVIDER=openai")
         if not settings.OPENAI_MODEL:
@@ -172,6 +172,8 @@ class OpenAIChatModel:
         }
         if _supports_temperature(settings.OPENAI_MODEL):
             client_kwargs["temperature"] = settings.LLM_TEMPERATURE
+        elif reasoning_effort is not None:
+            client_kwargs["reasoning_effort"] = reasoning_effort
         self._client = ChatOpenAI(**client_kwargs)
 
     async def complete(self, messages: Sequence[dict[str, Any]]) -> str:
@@ -216,7 +218,9 @@ class OpenAIChatModel:
                 yield str(chunk.content)
 
 
-def create_chat_model(settings: Settings) -> OllamaChatModel | OpenAIChatModel:
+def create_chat_model(
+    settings: Settings, *, reasoning_effort: str | None = None
+) -> OllamaChatModel | OpenAIChatModel:
     if settings.LLM_PROVIDER == "openai":
-        return OpenAIChatModel(settings)
+        return OpenAIChatModel(settings, reasoning_effort=reasoning_effort)
     return OllamaChatModel(settings)

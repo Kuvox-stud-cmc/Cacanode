@@ -53,7 +53,10 @@ class DeterministicChunker:
     def _chunk_blocks(self, document: ParsedDocument) -> list[TextChunk]:
         chunks: list[TextChunk] = []
         for block in document.blocks:
-            pieces = self._split_block(block.text)
+            pieces = self._split_block(
+                block.text,
+                preserve_lines=block.block_type in {"table", "code"},
+            )
             for piece_index, text in enumerate(pieces):
                 unit_id = block.unit_id if len(pieces) == 1 else f"{block.unit_id}:{piece_index}"
                 chunks.append(
@@ -77,8 +80,13 @@ class DeterministicChunker:
                 )
         return chunks
 
-    def _split_block(self, text: str) -> list[str]:
-        normalized = " ".join(text.split())
+    def _split_block(self, text: str, *, preserve_lines: bool = False) -> list[str]:
+        if preserve_lines:
+            normalized = "\n".join(
+                " ".join(line.split()) for line in text.splitlines() if line.strip()
+            )
+        else:
+            normalized = " ".join(text.split())
         if not normalized:
             return []
         if len(normalized) <= self._chunk_size:
