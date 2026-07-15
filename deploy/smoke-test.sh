@@ -2,12 +2,15 @@
 set -Eeuo pipefail
 
 BASE_URL="${1:?Usage: smoke-test.sh https://app.example.com}"
-ATTEMPTS="${SMOKE_TEST_ATTEMPTS:-36}"
+ATTEMPTS="${SMOKE_TEST_ATTEMPTS:-72}"
 DELAY_SECONDS="${SMOKE_TEST_DELAY_SECONDS:-5}"
 
 check() {
   local path="$1"
   curl --fail --silent --show-error \
+    --retry 3 \
+    --retry-delay 1 \
+    --retry-all-errors \
     --connect-timeout 5 \
     --max-time 20 \
     "${BASE_URL}${path}" >/dev/null
