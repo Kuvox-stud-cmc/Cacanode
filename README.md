@@ -1490,18 +1490,17 @@ QDRANT_KNOWLEDGE_BASE_FIELD=knowledge_base_id
 # Kuzu
 KUZU_DATABASE_PATH=/data/kuzu/cacanode.kuzu
 
-# Internal model serving
-LLM_BASE_URL=http://llm-server:8000/v1
-LLM_INTERNAL_API_KEY=change-me
-LLM_MODEL_ID=<approved-gemma-4-instruction-checkpoint>
-LLM_ADAPTER_ID=<approved-vietnamese-adapter-or-empty>
-LLM_TEMPERATURE=0.2
+# Hosted answer generation and graph extraction
+LLM_PROVIDER=openai
+OPENAI_API_KEY=<openai-api-key>
+OPENAI_MODEL=o4-mini
 LLM_MAX_OUTPUT_TOKENS=1024
 
-# Text embeddings
-TEXT_EMBEDDING_MODEL_ID=google/embeddinggemma-300M
+# Local text embeddings through embedding-only Ollama
+TEXT_EMBEDDING_BASE_URL=http://ollama:11434
+TEXT_EMBEDDING_MODEL_ID=embeddinggemma
 TEXT_EMBEDDING_DIMENSION=768
-TEXT_EMBEDDING_BATCH_SIZE=32
+TEXT_EMBEDDING_BATCH_SIZE=16
 TEXT_EMBEDDING_TIMEOUT_SECONDS=120
 SPARSE_MODEL_ID=Qdrant/bm25
 SPARSE_MODEL_CACHE_DIR=/models/fastembed
@@ -1554,8 +1553,8 @@ CONTEXT_DOCUMENT_SOFT_LIMIT=2
 NEIGHBOR_EXPANSION_LIMIT=3
 RERANKER_ENABLED=true
 RERANKER_URL=http://reranker-service
-RERANKER_MODEL_ID=BAAI/bge-reranker-v2-m3
-RERANKER_TIMEOUT_SECONDS=10
+RERANKER_MODEL_ID=cross-encoder/mmarco-mMiniLMv2-L12-H384-v1
+RERANKER_TIMEOUT_SECONDS=20
 ENABLE_GENERAL_KNOWLEDGE=false
 
 # Public API
@@ -1581,8 +1580,6 @@ No environment variable accepts a tenant-supplied model-provider key.
 - Git.
 - Docker Engine.
 - Docker Compose.
-- NVIDIA Container Toolkit for GPU containers.
-- Sufficient GPU memory for the selected Gemma checkpoint.
 - Sufficient disk space for model weights, raw sources, and derived media.
 
 ### Start local development
@@ -1598,8 +1595,8 @@ make dev
 ```
 
 The AI API reaches Graph on `http://localhost:8010`. Reranking is disabled by default locally
-because TEI does not publish an ARM64 image. The production `BAAI/bge-reranker-v2-m3` model can
-exhaust Docker Desktop memory under x86 emulation, starving Ollama and SeaweedFS. Local opt-in uses
+because TEI does not publish an ARM64 image. Large BGE rerankers can exhaust Docker Desktop memory
+under x86 emulation, starving Ollama and SeaweedFS. Local and low-resource production opt-in uses
 the much smaller Vietnamese-capable `cross-encoder/mmarco-mMiniLMv2-L12-H384-v1` model instead.
 Start it explicitly with `make dev-reranker`, then run the API with
 `DEV_RERANKER_ENABLED=true make dev`. The default `make dev` mode also starts worker lifecycles
@@ -1613,41 +1610,42 @@ make dev-down
 
 ### Start the container platform
 
-Use the production Compose file when you want the application containers as well as the backing services:
+The production profile is designed for a 4-vCPU / 8-GB CPU droplet. It uses hosted OpenAI
+generation, embedding-only Ollama, the Kuzu graph service, and a lightweight CPU multilingual
+reranker. Follow [DEPLOYMENT.md](DEPLOYMENT.md) for DNS, HTTPS, droplet bootstrap, GitHub Actions,
+secrets, smoke tests, and rollback.
+
+For a manual start after creating `.env.production`:
 
 ```bash
-cp .env.example .env
-docker compose -f docker-compose.prod.yml up -d --build
+COMPOSE_PARALLEL_LIMIT=1 docker compose \
+  --env-file .env.production \
+  -f docker-compose.prod.yml \
+  up -d --build
 ```
 
-To run dedicated worker containers instead of embedded FastAPI workers:
+The normal production mode runs one embedded document worker. If dedicated ingestion is required,
+disable the embedded worker and start only the dedicated document profile:
 
 ```bash
-WORKER_MODE=disabled docker compose -f docker-compose.prod.yml --profile workers up -d --build
-```
-
-Model services are optional because local hardware may not support the configured checkpoints. Start them only after setting valid model IDs:
-
-```bash
-docker compose -f docker-compose.prod.yml --profile gpu up -d llm-server embedding-service
+WORKER_MODE=disabled docker compose \
+  --env-file .env.production \
+  -f docker-compose.prod.yml \
+  --profile dedicated-workers up -d document-worker
 ```
 
 The production Compose deployment exposes these logical services:
 
 ```text
+caddy
 gateway
 admin-web
 business-api
 ai-api
-llm-server
-embedding-service
 graph-service
 document-worker
-ocr-worker
-asr-worker
-vision-worker
-audio-worker
-video-worker
+ollama
+reranker-service
 postgres
 redis
 rabbitmq
@@ -1660,30 +1658,23 @@ seaweedfs-filer
 ### Check status
 
 ```bash
-docker compose ps
-curl -fsS http://localhost:8010/health/ready
-```
-
-For the container platform, use:
-
-```bash
-docker compose -f docker-compose.prod.yml ps
-curl -fsS http://localhost/health/live
-curl -fsS http://localhost/health/ready
+docker compose --env-file .env.production -f docker-compose.prod.yml ps
+./deploy/smoke-test.sh https://app.example.com
 ```
 
 ### View logs
 
 ```bash
 docker compose logs -f postgres redis rabbitmq qdrant graph-service
-docker compose -f docker-compose.prod.yml logs -f gateway business-api ai-api llm-server
+docker compose --env-file .env.production -f docker-compose.prod.yml \
+  logs -f caddy gateway business-api ai-api reranker-service ollama
 ```
 
 ### Stop the platform
 
 ```bash
 docker compose down
-docker compose -f docker-compose.prod.yml down
+docker compose --env-file .env.production -f docker-compose.prod.yml down
 ```
 
 Use `docker compose down -v` only when intentionally deleting local databases, queues, vectors, graph data, and object-storage volumes.

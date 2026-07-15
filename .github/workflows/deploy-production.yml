@@ -1,0 +1,161 @@
+name: Deploy production
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate deployment configuration
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out revision
+        uses: actions/checkout@v4
+
+      - name: Validate scripts and Compose
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          bash -n deploy/bootstrap-ubuntu.sh deploy/deploy.sh deploy/smoke-test.sh
+          docker compose --env-file .env.production.example -f docker-compose.prod.yml config --quiet
+          docker compose --env-file .env.production.example -f docker-compose.prod.yml \
+            --profile dedicated-workers config --quiet
+
+      - name: Validate reverse proxies
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          docker run --rm \
+            --add-host admin-web:127.0.0.1 \
+            --add-host business-api:127.0.0.1 \
+            --add-host ai-api:127.0.0.1 \
+            -v "${PWD}/gateway/nginx.conf:/etc/nginx/nginx.conf:ro" \
+            -v "${PWD}/gateway/proxy-headers.conf:/etc/nginx/proxy-headers.conf:ro" \
+            nginx:1.27-alpine nginx -t
+          docker run --rm \
+            -e DEPLOY_DOMAIN=app.example.com \
+            -e CADDY_ACME_EMAIL=admin@example.com \
+            -v "${PWD}/deploy/Caddyfile:/etc/caddy/Caddyfile:ro" \
+            caddy:2-alpine caddy validate --config /etc/caddy/Caddyfile
+
+  deploy:
+    name: Deploy to DigitalOcean
+    needs: validate
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 45
+    env:
+      DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+      DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+      DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+      DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+      PRODUCTION_ENV_FILE: ${{ secrets.PRODUCTION_ENV_FILE }}
+      DEPLOY_PORT: ${{ vars.DEPLOY_PORT || '22' }}
+      DEPLOY_ROOT: ${{ vars.DEPLOY_ROOT || '/opt/cacanode' }}
+
+    steps:
+      - name: Check out revision
+        uses: actions/checkout@v4
+
+      - name: Validate deployment secrets
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          for name in DEPLOY_HOST DEPLOY_USER DEPLOY_SSH_KEY DEPLOY_KNOWN_HOSTS PRODUCTION_ENV_FILE; do
+            if [[ -z "${!name:-}" ]]; then
+              echo "Required production secret is missing: ${name}" >&2
+              exit 1
+            fi
+          done
+          if [[ ! "${DEPLOY_PORT}" =~ ^[0-9]+$ ]]; then
+            echo "DEPLOY_PORT must be numeric" >&2
+            exit 1
+          fi
+          if [[ "${DEPLOY_ROOT}" != /opt/* ]]; then
+            echo "DEPLOY_ROOT must be below /opt" >&2
+            exit 1
+          fi
+
+      - name: Configure SSH
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          install -d -m 700 "${HOME}/.ssh"
+          printf '%s\n' "${DEPLOY_SSH_KEY}" > "${HOME}/.ssh/deploy_key"
+          chmod 600 "${HOME}/.ssh/deploy_key"
+          printf '%s\n' "${DEPLOY_KNOWN_HOSTS}" > "${HOME}/.ssh/known_hosts"
+          chmod 600 "${HOME}/.ssh/known_hosts"
+
+      - name: Package revision and production environment
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          git archive --format=tar.gz --output=cacanode-release.tar.gz "${GITHUB_SHA}"
+          printf '%s\n' "${PRODUCTION_ENV_FILE}" > production.env
+          chmod 600 production.env
+
+      - name: Upload release
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          scp -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            -i "${HOME}/.ssh/deploy_key" -P "${DEPLOY_PORT}" \
+            cacanode-release.tar.gz production.env \
+            "${DEPLOY_USER}@${DEPLOY_HOST}:/tmp/"
+
+      - name: Activate release
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ssh -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            -i "${HOME}/.ssh/deploy_key" -p "${DEPLOY_PORT}" \
+            "${DEPLOY_USER}@${DEPLOY_HOST}" \
+            bash -s -- "${DEPLOY_ROOT}" "${GITHUB_SHA}" <<'REMOTE'
+          set -Eeuo pipefail
+          deploy_root="$1"
+          revision="$2"
+          release_dir="${deploy_root}/releases/${revision}"
+          env_file="${deploy_root}/shared/.env.production"
+          previous_release=""
+
+          if [[ -L "${deploy_root}/current" ]]; then
+            previous_release="$(readlink -f "${deploy_root}/current")"
+          fi
+
+          install -d -m 0750 "${release_dir}" "${deploy_root}/shared"
+          tar -xzf /tmp/cacanode-release.tar.gz -C "${release_dir}"
+          if [[ -f "${env_file}" ]]; then
+            cp -p "${env_file}" "${env_file}.previous"
+          fi
+          install -m 0600 /tmp/production.env "${env_file}"
+          rm -f /tmp/cacanode-release.tar.gz /tmp/production.env
+
+          if ! ENV_FILE="${env_file}" "${release_dir}/deploy/deploy.sh"; then
+            if [[ -f "${env_file}.previous" ]]; then
+              install -m 0600 "${env_file}.previous" "${env_file}"
+            fi
+            if [[ -n "${previous_release}" && -x "${previous_release}/deploy/deploy.sh" ]]; then
+              echo "Deployment failed; attempting the previous release"
+              ENV_FILE="${env_file}" "${previous_release}/deploy/deploy.sh" || true
+            fi
+            exit 1
+          fi
+
+          ln -sfn "${release_dir}" "${deploy_root}/current"
+
+          while IFS= read -r old_release; do
+            [[ -n "${old_release}" ]] && rm -rf -- "${old_release}"
+          done < <(find "${deploy_root}/releases" -mindepth 1 -maxdepth 1 -type d -printf '%T@ %p\n' \
+            | sort -nr | tail -n +4 | cut -d' ' -f2-)
+          REMOTE

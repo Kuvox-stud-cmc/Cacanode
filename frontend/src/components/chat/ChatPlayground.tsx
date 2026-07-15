@@ -9,7 +9,6 @@ import {
   type FormEvent,
   type KeyboardEvent,
 } from "react"
-import Image from "next/image"
 import Link from "next/link"
 import toast from "react-hot-toast"
 import {
@@ -28,6 +27,7 @@ import {
 } from "lucide-react"
 import { AppShell } from "@/components/app/AppShell"
 import { AssistantResponse } from "@/components/chat/AssistantResponse"
+import PublicNavbar from "@/components/landing/PublicNavbar"
 import { useAuthStore } from "@/components/providers/StoreProvider"
 import { useTokenRehydration } from "@/hooks/useTokenRehydration"
 import { useApiClient } from "@/hooks/useApiClient"
@@ -724,26 +724,9 @@ function Playground({ authenticated }: { authenticated: boolean }) {
     <div
       className={cn(
         "flex min-h-[32rem] flex-col bg-white",
-        authenticated ? "h-[calc(100dvh-3.5rem)]" : "h-dvh",
+        authenticated ? "h-[calc(100dvh-3.5rem)]" : "h-[calc(100dvh-4rem)]",
       )}
     >
-      {!authenticated && (
-        <header className="flex h-14 shrink-0 items-center border-b border-slate-200 px-4 sm:px-6">
-          <Link href="/" className="flex items-center gap-2">
-            <Image src="/logo.png" alt="CacaNode" width={28} height={28} />
-            <span className="font-semibold text-slate-900">CacaNode Chat</span>
-          </Link>
-          <Button
-            variant="outline"
-            className="ml-auto"
-            nativeButton={false}
-            render={<Link href="/login?next=%2F" />}
-          >
-            Sign in
-          </Button>
-        </header>
-      )}
-
       <div className="flex min-h-0 flex-1">
         {authenticated && (
           <aside
@@ -1049,5 +1032,12 @@ export default function ChatPlayground() {
     return <Playground authenticated />
   }
 
-  return <Playground authenticated={false} />
+  return (
+    <div className="h-dvh overflow-hidden bg-white">
+      <PublicNavbar />
+      <div className="pt-16">
+        <Playground authenticated={false} />
+      </div>
+    </div>
+  )
 }

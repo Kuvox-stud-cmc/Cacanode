@@ -1,9 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
-import { Check, Copy, KeyRound, Loader2, Play, Plus, RefreshCw, RotateCcw, Trash2 } from "lucide-react";
+import { Suspense, useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Check, Copy, CreditCard, KeyRound, Loader2, Play, Plus, RefreshCw, RotateCcw, Trash2 } from "lucide-react";
 import toast from "react-hot-toast";
+import PlanCardGrid, {
+  normalizePlanId,
+  type PlanId,
+} from "@/components/landing/PlanCardGrid";
 import { useAuthStore } from "@/components/providers/StoreProvider";
 import { useApiClient } from "@/hooks/useApiClient";
 import { publicConfig } from "@/lib/public-config";
@@ -47,12 +51,48 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 const WEBHOOK_EVENTS = ["conversation.started", "conversation.closed", "ticket.created"];
 
+type PlanQuotaSummary = {
+  label: string;
+  messages: string;
+  documents: string;
+  teamMembers: string;
+};
+
+const PLAN_QUOTAS: Record<string, PlanQuotaSummary> = {
+  starter: { label: "Starter", messages: "500", documents: "3", teamMembers: "1" },
+  free: { label: "Starter", messages: "500", documents: "3", teamMembers: "1" },
+  trial: { label: "Starter", messages: "500", documents: "3", teamMembers: "1" },
+  pro: { label: "Pro", messages: "10,000", documents: "50", teamMembers: "5" },
+  enterprise: {
+    label: "Enterprise",
+    messages: "Unlimited",
+    documents: "Unlimited",
+    teamMembers: "Unlimited",
+  },
+};
+
+function currentPlanSummary(plan: string | undefined): PlanQuotaSummary {
+  const normalized = plan?.trim().toLowerCase() ?? "";
+  const configured = PLAN_QUOTAS[normalized];
+  if (configured) return configured;
+
+  return {
+    label: normalized
+      ? normalized.replace(/[_-]+/g, " ").replace(/\b\w/g, (character) => character.toUpperCase())
+      : "Plan unavailable",
+    messages: "Not specified",
+    documents: "Not specified",
+    teamMembers: "Not specified",
+  };
+}
+
 function formatDate(value: string | null): string {
   return value ? new Date(value).toLocaleString() : "Never";
 }
 
-export default function SettingsPage() {
+function SettingsPageContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const user = useAuthStore((state) => state.user);
   const { request } = useApiClient();
   const [loading, setLoading] = useState(true);
@@ -76,6 +116,8 @@ export default function SettingsPage() {
   const [promptSettings, setPromptSettings] = useState<CustomerAnswerPromptSettings | null>(null);
   const [promptDraft, setPromptDraft] = useState("");
   const [restorePromptDialog, setRestorePromptDialog] = useState(false);
+  const [planDialog, setPlanDialog] = useState(false);
+  const [previewPlan, setPreviewPlan] = useState<PlanId | null>(null);
 
   useEffect(() => {
     if (!user) return;
@@ -107,6 +149,9 @@ export default function SettingsPage() {
   const promptDirty = promptSettings !== null && promptDraft !== promptSettings.prompt;
   const promptLength = Array.from(promptDraft).length;
   const promptInvalid = promptDraft.trim().length === 0 || promptLength > 4000;
+  const backendPlan = normalizePlanId(user?.plan);
+  const selectedPlan = previewPlan ?? backendPlan;
+  const currentPlan = currentPlanSummary(previewPlan ?? user?.plan);
 
   const embedCode = useMemo(() => {
     if (!newSecret || !newSecretScopes.includes("widget:chat")) return null;
@@ -235,6 +280,11 @@ export default function SettingsPage() {
     window.setTimeout(() => setCopied(false), 1500);
   }
 
+  function selectPlan(plan: PlanId) {
+    setPreviewPlan(plan);
+    setPlanDialog(false);
+  }
+
   if (user?.role !== "TENANT_ADMIN") {
     return null;
   }
@@ -246,10 +296,11 @@ export default function SettingsPage() {
   return (
     <div className="max-w-5xl space-y-6">
       <h2 className="text-xl font-semibold text-slate-800">Settings</h2>
-      <Tabs defaultValue="widget">
-        <TabsList className="mb-6">
+      <Tabs defaultValue={searchParams.get("tab") === "quota" ? "quota" : "widget"}>
+        <TabsList className="mb-6 h-auto max-w-full flex-wrap justify-start">
           <TabsTrigger value="widget">Widget</TabsTrigger>
           <TabsTrigger value="ai-prompt">AI Prompt</TabsTrigger>
+          <TabsTrigger value="quota">Quota Management</TabsTrigger>
           <TabsTrigger value="tokens">Integration Tokens</TabsTrigger>
           <TabsTrigger value="webhooks">Webhooks</TabsTrigger>
         </TabsList>
@@ -341,6 +392,62 @@ export default function SettingsPage() {
           </Card>
         </TabsContent>
 
+        <TabsContent value="quota" className="space-y-6">
+          <Card>
+            <CardHeader className="space-y-3">
+              <div className="flex flex-wrap items-start justify-between gap-4">
+                <div className="space-y-1">
+                  <CardTitle className="text-base">Current plan</CardTitle>
+                  <p className="text-sm text-slate-500">
+                    {previewPlan
+                      ? `Previewing the ${currentPlan.label} plan locally.`
+                      : `Your account is currently using the ${currentPlan.label} plan.`}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  {previewPlan && <Badge variant="outline">Preview only</Badge>}
+                  <Badge>{currentPlan.label}</Badge>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <Button type="button" onClick={() => setPlanDialog(true)}>
+                <CreditCard />Change plan
+              </Button>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="space-y-2">
+              <CardTitle className="text-base">Quota management</CardTitle>
+              <p className="text-sm text-slate-500">
+                Review the allowances associated with the account&apos;s current plan.
+              </p>
+            </CardHeader>
+            <CardContent className="space-y-5">
+              <div className="grid gap-4 sm:grid-cols-3">
+                {[
+                  { label: "Messages per month", value: currentPlan.messages },
+                  { label: "Documents", value: currentPlan.documents },
+                  { label: "Team members", value: currentPlan.teamMembers },
+                ].map((quota) => (
+                  <div key={quota.label} className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                    <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
+                      {quota.label}
+                    </p>
+                    <p className="mt-2 text-2xl font-semibold text-slate-900">{quota.value}</p>
+                  </div>
+                ))}
+              </div>
+              <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+                {previewPlan
+                  ? `Previewing the ${currentPlan.label} plan. This selection is not saved and will reset when you refresh.`
+                  : "Current usage and quota changes are not connected yet. This section currently shows plan allowances only."}
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
         <TabsContent value="tokens" className="space-y-4">
           <div className="flex items-center justify-between"><p className="text-sm text-slate-500">Create separate scoped tokens for hosted widgets and server-side Chat API integrations.</p><Button onClick={() => setTokenDialog(true)}><Plus />Create token</Button></div>
           {newSecret && <Card><CardHeader><CardTitle className="text-base">New token</CardTitle></CardHeader><CardContent className="space-y-3"><p className="text-sm text-amber-700">This value is shown once. Store it before closing this panel.</p><div className="flex gap-2"><code className="min-w-0 flex-1 overflow-x-auto rounded-md bg-slate-950 p-3 text-xs text-white">{newSecret}</code><Button variant="outline" size="icon" onClick={() => void copyText(newSecret)}>{copied ? <Check /> : <Copy />}</Button></div>{embedCode && <div className="space-y-2"><Label>Widget embed code</Label><pre className="overflow-x-auto rounded-md bg-slate-950 p-3 text-xs text-white">{embedCode}</pre><Button variant="outline" onClick={() => void copyText(embedCode)}><Copy />Copy embed code</Button></div>}</CardContent></Card>}
@@ -356,6 +463,22 @@ export default function SettingsPage() {
           <div className="divide-y rounded-md border bg-white">{webhooks.map((endpoint) => <div key={endpoint.id} className="flex flex-wrap items-center gap-3 p-4"><div className="min-w-56 flex-1"><p className="font-medium">{endpoint.name}</p><p className="truncate text-xs text-slate-500">{endpoint.url}</p></div><div className="flex flex-wrap gap-1">{endpoint.events.map((event) => <Badge key={event} variant="outline">{event}</Badge>)}</div><Badge variant="outline">{endpoint.lastDeliveryStatus ?? "Not delivered"}</Badge><Button variant="ghost" size="icon" title="Send test" onClick={async () => { await testWebhook(request, endpoint.id); toast.success("Test queued"); }}><Play /></Button><Button variant="ghost" size="icon" title="Rotate signing secret" onClick={async () => { const rotated = await rotateWebhookSecret(request, endpoint.id); setWebhookSecret(rotated.signingSecret); toast.success("Signing secret rotated"); }}><RefreshCw /></Button><Button variant="ghost" size="icon" title="Delete endpoint" onClick={async () => { await deleteWebhook(request, endpoint.id); setWebhooks((current) => current.filter((item) => item.id !== endpoint.id)); }}><Trash2 /></Button></div>)}{webhooks.length === 0 && <p className="p-8 text-center text-sm text-slate-500">No webhook endpoints</p>}</div>
         </TabsContent>
       </Tabs>
+
+      <Dialog open={planDialog} onOpenChange={setPlanDialog}>
+        <DialogContent className="inset-0 flex h-dvh w-screen max-w-none translate-x-0 translate-y-0 flex-col gap-0 rounded-none bg-[radial-gradient(circle_at_top,_rgba(99,102,241,0.28),_transparent_40%),linear-gradient(to_bottom,_rgba(15,23,42,0.52),_rgba(2,6,23,0.68))] p-0 text-white backdrop-blur-2xl sm:max-w-none [&_[data-slot=dialog-close]]:top-4 [&_[data-slot=dialog-close]]:right-4 [&_[data-slot=dialog-close]]:size-9 [&_[data-slot=dialog-close]]:rounded-full [&_[data-slot=dialog-close]]:border [&_[data-slot=dialog-close]]:border-white/15 [&_[data-slot=dialog-close]]:bg-white/10 [&_[data-slot=dialog-close]]:text-slate-200 [&_[data-slot=dialog-close]]:shadow-lg [&_[data-slot=dialog-close]]:backdrop-blur-md [&_[data-slot=dialog-close]]:hover:bg-white/20 [&_[data-slot=dialog-close]]:hover:text-white [&_[data-slot=dialog-close]_svg]:size-5">
+          <DialogHeader className="shrink-0 items-center bg-transparent px-14 py-7 text-center sm:px-20 sm:py-9">
+            <DialogTitle className="text-2xl font-semibold tracking-tight text-white sm:text-3xl">Choose your plan.</DialogTitle>
+            <DialogDescription className="max-w-xl text-center text-sm leading-6 text-slate-400 sm:text-base">
+              Compare plan allowances and preview a selection. Changes are not saved.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="min-h-0 flex-1 overflow-y-auto bg-transparent px-4 py-12 sm:px-8 sm:py-16">
+            <div className="mx-auto max-w-6xl">
+              <PlanCardGrid currentPlan={selectedPlan} onSelectPlan={selectPlan} />
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={tokenDialog} onOpenChange={setTokenDialog}><DialogContent><DialogHeader><DialogTitle>Create integration token</DialogTitle><DialogDescription>The secret is displayed once after creation.</DialogDescription></DialogHeader><div className="space-y-4"><div className="space-y-1.5"><Label>Name</Label><Input value={tokenName} onChange={(event) => setTokenName(event.target.value)} placeholder="Production website" /></div><div className="space-y-2"><Label>Scopes</Label>{(["widget:chat", "api:chat"] as IntegrationScope[]).map((scope) => <label key={scope} className="flex items-center gap-2 text-sm"><input type="checkbox" checked={tokenScopes.includes(scope)} onChange={(event) => setTokenScopes((current) => event.target.checked ? [...current, scope] : current.filter((item) => item !== scope))} />{scope}</label>)}</div><div className="space-y-1.5"><Label>Expiry date (optional)</Label><Input type="date" value={tokenExpiry} onChange={(event) => setTokenExpiry(event.target.value)} /></div></div><DialogFooter><Button variant="outline" onClick={() => setTokenDialog(false)}>Cancel</Button><Button onClick={() => void createToken()} disabled={saving || !tokenName.trim() || tokenScopes.length === 0}>Create</Button></DialogFooter></DialogContent></Dialog>
 
@@ -380,5 +503,13 @@ export default function SettingsPage() {
         </DialogContent>
       </Dialog>
     </div>
+  );
+}
+
+export default function SettingsPage() {
+  return (
+    <Suspense fallback={<div className="max-w-5xl space-y-4"><Skeleton className="h-8 w-40" /><Skeleton className="h-96 w-full" /></div>}>
+      <SettingsPageContent />
+    </Suspense>
   );
 }

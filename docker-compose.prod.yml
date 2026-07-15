@@ -1,113 +1,187 @@
 x-ai-environment: &ai-environment
-  APP_ENV: ${APP_ENV:-development}
-  TOKEN_KEY: ${TOKEN_KEY:-change-me-access}
-  INTEGRATION_TOKEN_PEPPER: ${INTEGRATION_TOKEN_PEPPER:-change-me-integration-pepper}
+  APP_ENV: ${APP_ENV:-production}
+  CORS_ORIGINS: ${CORS_ORIGINS:?CORS_ORIGINS is required}
+  LOG_LEVEL: ${LOG_LEVEL:-INFO}
+  TOKEN_KEY: ${TOKEN_KEY:?TOKEN_KEY is required}
+  INTEGRATION_TOKEN_PEPPER: ${INTEGRATION_TOKEN_PEPPER:?INTEGRATION_TOKEN_PEPPER is required}
   BUSINESS_API_BASE_URL: http://business-api:8080
-  POSTGRES_URL: postgresql://${POSTGRES_USER:-cacanode}:${POSTGRES_PASSWORD:-change-me}@postgres:5432/${POSTGRES_DB:-cacanode}
+  POSTGRES_URL: postgresql://${POSTGRES_USER:-cacanode}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:-cacanode}
   REDIS_URL: redis://redis:6379/0
-  RABBITMQ_URL: amqp://rag_user:rag_password@rabbitmq:5672/
+  RABBITMQ_URL: amqp://${RABBITMQ_USER:-rag_user}:${RABBITMQ_PASSWORD:?RABBITMQ_PASSWORD is required}@rabbitmq:5672/
   QDRANT_URL: http://qdrant:6333
+  QDRANT_API_KEY: ${QDRANT_API_KEY:-}
   QDRANT_COLLECTION: ${QDRANT_COLLECTION:-knowledge_units_v2}
   QDRANT_DENSE_VECTOR_NAME: ${QDRANT_DENSE_VECTOR_NAME:-text_embeddinggemma_v1}
   QDRANT_SPARSE_VECTOR_NAME: ${QDRANT_SPARSE_VECTOR_NAME:-text_bm25_v1}
   KUZU_DATABASE_PATH: /data/kuzu/cacanode.kuzu
   GRAPH_SERVICE_URL: http://graph-service:8010
   GRAPH_INTERNAL_TOKEN: ${GRAPH_INTERNAL_TOKEN:?GRAPH_INTERNAL_TOKEN is required}
+  GRAPH_TIMEOUT_SECONDS: ${GRAPH_TIMEOUT_SECONDS:-30}
+  GRAPH_EXTRACTION_MAX_OUTPUT_TOKENS: ${GRAPH_EXTRACTION_MAX_OUTPUT_TOKENS:-4096}
+  GRAPH_EXTRACTION_BATCH_SIZE: ${GRAPH_EXTRACTION_BATCH_SIZE:-4}
+  GRAPH_EXTRACTION_REASONING_EFFORT: ${GRAPH_EXTRACTION_REASONING_EFFORT:-low}
   INGESTION_INTERNAL_TOKEN: ${INGESTION_INTERNAL_TOKEN:?INGESTION_INTERNAL_TOKEN is required}
   SEAWEEDFS_MASTER_URL: http://seaweedfs-master:9333
   SEAWEEDFS_FILER_URL: http://seaweedfs-filer:8888
   SEAWEEDFS_S3_ENDPOINT: http://seaweedfs-s3:8333
   SEAWEEDFS_BUCKET: ${SEAWEEDFS_BUCKET:-cacanode}
-  LLM_BASE_URL: ${LLM_BASE_URL:-http://ollama:11434/v1}
-  LLM_INTERNAL_API_KEY: ${LLM_INTERNAL_API_KEY:-ollama}
-  LLM_MODEL_ID: ${LLM_MODEL_ID:-gemma4:12b}
-  LLM_MAX_OUTPUT_TOKENS: ${LLM_MAX_OUTPUT_TOKENS:-128}
-  GRAPH_EXTRACTION_MAX_OUTPUT_TOKENS: ${GRAPH_EXTRACTION_MAX_OUTPUT_TOKENS:-4096}
-  GRAPH_EXTRACTION_BATCH_SIZE: ${GRAPH_EXTRACTION_BATCH_SIZE:-4}
+  SEAWEEDFS_ACCESS_KEY: ${SEAWEEDFS_ACCESS_KEY:-}
+  SEAWEEDFS_SECRET_KEY: ${SEAWEEDFS_SECRET_KEY:-}
+  SEAWEEDFS_CONNECT_TIMEOUT_SECONDS: ${SEAWEEDFS_CONNECT_TIMEOUT_SECONDS:-3}
+  SEAWEEDFS_READ_TIMEOUT_SECONDS: ${SEAWEEDFS_READ_TIMEOUT_SECONDS:-30}
+  SEAWEEDFS_MAX_ATTEMPTS: ${SEAWEEDFS_MAX_ATTEMPTS:-3}
+  LLM_PROVIDER: ${LLM_PROVIDER:-openai}
+  OPENAI_API_KEY: ${OPENAI_API_KEY:?OPENAI_API_KEY is required}
+  OPENAI_MODEL: ${OPENAI_MODEL:-o4-mini}
+  LLM_MAX_OUTPUT_TOKENS: ${LLM_MAX_OUTPUT_TOKENS:-1024}
   LLM_TIMEOUT_SECONDS: ${LLM_TIMEOUT_SECONDS:-90}
-  LLM_USE_OLLAMA_NATIVE_CHAT: ${LLM_USE_OLLAMA_NATIVE_CHAT:-true}
-  LLM_DISABLE_THINKING: ${LLM_DISABLE_THINKING:-true}
-  TEXT_EMBEDDING_BASE_URL: ${TEXT_EMBEDDING_BASE_URL:-http://ollama:11434}
+  TEXT_EMBEDDING_BASE_URL: http://ollama:11434
   TEXT_EMBEDDING_MODEL_ID: ${TEXT_EMBEDDING_MODEL_ID:-embeddinggemma}
   TEXT_EMBEDDING_DIMENSION: ${TEXT_EMBEDDING_DIMENSION:-768}
+  TEXT_EMBEDDING_BATCH_SIZE: ${TEXT_EMBEDDING_BATCH_SIZE:-16}
+  TEXT_EMBEDDING_TIMEOUT_SECONDS: ${TEXT_EMBEDDING_TIMEOUT_SECONDS:-120}
   SPARSE_MODEL_ID: ${SPARSE_MODEL_ID:-Qdrant/bm25}
   SPARSE_MODEL_CACHE_DIR: /models/fastembed
+  DENSE_CANDIDATE_COUNT: ${DENSE_CANDIDATE_COUNT:-25}
+  SPARSE_CANDIDATE_COUNT: ${SPARSE_CANDIDATE_COUNT:-25}
+  GRAPH_CANDIDATE_COUNT: ${GRAPH_CANDIDATE_COUNT:-10}
+  FUSION_CANDIDATE_COUNT: ${FUSION_CANDIDATE_COUNT:-20}
+  RRF_K: ${RRF_K:-30}
+  PRIMARY_CONTEXT_TOP_K: ${PRIMARY_CONTEXT_TOP_K:-5}
+  FINAL_CONTEXT_TOP_K: ${FINAL_CONTEXT_TOP_K:-6}
+  CONTEXT_DOCUMENT_SOFT_LIMIT: ${CONTEXT_DOCUMENT_SOFT_LIMIT:-2}
+  NEIGHBOR_EXPANSION_LIMIT: ${NEIGHBOR_EXPANSION_LIMIT:-3}
   RERANKER_ENABLED: ${RERANKER_ENABLED:-true}
-  RERANKER_URL: ${RERANKER_URL:-http://reranker-service}
-  RERANKER_MODEL_ID: ${RERANKER_MODEL_ID:-BAAI/bge-reranker-v2-m3}
-  RERANKER_TIMEOUT_SECONDS: ${RERANKER_TIMEOUT_SECONDS:-10}
+  RERANKER_URL: http://reranker-service:80
+  RERANKER_MODEL_ID: ${RERANKER_MODEL_ID:-cross-encoder/mmarco-mMiniLMv2-L12-H384-v1}
+  RERANKER_TIMEOUT_SECONDS: ${RERANKER_TIMEOUT_SECONDS:-20}
   PUBLIC_RATE_LIMIT_PER_MINUTE: ${PUBLIC_RATE_LIMIT_PER_MINUTE:-120}
+  MAX_CONCURRENT_STREAMS_PER_TENANT: ${MAX_CONCURRENT_STREAMS_PER_TENANT:-10}
+  DISABLE_EXTERNAL_TELEMETRY: ${DISABLE_EXTERNAL_TELEMETRY:-true}
 
-x-worker: &worker
+x-document-worker: &document-worker
   build:
     context: ./rag-chatbot-fastapi
-  profiles: [workers]
+  profiles: [dedicated-workers]
   restart: unless-stopped
+  init: true
   environment:
     <<: *ai-environment
     WORKER_MODE: dedicated
+    WORKER_KINDS: document
   depends_on:
     rabbitmq:
       condition: service_healthy
+    qdrant:
+      condition: service_started
     ollama:
       condition: service_healthy
+    graph-service:
+      condition: service_healthy
+    seaweedfs-s3:
+      condition: service_started
   volumes:
-    - kuzu_data:/data/kuzu
     - model_cache:/models
+  mem_limit: ${DOCUMENT_WORKER_MEMORY_LIMIT:-1280m}
+  cpus: ${DOCUMENT_WORKER_CPU_LIMIT:-1.5}
 
 services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      DEPLOY_DOMAIN: ${DEPLOY_DOMAIN:?DEPLOY_DOMAIN is required}
+      CADDY_ACME_EMAIL: ${CADDY_ACME_EMAIL:?CADDY_ACME_EMAIL is required}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - gateway
+    mem_limit: ${CADDY_MEMORY_LIMIT:-256m}
+    cpus: ${CADDY_CPU_LIMIT:-0.5}
+
   gateway:
     image: nginx:1.27-alpine
     restart: unless-stopped
-    ports:
-      - "80:80"
+    expose:
+      - "80"
     volumes:
       - ./gateway/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./gateway/proxy-headers.conf:/etc/nginx/proxy-headers.conf:ro
     depends_on:
       - admin-web
       - business-api
       - ai-api
+    mem_limit: ${GATEWAY_MEMORY_LIMIT:-128m}
+    cpus: ${GATEWAY_CPU_LIMIT:-0.5}
 
   admin-web:
     build:
       context: ./frontend
       args:
-        NEXT_PUBLIC_API_BASE_URL: ${PUBLIC_API_BASE_URL:-http://localhost/api/v1}
-        NEXT_PUBLIC_AI_API_BASE_URL: ${PUBLIC_AI_API_BASE_URL:-}
+        NEXT_PUBLIC_API_BASE_URL: ${PUBLIC_API_BASE_URL:?PUBLIC_API_BASE_URL is required}
+        NEXT_PUBLIC_AI_API_BASE_URL: ${PUBLIC_AI_API_BASE_URL:?PUBLIC_AI_API_BASE_URL is required}
         NEXT_PUBLIC_DEMO_CHATBOT_ID: ${DEMO_CHATBOT_ID:-00000000-0000-0000-0000-000000000005}
         NEXT_PUBLIC_DEMO_KNOWLEDGE_BASE_ID: ${DEMO_KNOWLEDGE_BASE_ID:-00000000-0000-0000-0000-000000000004}
-        NEXT_PUBLIC_WIDGET_URL: ${PUBLIC_WIDGET_URL:-http://localhost/widget/v1/cacanode-chat.js}
+        NEXT_PUBLIC_WIDGET_URL: ${PUBLIC_WIDGET_URL:?PUBLIC_WIDGET_URL is required}
         NEXT_PUBLIC_DEFAULT_LOCALE: ${DEFAULT_LOCALE:-vi-VN}
     restart: unless-stopped
+    init: true
     expose:
       - "3000"
+    mem_limit: ${ADMIN_WEB_MEMORY_LIMIT:-512m}
+    cpus: ${ADMIN_WEB_CPU_LIMIT:-0.75}
 
   business-api:
     build:
       context: .
       dockerfile: api/Dockerfile
     restart: unless-stopped
+    init: true
     environment:
-      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-prod}
+      SPRING_PROFILES_ACTIVE: prod
       SERVER_PORT: 8080
+      JAVA_TOOL_OPTIONS: ${JAVA_TOOL_OPTIONS:--XX:MaxRAMPercentage=70 -XX:InitialRAMPercentage=20}
       POSTGRES_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-cacanode}
       POSTGRES_USER: ${POSTGRES_USER:-cacanode}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
       REDIS_URL: redis://redis:6379/0
-      RABBITMQ_URL: amqp://rag_user:rag_password@rabbitmq:5672/
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-rag_user}:${RABBITMQ_PASSWORD:?RABBITMQ_PASSWORD is required}@rabbitmq:5672/
+      CORS_ORIGINS: ${CORS_ORIGINS:?CORS_ORIGINS is required}
       COOKIE_SECURE: ${COOKIE_SECURE:-true}
-      TOKEN_KEY: ${TOKEN_KEY:-change-me-access}
-      INTEGRATION_TOKEN_PEPPER: ${INTEGRATION_TOKEN_PEPPER:-change-me-integration-pepper}
+      TOKEN_KEY: ${TOKEN_KEY:?TOKEN_KEY is required}
+      INTEGRATION_TOKEN_PEPPER: ${INTEGRATION_TOKEN_PEPPER:?INTEGRATION_TOKEN_PEPPER is required}
       AI_API_BASE_URL: http://ai-api:8000
       INGESTION_INTERNAL_TOKEN: ${INGESTION_INTERNAL_TOKEN:?INGESTION_INTERNAL_TOKEN is required}
-      WEBHOOK_ENCRYPTION_KEY: ${WEBHOOK_ENCRYPTION_KEY:-change-me-webhook-key}
+      WEBHOOK_ENCRYPTION_KEY: ${WEBHOOK_ENCRYPTION_KEY:?WEBHOOK_ENCRYPTION_KEY is required}
       EXPIRY_MINS: ${EXPIRY_MINS:-15}
       EXPIRY_DAYS: ${EXPIRY_DAYS:-30}
       PUBLIC_RATE_LIMIT_ENABLED: ${PUBLIC_RATE_LIMIT_ENABLED:-true}
       PUBLIC_RATE_LIMIT_PER_MINUTE: ${PUBLIC_RATE_LIMIT_PER_MINUTE:-120}
+      SEAWEEDFS_S3_ENDPOINT: http://seaweedfs-s3:8333
+      SEAWEEDFS_BUCKET: ${SEAWEEDFS_BUCKET:-cacanode}
+      SEAWEEDFS_ACCESS_KEY: ${SEAWEEDFS_ACCESS_KEY:-}
+      SEAWEEDFS_SECRET_KEY: ${SEAWEEDFS_SECRET_KEY:-}
+      SEAWEEDFS_REGION: ${SEAWEEDFS_REGION:-us-east-1}
       SENDGRID_API_KEY: ${SENDGRID_API_KEY:-}
-      FROM_EMAIL: ${FROM_EMAIL:-no-reply@cacanode.local}
+      BREVO_API_KEY: ${BREVO_API_KEY:-}
+      FROM_EMAIL: ${FROM_EMAIL:?FROM_EMAIL is required}
+      FROM_NAME: ${FROM_NAME:-CacaNode}
       TEMPLATE_ID: ${TEMPLATE_ID:-}
+      SUPPORT_EMAIL: ${SUPPORT_EMAIL:-support@cacanode.local}
+      VERIFICATION_LINK: ${VERIFICATION_LINK:?VERIFICATION_LINK is required}
+      LOGIN_2FA_LINK: ${LOGIN_2FA_LINK:?LOGIN_2FA_LINK is required}
+      INVITATION_LINK: ${INVITATION_LINK:?INVITATION_LINK is required}
+      LOGIN_2FA_BYPASS_EMAILS: ${LOGIN_2FA_BYPASS_EMAILS:-}
+      VERIFICATION_RESEND_COOLDOWN_SECONDS: ${VERIFICATION_RESEND_COOLDOWN_SECONDS:-60}
+      MAX_VERIFICATION_RESEND_ATTEMPTS: ${MAX_VERIFICATION_RESEND_ATTEMPTS:-5}
+      LOGIN_2FA_EXPIRY_MINUTES: ${LOGIN_2FA_EXPIRY_MINUTES:-15}
+      MOBILE_LOGIN_2FA_EXPIRY_MINUTES: ${MOBILE_LOGIN_2FA_EXPIRY_MINUTES:-10}
     expose:
       - "8080"
     depends_on:
@@ -117,19 +191,24 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
+      seaweedfs-s3:
+        condition: service_started
+    mem_limit: ${BUSINESS_API_MEMORY_LIMIT:-1280m}
+    cpus: ${BUSINESS_API_CPU_LIMIT:-1.5}
 
   ai-api:
     build:
       context: ./rag-chatbot-fastapi
     restart: unless-stopped
+    init: true
     environment:
       <<: *ai-environment
       WORKER_MODE: ${WORKER_MODE:-embedded}
-      READINESS_REQUIRE_MODELS: ${READINESS_REQUIRE_MODELS:-false}
+      WORKER_KINDS: ${WORKER_KINDS:-document}
+      READINESS_REQUIRE_MODELS: ${READINESS_REQUIRE_MODELS:-true}
     expose:
       - "8000"
     volumes:
-      - kuzu_data:/data/kuzu
       - model_cache:/models
     depends_on:
       postgres:
@@ -142,104 +221,74 @@ services:
         condition: service_started
       ollama:
         condition: service_healthy
+      graph-service:
+        condition: service_healthy
+      reranker-service:
+        condition: service_started
+      seaweedfs-s3:
+        condition: service_started
+    mem_limit: ${AI_API_MEMORY_LIMIT:-1536m}
+    cpus: ${AI_API_CPU_LIMIT:-2.0}
 
   graph-service:
     build:
       context: ./rag-chatbot-fastapi
     restart: unless-stopped
-    command: ["python", "-m", "uvicorn", "app.graph_main:app", "--host", "0.0.0.0", "--port", "8010"]
+    init: true
+    command: ["python", "-m", "uvicorn", "app.graph_main:app", "--host", "0.0.0.0", "--port", "8010", "--workers", "1"]
     environment:
       <<: *ai-environment
     expose:
       - "8010"
     volumes:
       - kuzu_data:/data/kuzu
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8010/health/ready', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    mem_limit: ${GRAPH_MEMORY_LIMIT:-512m}
+    cpus: ${GRAPH_CPU_LIMIT:-0.75}
 
   document-worker:
-    <<: *worker
+    <<: *document-worker
     command: ["python", "-m", "app.workers.runner", "document"]
-
-  ocr-worker:
-    <<: *worker
-    command: ["python", "-m", "app.workers.runner", "ocr"]
-
-  asr-worker:
-    <<: *worker
-    command: ["python", "-m", "app.workers.runner", "asr"]
-
-  vision-worker:
-    <<: *worker
-    command: ["python", "-m", "app.workers.runner", "vision"]
-
-  audio-worker:
-    <<: *worker
-    command: ["python", "-m", "app.workers.runner", "audio"]
-
-  video-worker:
-    <<: *worker
-    command: ["python", "-m", "app.workers.runner", "video"]
 
   ollama:
     image: ollama/ollama:latest
     restart: unless-stopped
     environment:
       OLLAMA_HOST: 0.0.0.0:11434
-    ports:
-      - "${OLLAMA_PORT:-11434}:11434"
+      OLLAMA_NUM_PARALLEL: ${OLLAMA_NUM_PARALLEL:-1}
+      OLLAMA_MAX_LOADED_MODELS: ${OLLAMA_MAX_LOADED_MODELS:-1}
+      OLLAMA_KEEP_ALIVE: ${OLLAMA_KEEP_ALIVE:-5m}
+    expose:
+      - "11434"
     volumes:
       - ollama_data:/root/.ollama
     healthcheck:
       test: ["CMD", "ollama", "list"]
       interval: 10s
       timeout: 5s
-      retries: 10
-
-  llm-server:
-    image: vllm/vllm-openai:latest
-    profiles: [gpu]
-    restart: unless-stopped
-    command: ["--model", "${VLLM_MODEL_ID:-configure-a-hugging-face-model}", "--api-key", "${VLLM_API_KEY:-change-me}"]
-    environment:
-      HUGGING_FACE_HUB_TOKEN: ${MODEL_REGISTRY_TOKEN:-}
-    volumes:
-      - model_cache:/root/.cache/huggingface
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
-
-  embedding-service:
-    image: ghcr.io/huggingface/text-embeddings-inference:latest
-    profiles: [gpu]
-    restart: unless-stopped
-    command: ["--model-id", "${TEI_MODEL_ID:-google/embeddinggemma-300m}"]
-    volumes:
-      - model_cache:/data
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
+      retries: 12
+    mem_limit: ${OLLAMA_MEMORY_LIMIT:-1280m}
+    cpus: ${OLLAMA_CPU_LIMIT:-1.5}
 
   reranker-service:
-    image: ghcr.io/huggingface/text-embeddings-inference:latest
-    profiles: [gpu]
+    image: ${RERANKER_IMAGE:-ghcr.io/huggingface/text-embeddings-inference:cpu-1.8}
+    platform: ${RERANKER_PLATFORM:-linux/amd64}
     restart: unless-stopped
-    command: ["--model-id", "${RERANKER_MODEL_ID:-BAAI/bge-reranker-v2-m3}"]
+    command: ["--model-id", "${RERANKER_MODEL_ID:-cross-encoder/mmarco-mMiniLMv2-L12-H384-v1}"]
+    environment:
+      OMP_NUM_THREADS: ${RERANKER_THREADS:-2}
+      MKL_NUM_THREADS: ${RERANKER_THREADS:-2}
+    expose:
+      - "80"
     volumes:
       - model_cache:/data
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
+    shm_size: 256mb
+    mem_limit: ${RERANKER_MEMORY_LIMIT:-1536m}
+    cpus: ${RERANKER_CPU_LIMIT:-1.25}
 
   postgres:
     image: postgres:16-alpine
@@ -247,98 +296,116 @@ services:
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-cacanode}
       POSTGRES_USER: ${POSTGRES_USER:-cacanode}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
-    ports:
-      - "5432:5432"
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+    expose:
+      - "5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-cacanode} -d ${POSTGRES_DB:-cacanode}"]
       interval: 5s
       timeout: 5s
-      retries: 10
+      retries: 12
+    mem_limit: ${POSTGRES_MEMORY_LIMIT:-768m}
+    cpus: ${POSTGRES_CPU_LIMIT:-1.0}
 
   redis:
     image: redis:7-alpine
     restart: unless-stopped
-    ports:
-      - "6379:6379"
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "${REDIS_MAXMEMORY:-192mb}", "--maxmemory-policy", "noeviction"]
+    expose:
+      - "6379"
     volumes:
       - redis_data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 3s
-      retries: 10
+      retries: 12
+    mem_limit: ${REDIS_MEMORY_LIMIT:-256m}
+    cpus: ${REDIS_CPU_LIMIT:-0.5}
 
   rabbitmq:
-    image: rabbitmq:3-management-alpine
+    image: rabbitmq:3-alpine
     restart: unless-stopped
     environment:
-      RABBITMQ_DEFAULT_USER: rag_user
-      RABBITMQ_DEFAULT_PASS: rag_password
-    ports:
-      - "5672:5672"
-      - "15672:15672"
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-rag_user}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?RABBITMQ_PASSWORD is required}
+    expose:
+      - "5672"
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
       interval: 10s
       timeout: 5s
-      retries: 10
+      retries: 12
+    mem_limit: ${RABBITMQ_MEMORY_LIMIT:-512m}
+    cpus: ${RABBITMQ_CPU_LIMIT:-0.75}
 
   qdrant:
     image: qdrant/qdrant:latest
     restart: unless-stopped
-    ports:
-      - "6333:6333"
-      - "6334:6334"
+    expose:
+      - "6333"
+      - "6334"
     volumes:
       - qdrant_data:/qdrant/storage
+    mem_limit: ${QDRANT_MEMORY_LIMIT:-768m}
+    cpus: ${QDRANT_CPU_LIMIT:-1.0}
 
   seaweedfs-master:
     image: chrislusf/seaweedfs:latest
     restart: unless-stopped
     command: master -mdir=/data
-    ports:
-      - "9333:9333"
-      - "19333:19333"
+    expose:
+      - "9333"
+      - "19333"
     volumes:
       - seaweedfs_master:/data
+    mem_limit: ${SEAWEEDFS_MASTER_MEMORY_LIMIT:-192m}
+    cpus: ${SEAWEEDFS_MASTER_CPU_LIMIT:-0.35}
 
   seaweedfs-volume:
     image: chrislusf/seaweedfs:latest
     restart: unless-stopped
     command: volume -mserver=seaweedfs-master:9333 -dir=/data -port=8080
-    ports:
-      - "8123:8080"
+    expose:
+      - "8080"
     volumes:
       - seaweedfs_volume:/data
     depends_on:
       - seaweedfs-master
+    mem_limit: ${SEAWEEDFS_VOLUME_MEMORY_LIMIT:-256m}
+    cpus: ${SEAWEEDFS_VOLUME_CPU_LIMIT:-0.5}
 
   seaweedfs-filer:
     image: chrislusf/seaweedfs:latest
     restart: unless-stopped
     command: filer -master=seaweedfs-master:9333
-    ports:
-      - "8888:8888"
+    expose:
+      - "8888"
     volumes:
       - seaweedfs_filer:/data
     depends_on:
       - seaweedfs-master
+    mem_limit: ${SEAWEEDFS_FILER_MEMORY_LIMIT:-256m}
+    cpus: ${SEAWEEDFS_FILER_CPU_LIMIT:-0.5}
 
   seaweedfs-s3:
     image: chrislusf/seaweedfs:latest
     restart: unless-stopped
     command: s3 -filer=seaweedfs-filer:8888
-    ports:
-      - "8333:8333"
+    expose:
+      - "8333"
     depends_on:
       - seaweedfs-filer
+    mem_limit: ${SEAWEEDFS_S3_MEMORY_LIMIT:-192m}
+    cpus: ${SEAWEEDFS_S3_CPU_LIMIT:-0.35}
 
 volumes:
+  caddy_data:
+  caddy_config:
   postgres_data:
   redis_data:
   rabbitmq_data:

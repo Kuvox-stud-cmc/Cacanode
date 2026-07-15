@@ -1,11 +1,19 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import Image from "next/image";
 import Link from "next/link";
-import { Bot, Menu, X } from "lucide-react";
+import { usePathname } from "next/navigation";
+import { Menu, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
+const navigation = [
+  { href: "/", label: "Chat Playground" },
+  { href: "/pricing", label: "Pricing" },
+];
+
 export default function PublicNavbar() {
+  const pathname = usePathname();
   const [scrolled, setScrolled] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
 
@@ -24,21 +32,29 @@ export default function PublicNavbar() {
       <div className="max-w-6xl mx-auto px-4 h-16 flex items-center justify-between">
         {/* Logo */}
         <Link href="/" className="flex items-center gap-2">
-          <img src="/logo.png" alt="CacaNode Logo" className="w-7 h-7" />
+          <Image src="/logo.png" alt="CacaNode Logo" width={28} height={28} />
           <span className="font-bold text-lg text-slate-900">CacaNode</span>
         </Link>
 
         {/* Desktop nav */}
-        <nav className="hidden md:flex items-center gap-8 text-sm">
-          <Link href="/#features" className="text-slate-600 hover:text-slate-900 transition-colors">
-            Features
-          </Link>
-          <Link href="/#how-it-works" className="text-slate-600 hover:text-slate-900 transition-colors">
-            How It Works
-          </Link>
-          <Link href="/pricing" className="text-slate-600 hover:text-slate-900 transition-colors">
-            Pricing
-          </Link>
+        <nav aria-label="Primary navigation" className="hidden items-center gap-2 text-sm md:flex">
+          {navigation.map((item) => {
+            const active = pathname === item.href;
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                aria-current={active ? "page" : undefined}
+                className={`rounded-md px-3 py-2 font-medium transition-colors ${
+                  active
+                    ? "bg-indigo-50 text-indigo-700"
+                    : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+                }`}
+              >
+                {item.label}
+              </Link>
+            );
+          })}
         </nav>
 
         {/* Desktop CTAs */}
@@ -67,15 +83,19 @@ export default function PublicNavbar() {
       {/* Mobile menu */}
       {mobileOpen && (
         <div className="md:hidden bg-white border-t border-slate-100 px-4 py-4 space-y-3">
-          <a href="#features" className="block text-sm text-slate-700 py-2" onClick={() => setMobileOpen(false)}>
-            Features
-          </a>
-          <a href="#how-it-works" className="block text-sm text-slate-700 py-2" onClick={() => setMobileOpen(false)}>
-            How It Works
-          </a>
-          <Link href="/pricing" className="block text-sm text-slate-700 py-2" onClick={() => setMobileOpen(false)}>
-            Pricing
-          </Link>
+          {navigation.map((item) => (
+            <Link
+              key={item.href}
+              href={item.href}
+              aria-current={pathname === item.href ? "page" : undefined}
+              className={`block rounded-md px-3 py-2 text-sm font-medium ${
+                pathname === item.href ? "bg-indigo-50 text-indigo-700" : "text-slate-700"
+              }`}
+              onClick={() => setMobileOpen(false)}
+            >
+              {item.label}
+            </Link>
+          ))}
           <div className="flex gap-2 pt-2">
             <Link href="/login" className="flex-1">
               <Button variant="outline" size="sm" className="w-full">

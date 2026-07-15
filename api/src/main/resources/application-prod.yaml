@@ -1,8 +1,6 @@
 app:
   cors:
-    allowed-origins:
-      - "https://cacanode.com"
-      - "https://www.cacanode.com"
+    allowed-origins: ${CORS_ORIGINS}
   security:
     cookie-secure: ${COOKIE_SECURE:true}
     login-2fa-bypass-emails: ${LOGIN_2FA_BYPASS_EMAILS:}
