@@ -95,6 +95,12 @@ if [[ "${reranker_enabled,,}" == "true" ]]; then
   done
 fi
 
+# Compose can recreate application containers without recreating the gateway.
+# Reload Nginx after all upstreams are stable so it does not retain stale
+# Docker DNS addresses from the previous release.
+"${compose[@]}" exec -T gateway nginx -t
+"${compose[@]}" exec -T gateway nginx -s reload
+
 "${ROOT_DIR}/deploy/smoke-test.sh" "${public_url%/}"
 "${compose[@]}" ps
 docker image prune --force >/dev/null
