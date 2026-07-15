@@ -141,13 +141,13 @@ jobs:
           install -m 0600 /tmp/production.env "${env_file}"
           rm -f /tmp/cacanode-release.tar.gz /tmp/production.env
 
-          if ! ENV_FILE="${env_file}" "${release_dir}/deploy/deploy.sh"; then
+          if ! ENV_FILE="${env_file}" SMOKE_TEST_ATTEMPTS=120 "${release_dir}/deploy/deploy.sh"; then
             if [[ -f "${env_file}.previous" ]]; then
               install -m 0600 "${env_file}.previous" "${env_file}"
             fi
             if [[ -n "${previous_release}" && -x "${previous_release}/deploy/deploy.sh" ]]; then
               echo "Deployment failed; attempting the previous release"
-              ENV_FILE="${env_file}" "${previous_release}/deploy/deploy.sh" || true
+              ENV_FILE="${env_file}" SMOKE_TEST_ATTEMPTS=120 "${previous_release}/deploy/deploy.sh" || true
             fi
             exit 1
           fi
