@@ -31,11 +31,12 @@ Implemented foundations include:
 
 - Next.js management-console shell and authentication client.
 - Spring Boot identity, tenant, persistence, and versioned-route compatibility.
+- Backend-authoritative Starter, Trial, Pro, and Enterprise entitlements with PayOS-hosted checkout, verified webhook activation, manual renewal, reconciliation, quota enforcement, and subscription lifecycle management.
 - FastAPI chat/session contracts, grounded citations, document ingestion, structural chunking, dense/sparse/graph retrieval, reranking fallbacks, request IDs, health checks, and worker lifecycles.
 - PostgreSQL, Redis, RabbitMQ, Qdrant, Kuzu storage, SeaweedFS, gateway, and application Compose definitions.
 - Optional dedicated-worker and GPU model-serving profiles.
 
-Image, audio, video, OCR ingestion, some billing enforcement, and several management APIs remain implementation work. Unimplemented paths return explicit errors rather than fabricated successful responses.
+Image, audio, video, OCR ingestion, and several broader management APIs remain implementation work. Unimplemented paths return explicit errors rather than fabricated successful responses.
 
 ---
 
@@ -55,6 +56,7 @@ Image, audio, video, OCR ingestion, some billing enforcement, and several manage
 - [Public Chat API](#public-chat-api)
 - [Chat Widget](#chat-widget)
 - [Management API](#management-api)
+- [Billing, Subscriptions, and Quotas](#billing-subscriptions-and-quotas)
 - [Data and Storage Contracts](#data-and-storage-contracts)
 - [Vietnamese Model Adaptation](#vietnamese-model-adaptation)
 - [Security and Tenant Isolation](#security-and-tenant-isolation)
@@ -72,7 +74,7 @@ Cacanode is delivered as a hosted commercial service. Customers subscribe to use
 
 ### Commercial offering
 
-A subscription grants access to:
+A subscription or trial grants access according to its plan entitlements:
 
 - One or more tenant-scoped chatbots.
 - One or more tenant-scoped knowledge bases.
@@ -83,7 +85,7 @@ A subscription grants access to:
 - Integration credential management.
 - Usage, quota, and operational status views.
 
-Commercial entitlements are represented by tenant subscription records. Payment processing may be handled outside this repository, but quota enforcement is part of the platform runtime.
+Commercial entitlements are represented by tenant subscription records and projected onto the tenant runtime. Self-service Pro purchases use server-created PayOS payment links, and activation occurs only after a verified PayOS webhook is durably processed. Enterprise provisioning remains sales-led.
 
 ### Metered usage
 
@@ -98,7 +100,7 @@ The platform records usage for:
 - Vector and graph records.
 - Audio and video processing duration.
 
-The API and widget consume the same tenant quota. A request is rejected with `429 RATE_LIMITED` when an applicable quota is exhausted.
+The API and widget consume the same tenant message quota. A chat request is rejected with HTTP `429` and `MESSAGE_QUOTA_EXCEEDED` when the applicable billing-period allowance is exhausted.
 
 ### Managed AI operation
 
@@ -307,7 +309,7 @@ The public Chat API is a Cacanode API contract. The internal vLLM OpenAI-compati
 | API Gateway | TLS termination, routing, request IDs, CORS, response buffering controls, public rate limiting |
 | Management Console | Tenant, chatbot, source, credential, widget, and usage administration |
 | Hosted Widget | Browser chat UI, client-token bootstrap, SSE rendering, local session state |
-| Spring Boot Business API | Identity, tenants, roles, chatbots, subscriptions, quotas, credentials, audit records |
+| Spring Boot Business API | Identity, tenants, roles, chatbots, subscriptions, PayOS payment links, quota projections, credentials, audit records |
 | FastAPI Chat and AI API | Public chat contract, SSE, retrieval, context assembly, GraphRAG execution |
 | Gemma model service | Text generation, query routing, summarization, structured entity and relation extraction |
 | Embedding service | EmbeddingGemma query and document vectors, batching, normalization, model versioning |
@@ -1063,8 +1065,82 @@ Dashboard access uses JWT authentication. Integration keys are not accepted for 
 | `DELETE` | `/api/v1/integration-keys/{keyId}` | Revoke key |
 | `GET` | `/api/v1/usage` | Read tenant usage and quota state |
 | `GET` | `/api/v1/audit-events` | Read authorized audit events |
+| `GET` | `/api/v1/public/billing/plans` | Read the public versioned plan catalog |
+| `GET` | `/api/v1/billing/account` | Read the current subscription, quota windows, usage, features, and pending payment |
+| `POST` | `/api/v1/billing/checkouts` | Create a server-priced PayOS Pro checkout; tenant administrator only |
+| `GET` | `/api/v1/billing/payments/{paymentId}` | Poll an internal payment status after returning from PayOS |
+| `POST` | `/api/v1/billing/downgrade` | Schedule paid Pro fallback or immediately end a trial |
+| `POST` | `/api/v1/public/billing/payos/webhook` | Receive and verify PayOS payment notifications |
 
 A newly created secret integration key is returned once. Only its prefix, fingerprint, scopes, timestamps, and one-way verification value are stored afterward.
+
+---
+
+## Billing, Subscriptions, and Quotas
+
+The billing module is the source of truth for plan definitions, prices, subscription state, PayOS payment orders, verified webhook processing, reconciliation, reminders, and billing APIs. The tenant module owns the runtime entitlement projection used by Java and Python request paths.
+
+### Plan catalog
+
+The catalog is versioned backend configuration. Clients request catalog and account data from the API and never submit a payment amount.
+
+| Plan | Price | Messages | Documents | Team members | Storage | Main features |
+|---|---:|---:|---:|---:|---:|---|
+| Starter | Free | 500 per month | 3 | 1 | 512 MB | Widget, dashboard summary, CacaNode branding |
+| Pro trial | Free for 14 days | 10,000 for the trial | 50 | 5 | 10 GB | Pro technical entitlements |
+| Pro monthly | 1,199,000 VND | 10,000 per month | 50 | 5 | 10 GB | API access, webhooks, advanced analytics, custom branding |
+| Pro annual | 11,990,000 VND | 10,000 per month | 50 | 5 | 10 GB | Same entitlements as monthly Pro |
+| Enterprise | Contact sales | Custom or unlimited | Custom or unlimited | Custom or unlimited | Custom | Sales-provisioned limits and features |
+
+Enterprise numeric limits are nullable. A `null` limit means custom or unlimited and bypasses numeric quota checks.
+
+### Subscription lifecycle
+
+- Registration creates a 14-day Pro trial in the same transaction as the tenant account.
+- Trial expiration moves directly to Starter without a grace period.
+- A paid monthly term uses one calendar month from activation; an annual term uses one year.
+- Annual subscriptions retain monthly message windows anchored to the original paid activation date.
+- PayOS does not provide recurring subscription mandates, so renewals use new hosted payment links.
+- Early renewal extends from the current `paidThroughAt` value and does not reset the active quota window early.
+- Paid expiration enters a three-day Pro grace period. Grace retains the final quota window and does not grant another allowance.
+- After grace, the tenant falls back to Starter. Existing documents, users, webhook configuration, and branding preferences remain stored.
+- Choosing Starter during paid Pro schedules fallback after prepaid access and grace. Choosing Starter during trial ends the trial immediately.
+- Version 1 does not provide refunds, prorating, automatic renewal, or automatic resource deletion.
+
+### PayOS payment flow
+
+Only `TENANT_ADMIN` users may create checkouts. The server resolves the amount and entitlement snapshot from the catalog, allocates the PayOS order code from a database sequence, and creates a payment link that expires after 30 minutes. `Idempotency-Key` is supported for checkout creation.
+
+The browser return and cancel URLs control presentation only. The frontend polls CacaNode's payment-status endpoint every two seconds for up to thirty seconds and never treats PayOS query parameters as proof of payment.
+
+Subscription activation requires a webhook verified through the pinned `vn.payos:payos-java:2.0.1` SDK. Processing checks the order code, payment-link ID, VND currency, and expected amount. Mismatches move the order to `REVIEW` and never activate entitlements. Successful duplicate webhooks are idempotent and do not extend the subscription twice.
+
+Pending payments are reconciled against PayOS every five minutes. Rate-limit and server failures receive bounded retries and emit PayOS billing metrics.
+
+### Quota and feature enforcement
+
+- Message usage is stored in billing-anniversary `usage_metrics` periods. The Python chat service locks the tenant and atomically increments the applicable period row.
+- Reaching the message limit returns the existing `MESSAGE_QUOTA_EXCEEDED` response with HTTP `429`.
+- Document uploads lock the tenant entitlement row and reject before object storage when document count or storage would exceed the limit.
+- Team-member limits count active members plus unexpired pending invitations and apply to invitations, acceptance, and reactivation.
+- Downgrades preserve existing resources but block additional messages, uploads, invitations, and reactivations while usage exceeds Starter limits.
+- Starter widget tokens remain usable. Creating or using `api:chat` tokens requires the API-access entitlement.
+- Webhook endpoint configuration is preserved after downgrade, while create, test, secret rotation, and delivery are disabled.
+- Starter retains dashboard summary analytics; detailed analytics require Trial, Pro, or Enterprise.
+- Saved branding preference is preserved, but CacaNode branding is forced whenever custom branding is disabled.
+
+Quota-warning notifications are emitted once per period at 80%, and quota-exceeded notifications are emitted at 100%. Paid renewal notices are created seven, three, and one day before expiration and daily during grace unless a Starter downgrade is already scheduled.
+
+### Persistence and module boundaries
+
+- `billing_subscriptions` stores one subscription per tenant, lifecycle timestamps, reminder state, catalog version, optimistic version, and a complete entitlement snapshot.
+- `billing_payment_orders` stores internal payment IDs, tenant and user IDs, sequence-generated PayOS order codes, server-resolved prices, provider link data, status, and purchase snapshots.
+- `billing_webhook_events` stores payload hashes and processing results without retaining unnecessary counterparty banking details.
+- `usage_metrics` retains the legacy year and month fields while adding authoritative `period_start` and `period_end` timestamps.
+- Billing applies runtime changes through `TenantModuleApi`; it does not access the tenant repository or pass JPA tenant entities across the module boundary.
+- PayOS SDK types remain inside the payment-gateway adapter.
+
+PayOS integration is disabled by default. PayOS has no separate sandbox, so final end-to-end verification requires an internal low-value live transaction after the production webhook URL is confirmed.
 
 ---
 
@@ -1563,6 +1639,16 @@ IDEMPOTENCY_TTL_HOURS=24
 PUBLIC_RATE_LIMIT_PER_MINUTE=120
 MAX_CONCURRENT_STREAMS_PER_TENANT=50
 
+# Billing and PayOS
+PAYOS_ENABLED=false
+PAYOS_CLIENT_ID=
+PAYOS_API_KEY=
+PAYOS_CHECKSUM_KEY=
+PAYOS_RETURN_URL=http://localhost:3000/settings?tab=quota&payment=return
+PAYOS_CANCEL_URL=http://localhost:3000/settings?tab=quota&payment=cancel
+BILLING_SALES_URL=mailto:sales@cacanode.com
+BILLING_CATALOG_VERSION=2026-07-15
+
 # Observability
 LOG_LEVEL=INFO
 OTEL_EXPORTER_OTLP_ENDPOINT=
@@ -1709,6 +1795,12 @@ Readiness for the AI API requires the active model, embedding service, Qdrant, K
 - Prompt-injection resistance.
 - Cross-tenant retrieval prevention.
 - Rate limits and concurrent-stream quotas.
+- Server-side plan price and entitlement resolution.
+- Trial expiration, paid grace, Starter fallback, early renewal, and annual monthly quota windows.
+- Valid, invalid, duplicate, unknown, mismatched, and reconciled PayOS payment events.
+- Checkout administrator authorization, idempotency, payment polling, and downgrade behavior.
+- Exact-limit and concurrent message, document, storage, and team-member enforcement.
+- API access, webhook, analytics, and custom-branding feature gates after downgrade.
 - Model, vector, and parser version migrations.
 
 ### Retrieval evaluation

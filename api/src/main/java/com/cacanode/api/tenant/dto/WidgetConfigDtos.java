@@ -18,7 +18,8 @@ public final class WidgetConfigDtos {
             @Pattern(regexp = "^#[0-9a-fA-F]{6}$") String primaryColor,
             WidgetPosition position,
             boolean active,
-            List<String> allowedOrigins
+            List<String> allowedOrigins,
+            Boolean hideCacanodeBranding
     ) {
     }
 
@@ -29,7 +30,9 @@ public final class WidgetConfigDtos {
             String primaryColor,
             WidgetPosition position,
             boolean active,
-            List<String> allowedOrigins
+            List<String> allowedOrigins,
+            boolean hideCacanodeBranding,
+            boolean showCacanodeBranding
     ) {
     }
 }

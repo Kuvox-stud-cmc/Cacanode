@@ -8,6 +8,7 @@ import com.cacanode.api.integration.model.WebhookOutboxEvent;
 import com.cacanode.api.integration.repository.WebhookEndpointRepository;
 import com.cacanode.api.integration.repository.WebhookOutboxRepository;
 import com.cacanode.api.tenant.repository.TenantRepository;
+import com.cacanode.api.tenant.api.TenantModuleApi;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -30,6 +31,7 @@ public class WebhookService {
     private final WebhookOutboxRepository outboxRepository;
     private final TenantRepository tenantRepository;
     private final WebhookCryptoService cryptoService;
+    private final TenantModuleApi tenantModuleApi;
 
     @Transactional(readOnly = true)
     public List<WebhookDtos.Response> list(UUID tenantId) {
@@ -39,6 +41,7 @@ public class WebhookService {
 
     @Transactional
     public WebhookDtos.Created create(UUID tenantId, WebhookDtos.UpsertRequest request) {
+        requireWebhooks(tenantId);
         validate(request);
         String secret = cryptoService.generateSecret();
         WebhookEndpoint endpoint = new WebhookEndpoint();
@@ -51,6 +54,7 @@ public class WebhookService {
 
     @Transactional
     public WebhookDtos.Response update(UUID tenantId, UUID endpointId, WebhookDtos.UpsertRequest request) {
+        requireWebhooks(tenantId);
         validate(request);
         WebhookEndpoint endpoint = find(tenantId, endpointId);
         apply(endpoint, request);
@@ -59,6 +63,7 @@ public class WebhookService {
 
     @Transactional
     public WebhookDtos.Created rotateSecret(UUID tenantId, UUID endpointId) {
+        requireWebhooks(tenantId);
         WebhookEndpoint endpoint = find(tenantId, endpointId);
         String secret = cryptoService.generateSecret();
         endpoint.setEncryptedSecret(cryptoService.encrypt(secret));
@@ -83,6 +88,7 @@ public class WebhookService {
 
     @Transactional
     public void enqueueTest(UUID tenantId, UUID endpointId) {
+        requireWebhooks(tenantId);
         find(tenantId, endpointId);
         enqueue(tenantId, "test", endpointId, Map.of("message", "CacaNode webhook test"));
     }
@@ -119,5 +125,11 @@ public class WebhookService {
                 endpoint.isActive(), endpoint.getLastDeliveryAt(), endpoint.getLastDeliveryStatus(),
                 endpoint.getCreatedAt()
         );
+    }
+
+    private void requireWebhooks(UUID tenantId) {
+        if (!tenantModuleApi.getEntitlements(tenantId).webhooks()) {
+            throw new BadRequestException("WEBHOOKS_REQUIRE_PRO");
+        }
     }
 }

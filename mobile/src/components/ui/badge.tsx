@@ -5,7 +5,7 @@ import { AppText } from '@/components/ui/app-text';
 import { radii, spacing } from '@/constants/theme';
 import { useAppTheme } from '@/hooks/use-app-theme';
 
-type BadgeTone = 'neutral' | 'primary' | 'success' | 'warning' | 'danger';
+export type BadgeTone = 'neutral' | 'primary' | 'success' | 'warning' | 'danger';
 
 export function Badge({ children, tone = 'neutral' }: PropsWithChildren<{ tone?: BadgeTone }>) {
   const theme = useAppTheme();

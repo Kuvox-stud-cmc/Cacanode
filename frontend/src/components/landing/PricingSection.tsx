@@ -1,4 +1,8 @@
+"use client";
+
+import { useEffect, useState } from "react";
 import PlanCardGrid from "@/components/landing/PlanCardGrid";
+import { getPublicBillingPlans, type BillingInterval, type BillingPlan } from "@/lib/billing-api";
 
 type PricingSectionProps = {
   title?: string;
@@ -8,9 +12,16 @@ type PricingSectionProps = {
 
 export default function PricingSection({
   title = "Simple, transparent pricing",
-  description = "Plans are shown for comparison only. Plan changes are not available yet.",
+  description = "Start free, upgrade through secure PayOS checkout, or contact us for custom scale.",
   compact = false,
 }: PricingSectionProps) {
+  const [plans, setPlans] = useState<BillingPlan[]>([]);
+  const [interval, setInterval] = useState<BillingInterval>("MONTHLY");
+
+  useEffect(() => {
+    getPublicBillingPlans().then(setPlans).catch(() => setPlans([]));
+  }, []);
+
   return (
     <section id="pricing" className={compact ? "" : "px-4 py-20"}>
       <div className="max-w-6xl mx-auto">
@@ -23,7 +34,7 @@ export default function PricingSection({
           </p>
         </div>
 
-        <PlanCardGrid />
+        {plans.length > 0 && <PlanCardGrid plans={plans} interval={interval} onIntervalChange={setInterval} />}
       </div>
     </section>
   );

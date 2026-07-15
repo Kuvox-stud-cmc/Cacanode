@@ -34,11 +34,11 @@ import com.cacanode.api.document.repository.DocumentRepository;
 import com.cacanode.api.document.storage.DocumentStorage;
 import com.cacanode.api.tenant.enums.KnowledgeBaseStatus;
 import com.cacanode.api.tenant.repository.KnowledgeBaseRepository;
+import com.cacanode.api.tenant.api.TenantModuleApi;
 
-import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Autowired;
 
 @Service
-@RequiredArgsConstructor
 public class DocumentService {
 
     private static final long MAX_FILE_SIZE_BYTES = 20L * 1024L * 1024L;
@@ -51,6 +51,38 @@ public class DocumentService {
     private final DocumentIngestionPublisher ingestionPublisher;
     private final DocumentIndexCleanup indexCleanup;
     private final ApplicationEventPublisher eventPublisher;
+    private final TenantModuleApi tenantModuleApi;
+
+    @Autowired
+    public DocumentService(
+            DocumentRepository documentRepository,
+            KnowledgeBaseRepository knowledgeBaseRepository,
+            DocumentStorage documentStorage,
+            DocumentIngestionPublisher ingestionPublisher,
+            DocumentIndexCleanup indexCleanup,
+            ApplicationEventPublisher eventPublisher,
+            TenantModuleApi tenantModuleApi
+    ) {
+        this.documentRepository = documentRepository;
+        this.knowledgeBaseRepository = knowledgeBaseRepository;
+        this.documentStorage = documentStorage;
+        this.ingestionPublisher = ingestionPublisher;
+        this.indexCleanup = indexCleanup;
+        this.eventPublisher = eventPublisher;
+        this.tenantModuleApi = tenantModuleApi;
+    }
+
+    public DocumentService(
+            DocumentRepository documentRepository,
+            KnowledgeBaseRepository knowledgeBaseRepository,
+            DocumentStorage documentStorage,
+            DocumentIngestionPublisher ingestionPublisher,
+            DocumentIndexCleanup indexCleanup,
+            ApplicationEventPublisher eventPublisher
+    ) {
+        this(documentRepository, knowledgeBaseRepository, documentStorage, ingestionPublisher,
+                indexCleanup, eventPublisher, null);
+    }
 
     DocumentUploadResponse upload(UUID tenantId, UUID userId, UUID knowledgeBaseId, MultipartFile file) {
         return upload(tenantId, userId, "TENANT_ADMIN", knowledgeBaseId,
@@ -74,6 +106,7 @@ public class DocumentService {
         }
 
         validateFile(file);
+        enforceUploadQuota(tenantId, file.getSize());
 
         String safeFileName = safeFileName(file.getOriginalFilename());
         DocumentType documentType = documentTypeFor(safeFileName);
@@ -133,6 +166,21 @@ public class DocumentService {
         }
 
         return toUploadResponse(document);
+    }
+
+    private void enforceUploadQuota(UUID tenantId, long incomingBytes) {
+        if (tenantModuleApi == null) return;
+        var entitlements = tenantModuleApi.lockEntitlements(tenantId);
+        long documentCount = documentRepository.countByTenantIdAndStatusNot(tenantId, DocumentStatus.FAILED);
+        long storedBytes = documentRepository.sumFileSizeByTenantIdAndStatusNot(tenantId, DocumentStatus.FAILED);
+        if (entitlements.maxDocuments() != null && documentCount + 1 > entitlements.maxDocuments()) {
+            throw new BadRequestException("DOCUMENT_QUOTA_EXCEEDED");
+        }
+        long storageLimitBytes = entitlements.maxStorageMb() == null
+                ? Long.MAX_VALUE : entitlements.maxStorageMb() * 1024L * 1024L;
+        if (storedBytes + incomingBytes > storageLimitBytes) {
+            throw new BadRequestException("STORAGE_QUOTA_EXCEEDED");
+        }
     }
 
     @Transactional

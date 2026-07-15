@@ -106,9 +106,11 @@ async def get_integration_principal(
                 cur.execute(
                     """
                     SELECT it.id, it.tenant_id, it.chatbot_id, c.knowledge_base_id,
-                           it.scopes, it.expires_at, it.revoked_at, c.allowed_origins
+                           it.scopes, it.expires_at, it.revoked_at, c.allowed_origins,
+                           t.api_access_enabled
                     FROM integration_tokens it
                     JOIN chatbots c ON c.id = it.chatbot_id AND c.tenant_id = it.tenant_id
+                    JOIN tenants t ON t.id = it.tenant_id
                     WHERE it.token_hash = %s AND c.status = 'ACTIVE'
                     """,
                     (token_hash,),
@@ -134,6 +136,8 @@ async def get_integration_principal(
         raise HTTPException(status_code=401, detail="Integration token is expired")
     if required_scope not in row["scopes"]:
         raise HTTPException(status_code=403, detail="Integration token scope is insufficient")
+    if required_scope == "api:chat" and not row["api_access_enabled"]:
+        raise HTTPException(status_code=403, detail="API access requires Pro")
     if required_scope == "widget:chat":
         parent_origin = request.headers.get("X-Parent-Origin")
         allowed_origins = row["allowed_origins"] or []

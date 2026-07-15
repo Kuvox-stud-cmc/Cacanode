@@ -1,6 +1,8 @@
 package com.cacanode.api.tenant.service.implement;
 
 import com.cacanode.api.tenant.api.RegisterTenantCommand;
+import com.cacanode.api.tenant.api.ApplyTenantEntitlementsCommand;
+import com.cacanode.api.tenant.api.TenantEntitlements;
 import com.cacanode.api.tenant.api.TenantModuleApi;
 import com.cacanode.api.tenant.api.TenantUserResult;
 import com.cacanode.api.tenant.dto.UserAuthDto;
@@ -18,6 +20,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.context.ApplicationEventPublisher;
+import com.cacanode.api.common.event.TenantCreatedEvent;
+import com.cacanode.api.common.exception.custom.ResourceNotFoundException;
 
 import java.text.Normalizer;
 import java.time.LocalDateTime;
@@ -34,6 +39,7 @@ public class TenantModuleApiImpl implements TenantModuleApi {
         private final TenantRepository tenantRepository;
         private final UserRepository userRepository;
         private final TenantWorkspaceService tenantWorkspaceService;
+        private final ApplicationEventPublisher eventPublisher;
 
         @Override
         @Transactional
@@ -45,10 +51,17 @@ public class TenantModuleApiImpl implements TenantModuleApi {
                 tenant.setSlug(generateSlug(command.getCompanyName()));
                 tenant.setPlan(TenantPlan.TRIAL);
                 tenant.setStatus(TenantStatus.TRIAL);
-                tenant.setTrialEndsAt(LocalDateTime.now().plusDays(14));
-                tenant.setMaxDocuments(30);
-                tenant.setMaxMessages(1000);
-                tenant.setMaxStorageMb(1024);
+                LocalDateTime trialStartsAt = LocalDateTime.now();
+                tenant.setTrialEndsAt(trialStartsAt.plusDays(14));
+                tenant.setQuotaAnchorAt(trialStartsAt);
+                tenant.setMaxDocuments(50);
+                tenant.setMaxMessages(10_000);
+                tenant.setMaxTeamMembers(5);
+                tenant.setMaxStorageMb(10_240);
+                tenant.setApiAccessEnabled(true);
+                tenant.setWebhooksEnabled(true);
+                tenant.setAdvancedAnalyticsEnabled(true);
+                tenant.setCustomBrandingEnabled(true);
                 tenantRepository.save(tenant);
                 tenantWorkspaceService.provisionDefaultWorkspace(tenant);
 
@@ -61,6 +74,9 @@ public class TenantModuleApiImpl implements TenantModuleApi {
                 user.setRole(UserRole.TENANT_ADMIN);
                 user.setStatus(UserStatus.PENDING);
                 userRepository.save(user);
+
+                eventPublisher.publishEvent(new TenantCreatedEvent(
+                                tenant.getId(), user.getId(), trialStartsAt, tenant.getTrialEndsAt()));
 
                 log.info("Tenant and admin user created: tenantId={}, userId={}", tenant.getId(), user.getId());
 
@@ -165,6 +181,50 @@ public class TenantModuleApiImpl implements TenantModuleApi {
                 userRepository.save(user);
 
                 log.info("User suspended due to verification abuse: userId={}, email={}", userId, user.getEmail());
+        }
+
+        @Override
+        @Transactional(readOnly = true)
+        public TenantEntitlements getEntitlements(UUID tenantId) {
+                return toEntitlements(tenantRepository.findById(tenantId)
+                                .orElseThrow(() -> new ResourceNotFoundException("Tenant not found")));
+        }
+
+        @Override
+        @Transactional
+        public TenantEntitlements lockEntitlements(UUID tenantId) {
+                return toEntitlements(tenantRepository.findByIdForUpdate(tenantId)
+                                .orElseThrow(() -> new ResourceNotFoundException("Tenant not found")));
+        }
+
+        @Override
+        @Transactional
+        public void applyEntitlements(ApplyTenantEntitlementsCommand command) {
+                Tenant tenant = tenantRepository.findByIdForUpdate(command.tenantId())
+                                .orElseThrow(() -> new ResourceNotFoundException("Tenant not found"));
+                tenant.setPlan(command.plan());
+                tenant.setStatus(command.status());
+                tenant.setMaxMessages(command.maxMessages());
+                tenant.setMaxDocuments(command.maxDocuments());
+                tenant.setMaxTeamMembers(command.maxTeamMembers());
+                tenant.setMaxStorageMb(command.maxStorageMb());
+                tenant.setTrialEndsAt(command.trialEndsAt());
+                tenant.setQuotaAnchorAt(command.quotaAnchorAt());
+                tenant.setPaidThroughAt(command.paidThroughAt());
+                tenant.setGraceEndsAt(command.graceEndsAt());
+                tenant.setApiAccessEnabled(command.apiAccess());
+                tenant.setWebhooksEnabled(command.webhooks());
+                tenant.setAdvancedAnalyticsEnabled(command.advancedAnalytics());
+                tenant.setCustomBrandingEnabled(command.customBranding());
+        }
+
+        private TenantEntitlements toEntitlements(Tenant tenant) {
+                return new TenantEntitlements(
+                                tenant.getId(), tenant.getPlan(), tenant.getStatus(), tenant.getMaxMessages(),
+                                tenant.getMaxDocuments(), tenant.getMaxTeamMembers(), tenant.getMaxStorageMb(),
+                                tenant.getQuotaAnchorAt(), tenant.getPaidThroughAt(), tenant.getGraceEndsAt(),
+                                tenant.isApiAccessEnabled(), tenant.isWebhooksEnabled(),
+                                tenant.isAdvancedAnalyticsEnabled(), tenant.isCustomBrandingEnabled());
         }
 
         private String generateSlug(String companyName) {

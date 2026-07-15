@@ -1,5 +1,6 @@
 import { useRouter } from 'expo-router';
-import { StyleSheet, View } from 'react-native';
+import { useState } from 'react';
+import { Alert, StyleSheet, View } from 'react-native';
 
 import { ScrollScreen } from '@/components/layout/screen';
 import { AppText } from '@/components/ui/app-text';
@@ -9,6 +10,10 @@ import { Card } from '@/components/ui/card';
 import { ListRow } from '@/components/ui/list-row';
 import { Separator } from '@/components/ui/separator';
 import { useLogoutSessionMutation } from '@/features/auth/api/auth-api';
+import { useGetBillingAccountQuery } from '@/features/billing/api/billing-api';
+import { PlanStatusBadge } from '@/features/billing/components/plan-status-badge';
+import { formatBillingDate } from '@/features/billing/model/billing-presentation';
+import { openBillingManagement } from '@/features/billing/services/billing-web-link';
 import { displayRole } from '@/features/navigation/role-policy';
 import { clearLocalSession } from '@/services/auth/session-manager';
 import { tokenVault } from '@/services/auth/token-vault';
@@ -20,6 +25,8 @@ export function AccountScreen() {
   const router = useRouter();
   const user = useAppSelector((state) => state.auth.user);
   const [logout, { isLoading }] = useLogoutSessionMutation();
+  const { data: billingAccount } = useGetBillingAccountQuery();
+  const [openingBilling, setOpeningBilling] = useState(false);
 
   const signOut = async () => {
     const refreshToken = await tokenVault.get().catch(() => null);
@@ -28,6 +35,17 @@ export function AccountScreen() {
 
     if (refreshToken) {
       void logout({ refreshToken }).unwrap().catch(() => undefined);
+    }
+  };
+
+  const openBilling = async () => {
+    setOpeningBilling(true);
+    try {
+      await openBillingManagement();
+    } catch {
+      Alert.alert('Unable to open billing', 'Open the CacaNode web app and go to Settings → Quota Management.');
+    } finally {
+      setOpeningBilling(false);
     }
   };
 
@@ -41,8 +59,29 @@ export function AccountScreen() {
           <ListRow subtitle={user?.email} title={user?.fullName || 'Signed-in user'} />
           <Separator />
           <Detail label="Role" value={displayRole(user?.role)} />
-          <Detail label="Plan" value={user?.plan} />
+          <View style={styles.detailRow}>
+            <AppText muted variant="bodySmall">Plan</AppText>
+            <PlanStatusBadge account={billingAccount} fallbackPlan={user?.plan} />
+          </View>
+          {billingAccount?.trialEndsAt ? (
+            <Detail label="Trial ends" value={formatBillingDate(billingAccount.trialEndsAt)} />
+          ) : null}
+          {billingAccount?.paidThroughAt ? (
+            <Detail label="Paid through" value={formatBillingDate(billingAccount.paidThroughAt)} />
+          ) : null}
+          {billingAccount?.graceEndsAt && billingAccount.status === 'GRACE' ? (
+            <Detail label="Grace ends" value={formatBillingDate(billingAccount.graceEndsAt)} tone="danger" />
+          ) : null}
         </Card>
+        {user?.role === 'TENANT_ADMIN' ? (
+          <Button
+            accessibilityLabel="Manage billing on web"
+            loading={openingBilling}
+            onPress={() => void openBilling()}
+            variant="secondary">
+            Manage billing on web
+          </Button>
+        ) : null}
         <Button accessibilityLabel="Sign out" loading={isLoading} onPress={() => void signOut()} variant="danger">
           Sign out
         </Button>
@@ -50,11 +89,19 @@ export function AccountScreen() {
   );
 }
 
-function Detail({ label, value }: { label: string; value?: string }) {
+function Detail({
+  label,
+  tone = 'primary',
+  value,
+}: {
+  label: string;
+  tone?: 'primary' | 'danger';
+  value?: string;
+}) {
   return (
     <View style={styles.detailRow}>
       <AppText muted variant="bodySmall">{label}</AppText>
-      <Badge tone="primary">{value ?? '—'}</Badge>
+      <Badge tone={tone}>{value ?? '—'}</Badge>
     </View>
   );
 }

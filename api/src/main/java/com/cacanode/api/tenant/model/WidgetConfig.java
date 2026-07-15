@@ -42,4 +42,7 @@ public class WidgetConfig extends BaseEntity {
     @Column(name = "is_active", nullable = false)
     private boolean active = true;
 
+    @Column(name = "hide_cacanode_branding", nullable = false)
+    private boolean hideCacanodeBranding;
+
 }

@@ -24,6 +24,16 @@ app:
   webhooks:
     encryption-key: ${WEBHOOK_ENCRYPTION_KEY}
     allow-private-networks: false
+  billing:
+    payos-enabled: ${PAYOS_ENABLED:false}
+    catalog-version: ${BILLING_CATALOG_VERSION:2026-07-15}
+    frontend-return-url: ${PAYOS_RETURN_URL}
+    frontend-cancel-url: ${PAYOS_CANCEL_URL}
+    sales-url: ${BILLING_SALES_URL:mailto:sales@cacanode.com}
+    payos:
+      client-id: ${PAYOS_CLIENT_ID:}
+      api-key: ${PAYOS_API_KEY:}
+      checksum-key: ${PAYOS_CHECKSUM_KEY:}
 
 spring:
   config:

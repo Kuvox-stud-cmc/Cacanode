@@ -3,6 +3,7 @@ import { parsePublicEnv } from '@/constants/env';
 const validEnv = {
   EXPO_PUBLIC_API_BASE_URL: 'http://localhost:8080/api/v1/',
   EXPO_PUBLIC_AI_API_BASE_URL: 'http://localhost:8000/api/v1///',
+  EXPO_PUBLIC_WEB_APP_URL: 'http://localhost:3000/',
 };
 
 describe('parsePublicEnv', () => {
@@ -10,6 +11,7 @@ describe('parsePublicEnv', () => {
     expect(parsePublicEnv(validEnv, { allowInsecureHttp: true })).toEqual({
       apiBaseUrl: 'http://localhost:8080/api/v1',
       aiApiBaseUrl: 'http://localhost:8000/api/v1',
+      webAppUrl: 'http://localhost:3000',
     });
   });
 
@@ -19,11 +21,12 @@ describe('parsePublicEnv', () => {
         {
           EXPO_PUBLIC_API_BASE_URL: undefined,
           EXPO_PUBLIC_AI_API_BASE_URL: undefined,
+          EXPO_PUBLIC_WEB_APP_URL: undefined,
         },
         { allowInsecureHttp: true },
       ),
     ).toThrow(
-      'Invalid public mobile environment configuration: EXPO_PUBLIC_API_BASE_URL, EXPO_PUBLIC_AI_API_BASE_URL',
+      'Invalid public mobile environment configuration: EXPO_PUBLIC_API_BASE_URL, EXPO_PUBLIC_AI_API_BASE_URL, EXPO_PUBLIC_WEB_APP_URL',
     );
   });
 
@@ -38,7 +41,7 @@ describe('parsePublicEnv', () => {
 
   it('requires HTTPS when insecure HTTP is disabled', () => {
     expect(() => parsePublicEnv(validEnv, { allowInsecureHttp: false })).toThrow(
-      'Production mobile API URLs must use HTTPS',
+      'Production mobile public URLs must use HTTPS',
     );
   });
 });

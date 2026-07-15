@@ -5,6 +5,7 @@ import com.cacanode.api.common.exception.custom.ConflictException;
 import com.cacanode.api.common.exception.custom.InternalServerErrorException;
 import com.cacanode.api.common.exception.custom.ResourceNotFoundException;
 import com.cacanode.api.common.exception.custom.UnauthorizedException;
+import com.cacanode.api.billing.gateway.PaymentGatewayException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.access.AccessDeniedException;
@@ -141,6 +142,19 @@ public class GlobalExceptionHandler {
                 .status(HttpStatus.INTERNAL_SERVER_ERROR.value())
                 .path(request.getDescription(false).replace("uri=", ""))
                 .error(HttpStatus.INTERNAL_SERVER_ERROR.getReasonPhrase())
+                .message(e.getMessage())
+                .build();
+    }
+
+    @ExceptionHandler(PaymentGatewayException.class)
+    @ResponseStatus(HttpStatus.BAD_GATEWAY)
+    public ErrorResponse handlePaymentGatewayException(PaymentGatewayException e, WebRequest request) {
+        log.error("Payment gateway error: {}", e.getMessage());
+        return ErrorResponse.builder()
+                .timestamp(LocalDateTime.now())
+                .status(HttpStatus.BAD_GATEWAY.value())
+                .path(request.getDescription(false).replace("uri=", ""))
+                .error(HttpStatus.BAD_GATEWAY.getReasonPhrase())
                 .message(e.getMessage())
                 .build();
     }

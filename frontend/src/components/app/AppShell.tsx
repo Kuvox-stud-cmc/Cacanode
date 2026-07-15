@@ -8,7 +8,11 @@ import { Loader2, LogOut, Menu, X } from "lucide-react"
 import { useAuthStore } from "@/components/providers/StoreProvider"
 import { useTokenRehydration } from "@/hooks/useTokenRehydration"
 import { logoutApi } from "@/lib/auth-api"
+import { getBillingAccount, type BillingAccount } from "@/lib/billing-api"
+import { useApiClient } from "@/hooks/useApiClient"
 import { appNavigation } from "@/components/app/navigation"
+import { PlanStatusBadge } from "@/components/billing/PlanStatusBadge"
+import { withNext } from "@/lib/auth-redirect"
 import { cn } from "@/lib/utils"
 
 function initialsFrom(fullName: string | undefined): string {
@@ -30,8 +34,11 @@ export function AppShell({ children, contentClassName, mobileNavContent }: AppSh
   const pathname = usePathname()
   const router = useRouter()
   const user = useAuthStore((state) => state.user)
+  const setPlan = useAuthStore((state) => state.setPlan)
   const clearAuth = useAuthStore((state) => state.clearAuth)
+  const { request } = useApiClient()
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [billingAccount, setBillingAccount] = useState<BillingAccount | null>(null)
   const visibleNavigation = appNavigation.filter(
     (item) => !item.tenantAdminOnly || user?.role === "TENANT_ADMIN",
   )
@@ -39,6 +46,23 @@ export function AppShell({ children, contentClassName, mobileNavContent }: AppSh
     appNavigation.find(
       (item) => item.href === pathname || pathname.startsWith(`${item.href}/`),
     )?.label ?? "Dashboard"
+
+  useEffect(() => {
+    if (!user?.tenantId) return
+    let cancelled = false
+    getBillingAccount(request)
+      .then((account) => {
+        if (cancelled) return
+        setBillingAccount(account)
+        setPlan(account.planCode)
+      })
+      .catch(() => {
+        if (!cancelled) setBillingAccount(null)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [request, setPlan, user?.tenantId])
 
   async function handleLogout() {
     try {
@@ -114,6 +138,25 @@ export function AppShell({ children, contentClassName, mobileNavContent }: AppSh
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm font-medium">{user?.fullName ?? "User"}</p>
               <p className="truncate text-xs text-slate-400">{user?.email ?? ""}</p>
+              <div className="mt-1.5">
+                {user?.role === "TENANT_ADMIN" ? (
+                  <Link
+                    href="/settings?tab=quota"
+                    aria-label="Open billing settings"
+                    className="inline-flex rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400"
+                  >
+                    <PlanStatusBadge
+                      plan={billingAccount?.planCode ?? user?.plan}
+                      status={billingAccount?.status}
+                    />
+                  </Link>
+                ) : (
+                  <PlanStatusBadge
+                    plan={billingAccount?.planCode ?? user?.plan}
+                    status={billingAccount?.status}
+                  />
+                )}
+              </div>
             </div>
           </div>
           <button
@@ -160,7 +203,8 @@ export function ProtectedAppShell({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (status === "unauthenticated") {
-      router.replace("/login")
+      const destination = `${window.location.pathname}${window.location.search}${window.location.hash}`
+      router.replace(withNext("/login", destination))
     }
   }, [router, status])
 

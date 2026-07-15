@@ -237,12 +237,3 @@ export interface Testimonial {
   company: string;
   initials: string;
 }
-
-export interface PricingPlan {
-  name: string;
-  price: string;
-  description: string;
-  features: string[];
-  cta: string;
-  highlighted: boolean;
-}

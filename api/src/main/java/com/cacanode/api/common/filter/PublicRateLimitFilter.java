@@ -48,6 +48,9 @@ public class PublicRateLimitFilter extends OncePerRequestFilter {
             return true;
         }
         String path = request.getRequestURI();
+        if (path.equals("/api/v1/public/billing/payos/webhook")) {
+            return true;
+        }
         return !(path.startsWith("/api/v1/auth/")
                 || path.startsWith("/api/auth/")
                 || path.startsWith("/api/v1/public/")

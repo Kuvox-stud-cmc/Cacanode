@@ -7,5 +7,7 @@ public enum NotificationType {
     DOCUMENT_FAILED,
     USER_INVITED,
     QUOTA_WARNING,
-    QUOTA_EXCEEDED
+    QUOTA_EXCEEDED,
+    BILLING_RENEWAL,
+    BILLING_GRACE
 }

@@ -40,14 +40,38 @@ public class Tenant extends BaseEntity {
     private String suspendedReason;
 
     // Usage quota
-    @Column(name = "max_documents", nullable = false)
-    private int maxDocuments = 150;
+    @Column(name = "max_documents")
+    private Integer maxDocuments = 50;
 
-    @Column(name = "max_messages", nullable = false)
-    private int maxMessages = 5000;
+    @Column(name = "max_messages")
+    private Integer maxMessages = 10_000;
 
-    @Column(name = "max_storage_mb", nullable = false)
-    private int maxStorageMb = 5120;
+    @Column(name = "max_storage_mb")
+    private Integer maxStorageMb = 10_240;
+
+    @Column(name = "max_team_members")
+    private Integer maxTeamMembers = 5;
+
+    @Column(name = "quota_anchor_at")
+    private LocalDateTime quotaAnchorAt;
+
+    @Column(name = "paid_through_at")
+    private LocalDateTime paidThroughAt;
+
+    @Column(name = "grace_ends_at")
+    private LocalDateTime graceEndsAt;
+
+    @Column(name = "api_access_enabled", nullable = false)
+    private boolean apiAccessEnabled = true;
+
+    @Column(name = "webhooks_enabled", nullable = false)
+    private boolean webhooksEnabled = true;
+
+    @Column(name = "advanced_analytics_enabled", nullable = false)
+    private boolean advancedAnalyticsEnabled = true;
+
+    @Column(name = "custom_branding_enabled", nullable = false)
+    private boolean customBrandingEnabled = true;
 
     @Column(name = "customer_answer_prompt", nullable = false, columnDefinition = "TEXT")
     private String customerAnswerPrompt = CustomerAnswerPromptDefaults.PLATFORM_DEFAULT;

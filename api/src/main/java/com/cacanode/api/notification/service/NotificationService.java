@@ -109,4 +109,15 @@ public class NotificationService {
     }
   }
 
+  public void recordBillingNotice(UUID tenantId, NotificationType type, String title, String message) {
+    Notification notification = new Notification();
+    notification.setTenantId(tenantId);
+    notification.setType(type);
+    notification.setTitle(title);
+    notification.setMessage(message);
+    notification.setStatus(NotificationStatus.SENT);
+    notification.setSentAt(LocalDateTime.now());
+    notificationRepository.save(notification);
+  }
+
 }

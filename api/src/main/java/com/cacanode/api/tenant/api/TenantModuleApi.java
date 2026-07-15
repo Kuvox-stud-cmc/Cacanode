@@ -48,4 +48,10 @@ public interface TenantModuleApi {
      * @param userId the user ID to suspend
      */
     void suspendUser(UUID userId);
+
+    TenantEntitlements getEntitlements(UUID tenantId);
+
+    TenantEntitlements lockEntitlements(UUID tenantId);
+
+    void applyEntitlements(ApplyTenantEntitlementsCommand command);
 }

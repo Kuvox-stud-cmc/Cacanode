@@ -24,7 +24,7 @@ import com.cacanode.api.tenant.model.User;
 import com.cacanode.api.tenant.repository.InvitationRepository;
 import com.cacanode.api.tenant.repository.UserRepository;
 import jakarta.servlet.http.HttpServletResponse;
-import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -39,7 +39,6 @@ import java.util.Map;
 import java.util.UUID;
 
 @Service
-@RequiredArgsConstructor
 public class TenantUserManagementService {
     private static final Duration INVITATION_LIFETIME = Duration.ofHours(72);
     private static final Duration RESEND_COOLDOWN = Duration.ofSeconds(60);
@@ -52,6 +51,41 @@ public class TenantUserManagementService {
     private final PasswordEncoder passwordEncoder;
     private final AuthService authService;
     private final ApplicationEventPublisher eventPublisher;
+    private final TenantEntitlementService entitlementService;
+
+    @Autowired
+    public TenantUserManagementService(
+            UserRepository userRepository,
+            InvitationRepository invitationRepository,
+            RefreshTokenRepository refreshTokenRepository,
+            JwtService jwtService,
+            PasswordEncoder passwordEncoder,
+            AuthService authService,
+            ApplicationEventPublisher eventPublisher,
+            TenantEntitlementService entitlementService
+    ) {
+        this.userRepository = userRepository;
+        this.invitationRepository = invitationRepository;
+        this.refreshTokenRepository = refreshTokenRepository;
+        this.jwtService = jwtService;
+        this.passwordEncoder = passwordEncoder;
+        this.authService = authService;
+        this.eventPublisher = eventPublisher;
+        this.entitlementService = entitlementService;
+    }
+
+    public TenantUserManagementService(
+            UserRepository userRepository,
+            InvitationRepository invitationRepository,
+            RefreshTokenRepository refreshTokenRepository,
+            JwtService jwtService,
+            PasswordEncoder passwordEncoder,
+            AuthService authService,
+            ApplicationEventPublisher eventPublisher
+    ) {
+        this(userRepository, invitationRepository, refreshTokenRepository, jwtService, passwordEncoder,
+                authService, eventPublisher, null);
+    }
 
     @Transactional
     public DirectoryResponse getDirectory(UUID tenantId, UUID currentUserId) {
@@ -74,6 +108,7 @@ public class TenantUserManagementService {
     @Transactional
     public InvitationResponse invite(UUID tenantId, UUID actorId, String rawEmail, UserRole role) {
         validateManageableRole(role);
+        if (entitlementService != null) entitlementService.assertCanAddMember(tenantId);
         String email = normalizeEmail(rawEmail);
         if (userRepository.existsByEmailIgnoreCase(email)) {
             throw new ConflictException("An account already exists for this email");
@@ -178,6 +213,9 @@ public class TenantUserManagementService {
             throw new BadRequestException("You cannot deactivate your own account");
         }
         User user = requireUser(tenantId, userId);
+        if (status == UserStatus.ACTIVE && user.getStatus() != UserStatus.ACTIVE) {
+            if (entitlementService != null) entitlementService.assertCanAddMember(tenantId);
+        }
         if (status == UserStatus.INACTIVE && user.getRole() == UserRole.TENANT_ADMIN) {
             ensureNotFinalActiveAdmin(user);
         }
@@ -206,6 +244,7 @@ public class TenantUserManagementService {
         Invitation invitation = invitationRepository.findByTokenHashForUpdate(jwtService.hashToken(request.getToken()))
                 .orElseThrow(() -> new ResourceNotFoundException("Invitation is invalid or no longer available"));
         validateAcceptable(invitation);
+        if (entitlementService != null) entitlementService.assertCanAcceptInvitation(invitation.getTenant().getId());
         String email = normalizeEmail(invitation.getEmail());
         if (userRepository.existsByEmailIgnoreCase(email)) {
             throw new ConflictException("An account already exists for this email");

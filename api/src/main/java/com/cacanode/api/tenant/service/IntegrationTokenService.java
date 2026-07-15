@@ -8,7 +8,7 @@ import com.cacanode.api.tenant.model.Chatbot;
 import com.cacanode.api.tenant.model.IntegrationToken;
 import com.cacanode.api.tenant.repository.ChatbotRepository;
 import com.cacanode.api.tenant.repository.IntegrationTokenRepository;
-import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -24,9 +24,9 @@ import java.util.HexFormat;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import com.cacanode.api.tenant.api.TenantModuleApi;
 
 @Service
-@RequiredArgsConstructor
 public class IntegrationTokenService {
     public static final String WIDGET_SCOPE = "widget:chat";
     public static final String API_SCOPE = "api:chat";
@@ -35,6 +35,22 @@ public class IntegrationTokenService {
 
     private final IntegrationTokenRepository repository;
     private final ChatbotRepository chatbotRepository;
+    private final TenantModuleApi tenantModuleApi;
+
+    @Autowired
+    public IntegrationTokenService(
+            IntegrationTokenRepository repository,
+            ChatbotRepository chatbotRepository,
+            TenantModuleApi tenantModuleApi
+    ) {
+        this.repository = repository;
+        this.chatbotRepository = chatbotRepository;
+        this.tenantModuleApi = tenantModuleApi;
+    }
+
+    public IntegrationTokenService(IntegrationTokenRepository repository, ChatbotRepository chatbotRepository) {
+        this(repository, chatbotRepository, null);
+    }
 
     @Value("${app.integrations.token-pepper:development-integration-token-pepper}")
     private String pepper;
@@ -49,6 +65,10 @@ public class IntegrationTokenService {
         List<String> scopes = request.scopes().stream().distinct().sorted().toList();
         if (scopes.isEmpty() || !ALLOWED_SCOPES.containsAll(scopes)) {
             throw new BadRequestException("Token scopes are invalid");
+        }
+        if (tenantModuleApi != null && scopes.contains(API_SCOPE)
+                && !tenantModuleApi.getEntitlements(tenantId).apiAccess()) {
+            throw new BadRequestException("API_ACCESS_REQUIRES_PRO");
         }
         if (request.expiresAt() != null && !request.expiresAt().isAfter(LocalDateTime.now())) {
             throw new BadRequestException("Token expiry must be in the future");
@@ -102,6 +122,10 @@ public class IntegrationTokenService {
         }
         if (!token.getScopes().contains(requiredScope)) {
             throw new UnauthorizedException("Integration token does not have the required scope");
+        }
+        if (tenantModuleApi != null && API_SCOPE.equals(requiredScope)
+                && !tenantModuleApi.getEntitlements(token.getTenant().getId()).apiAccess()) {
+            throw new UnauthorizedException("API access is disabled for this tenant");
         }
         token.setLastUsedAt(now);
         return new Principal(

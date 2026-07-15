@@ -10,6 +10,7 @@ import { createAppStore } from '@/store';
 
 const order: string[] = [];
 const mockReplace = jest.fn(() => order.push('route'));
+const mockOpenBilling = jest.fn(() => Promise.resolve());
 const mockLogout = jest.fn(() => {
   order.push('server');
   return { unwrap: () => Promise.reject(new Error('offline')) };
@@ -25,6 +26,14 @@ jest.mock('@/components/layout/screen', () => ({
 
 jest.mock('@/features/auth/api/auth-api', () => ({
   useLogoutSessionMutation: () => [mockLogout, { isLoading: false }],
+}));
+
+jest.mock('@/features/billing/api/billing-api', () => ({
+  useGetBillingAccountQuery: () => ({ data: undefined }),
+}));
+
+jest.mock('@/features/billing/services/billing-web-link', () => ({
+  openBillingManagement: () => mockOpenBilling(),
 }));
 
 jest.mock('@/services/auth/token-vault', () => ({
@@ -66,5 +75,26 @@ describe('AccountScreen', () => {
 
     expect(order).toEqual(['clear', 'route', 'server']);
     expect(mockReplace).toHaveBeenCalledWith('/login');
+  });
+
+  it('opens web billing for tenant admins', async () => {
+    const store = createAppStore();
+    store.dispatch(sessionAuthenticated({
+      userId: 'user-1',
+      tenantId: 'tenant-1',
+      email: 'person@example.com',
+      fullName: 'Person Name',
+      role: 'TENANT_ADMIN',
+      plan: 'TRIAL',
+    }));
+    const screen = await render(
+      <Provider store={store}>
+        <AccountScreen />
+      </Provider>,
+    );
+
+    expect(screen.getByText('Trial')).toBeTruthy();
+    await fireEvent.press(screen.getByRole('button', { name: 'Manage billing on web' }));
+    await waitFor(() => expect(mockOpenBilling).toHaveBeenCalledTimes(1));
   });
 });

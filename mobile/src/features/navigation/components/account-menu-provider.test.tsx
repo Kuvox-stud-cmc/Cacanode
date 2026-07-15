@@ -14,6 +14,8 @@ import { createAppStore } from '@/store';
 const order: string[] = [];
 const mockPush = jest.fn();
 const mockReplace = jest.fn(() => order.push('route'));
+const mockLoadBilling = jest.fn();
+const mockOpenBilling = jest.fn(() => Promise.resolve());
 const mockLogout = jest.fn(() => {
   order.push('server');
   return { unwrap: () => Promise.resolve() };
@@ -31,6 +33,14 @@ jest.mock('@/features/auth/api/auth-api', () => ({
   useLogoutSessionMutation: () => [mockLogout, { isLoading: false }],
 }));
 
+jest.mock('@/features/billing/api/billing-api', () => ({
+  useLazyGetBillingAccountQuery: () => [mockLoadBilling, { data: undefined }],
+}));
+
+jest.mock('@/features/billing/services/billing-web-link', () => ({
+  openBillingManagement: () => mockOpenBilling(),
+}));
+
 jest.mock('@/services/auth/token-vault', () => ({
   tokenVault: { get: jest.fn() },
 }));
@@ -44,14 +54,14 @@ function OpenMenuButton() {
   return <Button onPress={open}>Open menu</Button>;
 }
 
-async function renderMenu() {
+async function renderMenu(role = 'TENANT_ADMIN') {
   const store = createAppStore();
   store.dispatch(
     sessionAuthenticated({
       email: 'ada@example.com',
       fullName: 'Ada Lovelace',
       plan: 'PRO',
-      role: 'TENANT_ADMIN',
+      role,
       tenantId: 'tenant-1',
       userId: 'user-1',
     }),
@@ -76,8 +86,24 @@ describe('AccountMenuProvider', () => {
     await fireEvent.press(screen.getByRole('button', { name: 'Open menu' }));
     expect(screen.getByText('Ada Lovelace')).toBeTruthy();
     expect(screen.getByText('Tenant admin')).toBeTruthy();
+    expect(screen.getByText('Pro')).toBeTruthy();
     await fireEvent.press(screen.getByRole('button', { name: 'Account settings' }));
     expect(mockPush).toHaveBeenCalledWith('/settings');
+  });
+
+  it('opens web billing for tenant admins', async () => {
+    const screen = await renderMenu();
+    await fireEvent.press(screen.getByRole('button', { name: 'Open menu' }));
+    expect(mockLoadBilling).toHaveBeenCalled();
+    await fireEvent.press(screen.getByRole('button', { name: 'Manage billing on web' }));
+    await waitFor(() => expect(mockOpenBilling).toHaveBeenCalledTimes(1));
+  });
+
+  it('shows plan status without billing management for non-admin users', async () => {
+    const screen = await renderMenu('USER');
+    await fireEvent.press(screen.getByRole('button', { name: 'Open menu' }));
+    expect(screen.getByText('Pro')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Manage billing on web' })).toBeNull();
   });
 
   it('clears and redirects before best-effort server logout', async () => {

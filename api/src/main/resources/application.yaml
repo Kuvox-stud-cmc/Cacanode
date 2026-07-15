@@ -21,3 +21,37 @@ app:
   rate-limit:
     enabled: ${PUBLIC_RATE_LIMIT_ENABLED:true}
     public-requests-per-minute: ${PUBLIC_RATE_LIMIT_PER_MINUTE:120}
+  billing:
+    catalog-version: ${BILLING_CATALOG_VERSION:2026-07-15}
+    trial-days: 14
+    grace-days: 3
+    checkout-minutes: 30
+    pro-monthly-price-vnd: 1199000
+    pro-annual-price-vnd: 11990000
+    starter:
+      max-messages: 500
+      max-documents: 3
+      max-team-members: 1
+      max-storage-mb: 512
+      api-access: false
+      webhooks: false
+      advanced-analytics: false
+      custom-branding: false
+    pro:
+      max-messages: 10000
+      max-documents: 50
+      max-team-members: 5
+      max-storage-mb: 10240
+      api-access: true
+      webhooks: true
+      advanced-analytics: true
+      custom-branding: true
+    enterprise:
+      max-messages:
+      max-documents:
+      max-team-members:
+      max-storage-mb:
+      api-access: true
+      webhooks: true
+      advanced-analytics: true
+      custom-branding: true

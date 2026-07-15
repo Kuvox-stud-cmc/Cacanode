@@ -14,6 +14,8 @@ import {
 import { AlertCircle, BarChart3, CheckCircle, Clock, MessageSquare, TrendingDown, TrendingUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { getBillingAccount } from "@/lib/billing-api";
+import { useRouter } from "next/navigation";
 
 const scopeOptions: Array<{ value: AnalyticsScope; label: string }> = [
   { value: "CUSTOMER", label: "Customer" }, { value: "EMPLOYEE", label: "Employee" }, { value: "ALL", label: "All" },
@@ -30,15 +32,26 @@ function trendLabel(value: number, suffix = "%") {
 
 export default function AnalyticsPage() {
   const { request } = useApiClient();
+  const router = useRouter();
   const [scope, setScope] = useState<AnalyticsScope>("CUSTOMER");
   const [range, setRange] = useState<AnalyticsDays>(30);
   const [analytics, setAnalytics] = useState<AnalyticsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [upgradeRequired, setUpgradeRequired] = useState(false);
 
   const loadAnalytics = useCallback(async (signal?: AbortSignal) => {
     setLoading(true); setError(null);
-    try { setAnalytics(await getAnalytics(request, scope, range, signal)); }
+    try {
+      const account = await getBillingAccount(request);
+      if (!account.features.advancedAnalytics) {
+        setUpgradeRequired(true);
+        setAnalytics(null);
+        return;
+      }
+      setUpgradeRequired(false);
+      setAnalytics(await getAnalytics(request, scope, range, signal));
+    }
     catch (cause) { if (!(cause instanceof DOMException && cause.name === "AbortError")) setError(cause instanceof Error ? cause.message : "Unable to load analytics"); }
     finally { if (!signal?.aborted) setLoading(false); }
   }, [range, request, scope]);
@@ -61,6 +74,10 @@ export default function AnalyticsPage() {
   const maxCount = Math.max(0, ...(analytics?.dailyMessageVolume.map((d) => d.count) ?? []));
   const maxQuestion = Math.max(0, ...(analytics?.popularQuestions.map((q) => q.count) ?? []));
   const noActivity = !loading && analytics?.sessions.value === 0 && analytics.userMessages.value === 0;
+
+  if (!loading && upgradeRequired) {
+    return <Card className="mx-auto max-w-xl"><CardHeader><CardTitle>Advanced analytics requires Pro</CardTitle></CardHeader><CardContent className="space-y-4"><p className="text-sm text-slate-600">Starter keeps the dashboard summary. Upgrade to Pro for detailed trends, response times, and popular questions.</p><Button onClick={() => router.push("/settings?tab=quota")}>View Pro plans</Button></CardContent></Card>;
+  }
 
   return (
     <div className="space-y-6">

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field, replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
+import calendar
+import math
 from typing import Any, Protocol
 from uuid import uuid4
 
@@ -516,37 +518,123 @@ class PostgresChatSessionStore:
         with self._connect() as conn:
             with conn.cursor(row_factory=self._dict_row) as cur:
                 cur.execute(
-                    "SELECT max_messages FROM tenants WHERE id = %s FOR UPDATE",
+                    """
+                    SELECT t.max_messages, s.plan_code, s.status, s.quota_anchor_at,
+                           s.trial_ends_at, s.paid_through_at
+                    FROM tenants t
+                    JOIN billing_subscriptions s ON s.tenant_id = t.id
+                    WHERE t.id = %s
+                    FOR UPDATE OF t
+                    """,
                     (tenant_id,),
                 )
                 tenant = cur.fetchone()
                 if tenant is None:
                     raise ChatWorkspaceNotFoundError("Tenant was not found")
+                period_start, period_end = self._billing_period(tenant, now)
                 cur.execute(
                     """
                     SELECT message_count
                     FROM usage_metrics
-                    WHERE tenant_id = %s AND period_year = %s AND period_month = %s
+                    WHERE tenant_id = %s AND period_start = %s
                     """,
-                    (tenant_id, now.year, now.month),
+                    (tenant_id, period_start),
                 )
                 usage = cur.fetchone()
                 current = 0 if usage is None else int(usage["message_count"])
-                if current >= int(tenant["max_messages"]):
+                limit = tenant["max_messages"]
+                if limit is not None and current >= int(limit):
                     raise ChatQuotaExceededError("Tenant message quota exceeded")
                 cur.execute(
                     """
                     INSERT INTO usage_metrics (
-                        tenant_id, period_year, period_month, message_count,
-                        document_count, storage_mb_used, token_count
-                    ) VALUES (%s, %s, %s, 1, 0, 0, 0)
-                    ON CONFLICT (tenant_id, period_year, period_month)
+                        tenant_id, period_year, period_month, period_start, period_end,
+                        message_count, document_count, storage_mb_used, token_count
+                    ) VALUES (%s, %s, %s, %s, %s, 1, 0, 0, 0)
+                    ON CONFLICT (tenant_id, period_start)
                     DO UPDATE SET message_count = usage_metrics.message_count + 1,
                                   updated_at = NOW()
+                    RETURNING message_count, warning_80_sent, exceeded_sent
                     """,
-                    (tenant_id, now.year, now.month),
+                    (
+                        tenant_id,
+                        period_start.year,
+                        period_start.month,
+                        period_start,
+                        period_end,
+                    ),
                 )
+                updated = cur.fetchone()
+                if limit is not None:
+                    count = int(updated["message_count"])
+                    warning_threshold = math.ceil(int(limit) * 0.8)
+                    if count >= warning_threshold and not updated["warning_80_sent"]:
+                        if self._mark_quota_notice(cur, tenant_id, period_start, "warning_80_sent"):
+                            self._insert_quota_notification(
+                                cur, tenant_id, "QUOTA_WARNING",
+                                "Message quota is at 80%",
+                                f"You have used {count} of {limit} messages in this billing period.",
+                            )
+                    if count >= int(limit) and not updated["exceeded_sent"]:
+                        if self._mark_quota_notice(cur, tenant_id, period_start, "exceeded_sent"):
+                            self._insert_quota_notification(
+                                cur, tenant_id, "QUOTA_EXCEEDED",
+                                "Message quota reached",
+                                "Additional messages are blocked until the next reset or a Pro renewal.",
+                            )
             conn.commit()
+
+    def _billing_period(self, tenant: dict[str, Any], now: datetime) -> tuple[datetime, datetime]:
+        anchor = tenant["quota_anchor_at"]
+        if tenant["plan_code"] == "TRIAL":
+            return anchor, tenant["trial_ends_at"]
+        effective_now = now
+        paid_through = tenant["paid_through_at"]
+        if paid_through is not None and (
+            tenant["status"] == "GRACE" or now >= paid_through
+        ):
+            effective_now = paid_through - timedelta(microseconds=1)
+        start = anchor
+        end = self._plus_month(start)
+        while effective_now >= end:
+            start = end
+            end = self._plus_month(end)
+        if paid_through is not None and end > paid_through:
+            end = paid_through
+        return start, end
+
+    def _plus_month(self, value: datetime) -> datetime:
+        month_index = value.month
+        year = value.year + month_index // 12
+        month = month_index % 12 + 1
+        day = min(value.day, calendar.monthrange(year, month)[1])
+        return value.replace(year=year, month=month, day=day)
+
+    def _mark_quota_notice(
+        self, cur: Any, tenant_id: str, period_start: datetime, column: str
+    ) -> bool:
+        if column not in {"warning_80_sent", "exceeded_sent"}:
+            raise ValueError("Invalid quota notice column")
+        cur.execute(
+            f"""
+            UPDATE usage_metrics SET {column} = TRUE, updated_at = NOW()
+            WHERE tenant_id = %s AND period_start = %s AND {column} = FALSE
+            RETURNING id
+            """,
+            (tenant_id, period_start),
+        )
+        return cur.fetchone() is not None
+
+    def _insert_quota_notification(
+        self, cur: Any, tenant_id: str, notification_type: str, title: str, message: str
+    ) -> None:
+        cur.execute(
+            """
+            INSERT INTO notifications (tenant_id, type, title, message, status, sent_at)
+            VALUES (%s, %s, %s, %s, 'SENT', NOW())
+            """,
+            (tenant_id, notification_type, title, message),
+        )
 
     def list_external_conversations(
         self,

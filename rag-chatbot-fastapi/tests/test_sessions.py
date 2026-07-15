@@ -1,8 +1,43 @@
 from __future__ import annotations
 
 from typing import Any
+from datetime import datetime
 
 from app.rag.sessions import PostgresChatSessionStore
+
+
+def test_billing_anniversary_periods_are_monthly_for_annual_pro() -> None:
+    store = PostgresChatSessionStore("postgresql://unused")
+    start, end = store._billing_period(  # noqa: SLF001
+        {
+            "plan_code": "PRO",
+            "status": "ACTIVE",
+            "quota_anchor_at": datetime(2026, 1, 31, 10, 15),
+            "trial_ends_at": None,
+            "paid_through_at": datetime(2027, 1, 31, 10, 15),
+        },
+        datetime(2026, 3, 15, 12, 0),
+    )
+
+    assert start == datetime(2026, 2, 28, 10, 15)
+    assert end == datetime(2026, 3, 28, 10, 15)
+
+
+def test_grace_uses_final_paid_window_without_new_quota() -> None:
+    store = PostgresChatSessionStore("postgresql://unused")
+    start, end = store._billing_period(  # noqa: SLF001
+        {
+            "plan_code": "PRO",
+            "status": "GRACE",
+            "quota_anchor_at": datetime(2026, 1, 31, 10, 15),
+            "trial_ends_at": None,
+            "paid_through_at": datetime(2026, 4, 30, 10, 15),
+        },
+        datetime(2026, 5, 2, 9, 0),
+    )
+
+    assert start == datetime(2026, 4, 28, 10, 15)
+    assert end == datetime(2026, 4, 30, 10, 15)
 
 
 class FakeCursor:

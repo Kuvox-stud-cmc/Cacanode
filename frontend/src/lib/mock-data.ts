@@ -3,7 +3,6 @@ import type {
   Message,
   Conversation,
   Testimonial,
-  PricingPlan,
 } from "@/types";
 
 export const mockUsers: User[] = [
@@ -233,58 +232,5 @@ export const mockTestimonials: Testimonial[] = [
     title: "Product Manager",
     company: "Loopkit",
     initials: "PN",
-  },
-];
-
-export const mockPricingPlans: PricingPlan[] = [
-  {
-    name: "Starter",
-    price: "Free",
-    description: "Perfect for trying CacaNode on your first project.",
-    features: [
-      "500 messages / month",
-      "3 documents",
-      "1 team member",
-      "Basic analytics",
-      "Email support",
-      "CacaNode branding",
-    ],
-    cta: "Start for free",
-    highlighted: false,
-  },
-  {
-    name: "Pro",
-    price: "$49/mo",
-    description: "Everything you need to run support at scale.",
-    features: [
-      "10,000 messages / month",
-      "50 documents",
-      "5 team members",
-      "Advanced analytics",
-      "Priority support",
-      "Custom branding",
-      "API access",
-      "Webhooks",
-    ],
-    cta: "Get Pro",
-    highlighted: true,
-  },
-  {
-    name: "Enterprise",
-    price: "Custom",
-    description: "Unlimited scale with dedicated support and SLAs.",
-    features: [
-      "Unlimited messages",
-      "Unlimited documents",
-      "Unlimited team members",
-      "Advanced analytics + export",
-      "Dedicated CSM",
-      "Custom branding",
-      "Full API access",
-      "SSO / SAML",
-      "99.99% SLA",
-    ],
-    cta: "Contact sales",
-    highlighted: false,
   },
 ];

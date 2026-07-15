@@ -23,6 +23,8 @@ export type WidgetSettings = {
   position: "BOTTOM_RIGHT" | "BOTTOM_LEFT";
   active: boolean;
   allowedOrigins: string[];
+  hideCacanodeBranding: boolean;
+  showCacanodeBranding: boolean;
 };
 
 export type WebhookEndpoint = {
@@ -76,7 +78,15 @@ export async function updateWidgetSettings(
 ): Promise<WidgetSettings> {
   return readJsonOrThrow(await request(`${getApiBase()}/tenants/me/integrations/widget`, {
     method: "PUT",
-    body: JSON.stringify(payload),
+    body: JSON.stringify({
+      displayName: payload.displayName,
+      welcomeMessage: payload.welcomeMessage,
+      primaryColor: payload.primaryColor,
+      position: payload.position,
+      active: payload.active,
+      allowedOrigins: payload.allowedOrigins,
+      hideCacanodeBranding: payload.hideCacanodeBranding,
+    }),
   }));
 }
 

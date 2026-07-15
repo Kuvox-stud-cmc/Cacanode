@@ -6,6 +6,7 @@ import lombok.Getter;
 import lombok.Setter;
 
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 import java.util.UUID;
 
 @Getter
@@ -17,10 +18,7 @@ import java.util.UUID;
                 @Index(name = "idx_usage_metric_tenant_id", columnList = "tenant_id")
         },
         uniqueConstraints = {
-                @UniqueConstraint(
-                        name = "uq_usage_metric_tenant_period",
-                        columnNames = {"tenant_id", "period_year", "period_month"}
-                )
+                @UniqueConstraint(name = "uq_usage_metric_tenant_period_start", columnNames = {"tenant_id", "period_start"})
         }
 )
 public class UsageMetrics extends BaseEntity {
@@ -33,6 +31,18 @@ public class UsageMetrics extends BaseEntity {
 
     @Column(name = "period_month", nullable = false)
     private int periodMonth;
+
+    @Column(name = "period_start", nullable = false)
+    private LocalDateTime periodStart;
+
+    @Column(name = "period_end", nullable = false)
+    private LocalDateTime periodEnd;
+
+    @Column(name = "warning_80_sent", nullable = false)
+    private boolean warning80Sent;
+
+    @Column(name = "exceeded_sent", nullable = false)
+    private boolean exceededSent;
 
     @Column(name = "message_count", nullable = false)
     private int messageCount = 0;

@@ -6,7 +6,7 @@ import { createApiBaseQuery } from '@/services/api/base-query';
 export const springApi = createApi({
   reducerPath: 'springApi',
   baseQuery: createApiBaseQuery(env.apiBaseUrl),
-  tagTypes: ['Dashboard', 'Document', 'Ticket', 'Workspace'],
+  tagTypes: ['Billing', 'Dashboard', 'Document', 'Ticket', 'Workspace'],
   endpoints: () => ({}),
 });
 

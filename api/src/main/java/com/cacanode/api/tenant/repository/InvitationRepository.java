@@ -31,4 +31,6 @@ public interface InvitationRepository extends JpaRepository<Invitation, UUID> {
 
     boolean existsByTenant_IdAndEmailIgnoreCaseAndStatusAndExpiresAtAfter(
             UUID tenantId, String email, InvitationStatus status, LocalDateTime now);
+
+    long countByTenant_IdAndStatusAndExpiresAtAfter(UUID tenantId, InvitationStatus status, LocalDateTime now);
 }

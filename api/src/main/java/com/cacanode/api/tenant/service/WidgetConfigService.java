@@ -12,11 +12,13 @@ import org.springframework.transaction.annotation.Transactional;
 import java.net.URI;
 import java.util.List;
 import java.util.UUID;
+import com.cacanode.api.tenant.api.TenantModuleApi;
 
 @Service
 @RequiredArgsConstructor
 public class WidgetConfigService {
     private final WidgetConfigRepository repository;
+    private final TenantModuleApi tenantModuleApi;
 
     @Transactional(readOnly = true)
     public WidgetConfigDtos.Response get(UUID tenantId) {
@@ -37,6 +39,9 @@ public class WidgetConfigService {
         config.setPrimaryColor(request.primaryColor());
         config.setPosition(request.position());
         config.setActive(request.active());
+        if (request.hideCacanodeBranding() != null) {
+            config.setHideCacanodeBranding(request.hideCacanodeBranding());
+        }
         config.getChatbot().setAllowedOrigins(origins);
         return toResponse(config);
     }
@@ -65,7 +70,9 @@ public class WidgetConfigService {
         return new WidgetConfigDtos.Response(
                 config.getChatbot().getId(), config.getDisplayName(), config.getWelcomeMessage(),
                 config.getPrimaryColor(), config.getPosition(), config.isActive(),
-                List.copyOf(config.getChatbot().getAllowedOrigins())
+                List.copyOf(config.getChatbot().getAllowedOrigins()), config.isHideCacanodeBranding(),
+                !tenantModuleApi.getEntitlements(config.getTenant().getId()).customBranding()
+                        || !config.isHideCacanodeBranding()
         );
     }
 }

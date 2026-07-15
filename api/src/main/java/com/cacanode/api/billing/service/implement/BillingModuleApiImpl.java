@@ -7,6 +7,7 @@ import com.cacanode.api.document.enums.DocumentType;
 import lombok.RequiredArgsConstructor;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.context.annotation.Primary;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.sql.Timestamp;
@@ -27,6 +28,7 @@ import java.util.UUID;
 import java.util.regex.Pattern;
 
 @Service
+@Primary
 @RequiredArgsConstructor
 @Transactional(readOnly = true)
 public class BillingModuleApiImpl implements BillingService {

@@ -11,11 +11,13 @@ const publicUrlSchema = z
 const publicEnvSchema = z.object({
   EXPO_PUBLIC_API_BASE_URL: publicUrlSchema,
   EXPO_PUBLIC_AI_API_BASE_URL: publicUrlSchema,
+  EXPO_PUBLIC_WEB_APP_URL: publicUrlSchema,
 });
 
 type RawPublicEnv = {
   EXPO_PUBLIC_API_BASE_URL: string | undefined;
   EXPO_PUBLIC_AI_API_BASE_URL: string | undefined;
+  EXPO_PUBLIC_WEB_APP_URL: string | undefined;
 };
 
 type ParsePublicEnvOptions = {
@@ -43,13 +45,16 @@ export function parsePublicEnv(
   const values = {
     apiBaseUrl: removeTrailingSlashes(parsed.data.EXPO_PUBLIC_API_BASE_URL),
     aiApiBaseUrl: removeTrailingSlashes(parsed.data.EXPO_PUBLIC_AI_API_BASE_URL),
+    webAppUrl: removeTrailingSlashes(parsed.data.EXPO_PUBLIC_WEB_APP_URL),
   };
 
   if (
     !allowInsecureHttp &&
-    (values.apiBaseUrl.startsWith('http://') || values.aiApiBaseUrl.startsWith('http://'))
+    (values.apiBaseUrl.startsWith('http://') ||
+      values.aiApiBaseUrl.startsWith('http://') ||
+      values.webAppUrl.startsWith('http://'))
   ) {
-    throw new Error('Production mobile API URLs must use HTTPS');
+    throw new Error('Production mobile public URLs must use HTTPS');
   }
 
   return values;
@@ -63,6 +68,9 @@ export const env = parsePublicEnv(
     EXPO_PUBLIC_AI_API_BASE_URL:
       process.env.EXPO_PUBLIC_AI_API_BASE_URL ??
       (process.env.NODE_ENV === 'test' ? 'http://localhost:8000/api/v1' : undefined),
+    EXPO_PUBLIC_WEB_APP_URL:
+      process.env.EXPO_PUBLIC_WEB_APP_URL ??
+      (process.env.NODE_ENV === 'test' ? 'http://localhost:3000' : undefined),
   },
   { allowInsecureHttp: __DEV__ },
 );

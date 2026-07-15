@@ -44,7 +44,8 @@ npm install
 cp .env.example .env.local
 ```
 
-`.env.local` is ignored by Git. The example contains public service URLs only. Change each hostname
+`.env.local` is ignored by Git. The example contains public service URLs only, including the Next.js
+web application used for billing management. Change each hostname
 for the simulator, emulator, or physical device you are running; never put credentials or tokens in
 an `EXPO_PUBLIC_*` variable.
 
@@ -83,14 +84,15 @@ tunnel URLs.
 The default [`.env.example`](./.env.example) values work when the iOS Simulator can reach services
 on the development Mac through `localhost`.
 
-| Target | API hostname to use | Example Spring URL |
-| --- | --- | --- |
-| iOS Simulator | `localhost` | `http://localhost:8080/api/v1` |
-| Android Emulator | `10.0.2.2` | `http://10.0.2.2:8080/api/v1` |
-| Physical device | Mac LAN IP or HTTPS tunnel host | `http://192.168.1.20:8080/api/v1` |
+| Target | Hostname to use | Example Spring URL | Example web URL |
+| --- | --- | --- | --- |
+| iOS Simulator | `localhost` | `http://localhost:8080/api/v1` | `http://localhost:3000` |
+| Android Emulator | `10.0.2.2` | `http://10.0.2.2:8080/api/v1` | `http://10.0.2.2:3000` |
+| Physical device | Mac LAN IP or HTTPS tunnel host | `http://192.168.1.20:8080/api/v1` | `http://192.168.1.20:3000` |
 
 Apply the same hostname rule to the AI API on port 8000. A physical phone cannot use `localhost` to
-reach services running on the development computer. Preview and production builds must use HTTPS.
+reach services running on the development computer. The web URL opens billing in the system browser;
+preview and production builds must use HTTPS.
 
 ## Verification
 
