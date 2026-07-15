@@ -24,7 +24,7 @@ def auth_headers(tenant_id: str = "tenant-1", user_id: str = "user-1") -> dict[s
             "exp": datetime.now(UTC) + timedelta(minutes=15),
         },
         settings.TOKEN_KEY,
-        algorithm="HS256",
+        algorithm="HS512",
     )
     return {"Authorization": f"Bearer {token}"}
 

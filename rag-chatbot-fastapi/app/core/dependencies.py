@@ -17,6 +17,7 @@ from app.core.config import settings
 # HTTP Bearer security scheme for JWT tokens
 security_bearer = HTTPBearer()
 BearerCredentials = Annotated[HTTPAuthorizationCredentials, Depends(security_bearer)]
+JWT_ALGORITHMS = ["HS256", "HS384", "HS512"]
 
 
 async def get_current_tenant(
@@ -43,7 +44,7 @@ async def get_current_tenant(
         payload = jwt.decode(
             token,
             settings.TOKEN_KEY,
-            algorithms=["HS256"],
+            algorithms=JWT_ALGORITHMS,
         )
     except jwt.ExpiredSignatureError:
         raise HTTPException(
