@@ -1,6 +1,9 @@
 package com.cacanode.api.tenant.service;
 
 import com.cacanode.api.ai.enums.ModelConfigStatus;
+import com.cacanode.api.common.cache.BusinessCache;
+import com.cacanode.api.common.cache.CacheKeyFactory;
+import com.cacanode.api.common.cache.VersionedJsonCache;
 import com.cacanode.api.ai.model.ModelConfigVersion;
 import com.cacanode.api.ai.repository.ModelConfigVersionRepository;
 import com.cacanode.api.common.exception.custom.InternalServerErrorException;
@@ -18,6 +21,7 @@ import com.cacanode.api.tenant.repository.KnowledgeBaseRepository;
 import com.cacanode.api.tenant.repository.TenantRepository;
 import com.cacanode.api.tenant.repository.WidgetConfigRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -38,9 +42,25 @@ public class TenantWorkspaceService {
     private final ChatbotRepository chatbotRepository;
     private final WidgetConfigRepository widgetConfigRepository;
     private final ModelConfigVersionRepository modelConfigVersionRepository;
+    @Autowired(required = false)
+    private VersionedJsonCache businessCache;
+    @Autowired(required = false)
+    private CacheKeyFactory cacheKeyFactory;
 
     @Transactional
     public TenantWorkspaceResponse getOrProvisionWorkspace(UUID tenantId) {
+        if (businessCache == null || cacheKeyFactory == null) {
+            return loadOrProvisionAuthoritative(tenantId);
+        }
+        return businessCache.getOrLoad(
+                BusinessCache.WORKSPACE,
+                cacheKeyFactory.build("workspace", "tenant", tenantId.toString()),
+                TenantWorkspaceResponse.class,
+                () -> loadOrProvisionAuthoritative(tenantId)
+        );
+    }
+
+    private TenantWorkspaceResponse loadOrProvisionAuthoritative(UUID tenantId) {
         Tenant tenant = tenantRepository.findById(tenantId)
                 .orElseThrow(() -> new ResourceNotFoundException("Tenant workspace was not found"));
 
@@ -99,7 +119,7 @@ public class TenantWorkspaceService {
                     chatbot.setDisplayName(DEFAULT_CHATBOT_NAME);
                     chatbot.setDefaultLocale(knowledgeBase.getDefaultLocale());
                     chatbot.setWelcomeMessage(DEFAULT_WELCOME_MESSAGE);
-                    chatbot.setSafeInstructions(CustomerAnswerPromptDefaults.PLATFORM_DEFAULT);
+                    chatbot.setSafeInstructions(CustomerAnswerPromptDefaults.forTenant(tenant.getName()));
                     chatbot.setRetrievalSettings(Map.of(
                             "topK", 8,
                             "graphDepth", 2,

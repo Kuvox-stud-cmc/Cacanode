@@ -4,7 +4,7 @@ import type {
   ChatSessionResponse,
   PlaygroundSession,
 } from "@/types";
-import { getAiApiBase } from "@/lib/auth-api";
+import { getApiBase } from "@/lib/auth-api";
 import { readJsonOrThrow } from "@/lib/api-error";
 import type { ApiRequest } from "@/lib/documents-api";
 
@@ -18,7 +18,7 @@ export async function createChatSessionApi(
     locale: string;
   },
 ): Promise<ChatSessionResponse> {
-  const res = await request(`${getAiApiBase()}/chat/sessions`, {
+  const res = await request(`${getApiBase()}/chat/sessions`, {
     method: "POST",
     body: JSON.stringify(payload),
   });
@@ -31,7 +31,7 @@ export async function listPlaygroundSessionsApi(
   offset = 0,
 ): Promise<PlaygroundSession[]> {
   const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
-  const res = await request(`${getAiApiBase()}/chat/playground/sessions?${params}`);
+  const res = await request(`${getApiBase()}/chat/playground/sessions?${params}`);
   return readJsonOrThrow<PlaygroundSession[]>(res);
 }
 
@@ -39,7 +39,7 @@ export async function hidePlaygroundSessionApi(
   request: ApiRequest,
   sessionId: string,
 ): Promise<void> {
-  const res = await request(`${getAiApiBase()}/chat/playground/sessions/${sessionId}`, {
+  const res = await request(`${getApiBase()}/chat/playground/sessions/${sessionId}`, {
     method: "DELETE",
   });
   if (!res.ok) await readJsonOrThrow(res);
@@ -62,7 +62,7 @@ export async function submitChatMessageApi(
   }
 
   try {
-    const res = await request(`${getAiApiBase()}/chat/sessions/${sessionId}/messages`, {
+    const res = await request(`${getApiBase()}/chat/sessions/${sessionId}/messages`, {
       method: "POST",
       body: JSON.stringify({ content }),
       signal: controller.signal,
@@ -87,7 +87,7 @@ export async function getChatMessagesApi(
   let after = 0;
   while (true) {
     const params = new URLSearchParams({ limit: "200", after: String(after) });
-    const res = await request(`${getAiApiBase()}/chat/sessions/${sessionId}/messages?${params}`);
+    const res = await request(`${getApiBase()}/chat/sessions/${sessionId}/messages?${params}`);
     const page = await readJsonOrThrow<ChatHistoryMessageResponse[]>(res);
     messages.push(...page);
     if (page.length < 200) return messages;

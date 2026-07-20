@@ -12,7 +12,7 @@ export const springApi = createApi({
 
 export const aiApi = createApi({
   reducerPath: 'aiApi',
-  baseQuery: createApiBaseQuery(env.aiApiBaseUrl),
+  baseQuery: createApiBaseQuery(env.apiBaseUrl),
   tagTypes: ['Chat', 'Conversation'],
   endpoints: () => ({}),
 });

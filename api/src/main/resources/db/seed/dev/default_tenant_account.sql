@@ -10,6 +10,12 @@ INSERT INTO tenants (
     max_documents,
     max_messages,
     max_storage_mb,
+    max_team_members,
+    quota_anchor_at,
+    api_access_enabled,
+    webhooks_enabled,
+    advanced_analytics_enabled,
+    custom_branding_enabled,
     created_at,
     updated_at
 )
@@ -22,6 +28,12 @@ VALUES (
     150,
     5000,
     5120,
+    5,
+    NOW(),
+    TRUE,
+    TRUE,
+    TRUE,
+    TRUE,
     NOW(),
     NOW()
 )
@@ -33,6 +45,12 @@ SET
     max_documents = EXCLUDED.max_documents,
     max_messages = EXCLUDED.max_messages,
     max_storage_mb = EXCLUDED.max_storage_mb,
+    max_team_members = EXCLUDED.max_team_members,
+    quota_anchor_at = COALESCE(tenants.quota_anchor_at, EXCLUDED.quota_anchor_at),
+    api_access_enabled = EXCLUDED.api_access_enabled,
+    webhooks_enabled = EXCLUDED.webhooks_enabled,
+    advanced_analytics_enabled = EXCLUDED.advanced_analytics_enabled,
+    custom_branding_enabled = EXCLUDED.custom_branding_enabled,
     updated_at = NOW();
 
 INSERT INTO users (
@@ -236,4 +254,51 @@ SET
     primary_color = EXCLUDED.primary_color,
     position = EXCLUDED.position,
     is_active = EXCLUDED.is_active,
+    updated_at = NOW();
+
+INSERT INTO billing_subscriptions (
+    tenant_id,
+    plan_code,
+    status,
+    billing_interval,
+    catalog_version,
+    quota_anchor_at,
+    paid_through_at,
+    grace_ends_at,
+    entitlement_snapshot,
+    created_at,
+    updated_at
+)
+VALUES (
+    (SELECT id FROM tenants WHERE slug = 'cacanode-demo'),
+    'PRO',
+    'ACTIVE',
+    'MONTHLY',
+    '2026-07-15',
+    NOW(),
+    NOW() + INTERVAL '1 year',
+    NOW() + INTERVAL '1 year 3 days',
+    jsonb_build_object(
+        'maxMessages', 5000,
+        'maxDocuments', 150,
+        'maxTeamMembers', 5,
+        'maxStorageMb', 5120,
+        'apiAccess', TRUE,
+        'webhooks', TRUE,
+        'advancedAnalytics', TRUE,
+        'customBranding', TRUE
+    ),
+    NOW(),
+    NOW()
+)
+ON CONFLICT (tenant_id) DO UPDATE
+SET
+    plan_code = EXCLUDED.plan_code,
+    status = EXCLUDED.status,
+    billing_interval = EXCLUDED.billing_interval,
+    catalog_version = EXCLUDED.catalog_version,
+    paid_through_at = EXCLUDED.paid_through_at,
+    grace_ends_at = EXCLUDED.grace_ends_at,
+    cancel_at_period_end = FALSE,
+    entitlement_snapshot = EXCLUDED.entitlement_snapshot,
     updated_at = NOW();

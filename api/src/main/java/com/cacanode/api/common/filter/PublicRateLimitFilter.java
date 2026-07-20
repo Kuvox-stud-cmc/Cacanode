@@ -1,5 +1,6 @@
 package com.cacanode.api.common.filter;
 
+import com.cacanode.api.common.cache.CacheMetrics;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -35,6 +36,7 @@ public class PublicRateLimitFilter extends OncePerRequestFilter {
     );
 
     private final StringRedisTemplate redisTemplate;
+    private final CacheMetrics cacheMetrics;
 
     @Value("${app.rate-limit.enabled:true}")
     private boolean enabled;
@@ -54,6 +56,7 @@ public class PublicRateLimitFilter extends OncePerRequestFilter {
         return !(path.startsWith("/api/v1/auth/")
                 || path.startsWith("/api/auth/")
                 || path.startsWith("/api/v1/public/")
+                || path.startsWith("/api/v1/widget/chat/")
                 || path.startsWith("/api/v1/external/")
                 || path.equals("/api/chat/widget-config"));
     }
@@ -72,11 +75,13 @@ public class PublicRateLimitFilter extends OncePerRequestFilter {
 
         try {
             Long count = redisTemplate.execute(INCREMENT_SCRIPT, List.of(key), "120");
+            cacheMetrics.redisOperation("public-rate-limit", "increment", "success");
             if (count != null && count > requestsPerMinute) {
                 writeRateLimited(response, 60 - epochSeconds % 60);
                 return;
             }
         } catch (RuntimeException exception) {
+            cacheMetrics.redisOperation("public-rate-limit", "increment", "error");
             // Public authentication and widget availability must not depend on Redis uptime.
             log.warn("Public rate limiter unavailable; allowing request path={} reason={}",
                     request.getRequestURI(), exception.getClass().getSimpleName());
@@ -97,6 +102,12 @@ public class PublicRateLimitFilter extends OncePerRequestFilter {
         }
         if (path.startsWith("/api/v1/external/tickets")) {
             return "external-tickets";
+        }
+        if (path.startsWith("/api/v1/widget/chat/")) {
+            return "widget-chat";
+        }
+        if (path.startsWith("/api/v1/external/chat/")) {
+            return "external-chat";
         }
         return "public";
     }

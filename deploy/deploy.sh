@@ -38,11 +38,19 @@ reranker_enabled="${reranker_enabled:-true}"
 for required_name in \
   DEPLOY_DOMAIN CADDY_ACME_EMAIL ADMIN_WEB_URL CORS_ORIGINS \
   POSTGRES_PASSWORD RABBITMQ_PASSWORD TOKEN_KEY INTEGRATION_TOKEN_PEPPER \
-  WEBHOOK_ENCRYPTION_KEY GRAPH_INTERNAL_TOKEN INGESTION_INTERNAL_TOKEN \
+  WEBHOOK_ENCRYPTION_KEY GRAPH_INTERNAL_TOKEN GRPC_CERT_DIR \
   OPENAI_API_KEY FROM_EMAIL VERIFICATION_LINK LOGIN_2FA_LINK INVITATION_LINK; do
   required_value="$(env_value "${required_name}")"
   if [[ -z "${required_value}" || "${required_value}" == *replace-with* || "${required_value}" == *example.com* ]]; then
     echo "${required_name} is missing or still contains an example value" >&2
+    exit 1
+  fi
+done
+
+grpc_cert_dir="$(env_value GRPC_CERT_DIR)"
+for certificate_file in ca.crt spring-client.crt spring-client.key ai-server.crt ai-server.key; do
+  if [[ ! -r "${grpc_cert_dir}/${certificate_file}" ]]; then
+    echo "Missing readable gRPC certificate material: ${grpc_cert_dir}/${certificate_file}" >&2
     exit 1
   fi
 done

@@ -9,7 +9,7 @@ app:
     cookie-secure: ${COOKIE_SECURE:false}
     login-2fa-bypass-emails: ${LOGIN_2FA_BYPASS_EMAILS:admin@cacanode.local}
   seaweedfs:
-    s3-endpoint: ${SEAWEEDFS_S3_ENDPOINT:http://localhost:8333}
+    s3-endpoint: ${SEAWEEDFS_S3_ENDPOINT:http://localhost:18333}
     bucket: ${SEAWEEDFS_BUCKET:cacanode}
     access-key: ${SEAWEEDFS_ACCESS_KEY:}
     secret-key: ${SEAWEEDFS_SECRET_KEY:}
@@ -22,9 +22,16 @@ app:
     invitation-link: ${INVITATION_LINK:http://localhost:3000/accept-invitation}
   integrations:
     token-pepper: ${INTEGRATION_TOKEN_PEPPER:development-integration-token-pepper}
+    legacy-token-pepper: ${INTEGRATION_TOKEN_LEGACY_PEPPER:development-integration-token-pepper}
+    secret-encryption-key: ${INTEGRATION_SECRET_ENCRYPTION_KEY:development-integration-secret-encryption-key}
+    legacy-secret-encryption-key: ${INTEGRATION_SECRET_LEGACY_ENCRYPTION_KEY:development-integration-secret-encryption-key}
   ai:
-    base-url: ${AI_API_BASE_URL:http://localhost:8000}
-    ingestion-token: ${INGESTION_INTERNAL_TOKEN:development-ingestion-token}
+    grpc:
+      target: ${AI_GRPC_TARGET:localhost:50051}
+      plaintext: ${AI_GRPC_PLAINTEXT:true}
+      answer-deadline-seconds: ${AI_ANSWER_DEADLINE_SECONDS:100}
+      document-units-deadline-seconds: ${AI_DOCUMENT_UNITS_DEADLINE_SECONDS:10}
+      deletion-deadline-seconds: ${AI_DELETION_DEADLINE_SECONDS:15}
   webhooks:
     encryption-key: ${WEBHOOK_ENCRYPTION_KEY:development-webhook-encryption-key}
     allow-private-networks: true
@@ -65,10 +72,9 @@ spring:
           batch_size: 20
   data:
     redis:
-      url: ${REDIS_URL:redis://localhost:6379/0}
-      timeout: 2000ms
+      url: ${REDIS_URL:redis://localhost:16379/0}
   rabbitmq:
-    addresses: ${RABBITMQ_URL:amqp://rag_user:rag_password@localhost:5672/}
+    addresses: ${RABBITMQ_URL:amqp://rag_user:rag_password@localhost:15673/}
     publisher-confirm-type: correlated
     publisher-returns: true
   sendgrid:

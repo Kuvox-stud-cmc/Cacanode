@@ -2,12 +2,31 @@ import argparse
 import asyncio
 import signal
 
+import redis.asyncio as redis
+
+from app.core.cache import RedisCacheStore, TtlJitter
 from app.core.config import settings
+from app.ingestion.embedding import create_embedding_client
 from app.workers.manager import SUPPORTED_WORKERS, WorkerManager
 
 
 async def run(kind: str) -> None:
-    manager = WorkerManager(settings, kinds=(kind,))
+    redis_client = redis.from_url(
+        settings.REDIS_URL,
+        decode_responses=False,
+        socket_connect_timeout=settings.REDIS_CONNECT_TIMEOUT_SECONDS,
+        socket_timeout=settings.REDIS_OPERATION_TIMEOUT_SECONDS,
+    )
+    cache_store = RedisCacheStore(
+        redis_client,
+        enabled=settings.CACHE_ENABLED,
+        ttl_jitter=TtlJitter(settings.CACHE_TTL_JITTER_PERCENT),
+    )
+    manager = WorkerManager(
+        settings,
+        kinds=(kind,),
+        embedder=create_embedding_client(settings, cache_store),
+    )
     stopped = asyncio.Event()
     loop = asyncio.get_running_loop()
     for signum in (signal.SIGINT, signal.SIGTERM):
@@ -15,11 +34,12 @@ async def run(kind: str) -> None:
             loop.add_signal_handler(signum, stopped.set)
         except NotImplementedError:
             pass
-    await manager.start()
     try:
+        await manager.start()
         await stopped.wait()
     finally:
         await manager.stop()
+        await redis_client.aclose()
 
 
 def main() -> None:

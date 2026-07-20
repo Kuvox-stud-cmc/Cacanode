@@ -29,19 +29,27 @@ public class SeaweedFsDocumentStorage implements DocumentStorage {
     @Override
     public void store(String key, MultipartFile file) {
         try {
-            ensureBucketExists();
+            store(key, file.getBytes(), file.getContentType());
+        } catch (IOException e) {
+            throw new InternalServerErrorException("Unable to read uploaded document");
+        }
+    }
 
+    @Override
+    public void store(String key, byte[] content, String contentType) {
+        try {
+            ensureBucketExists();
             PutObjectRequest request = PutObjectRequest.builder()
                     .bucket(properties.bucket())
                     .key(key)
-                    .contentType(file.getContentType())
-                    .contentLength(file.getSize())
+                    .contentType(contentType)
+                    .contentLength((long) content.length)
                     .build();
-
-            seaweedFsS3Client.putObject(request, RequestBody.fromBytes(file.getBytes()));
-        } catch (IOException e) {
-            throw new InternalServerErrorException("Unable to read uploaded document");
+            seaweedFsS3Client.putObject(request, RequestBody.fromBytes(content));
         } catch (RuntimeException e) {
+            if (e instanceof InternalServerErrorException internal) {
+                throw internal;
+            }
             throw new InternalServerErrorException("Unable to store uploaded document", e);
         }
     }

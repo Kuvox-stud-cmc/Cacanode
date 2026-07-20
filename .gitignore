@@ -11,6 +11,7 @@ desktop.ini
 
 # ─── Logs ────────────────────────────────────────────────────────────────────
 *.log
+rag-chatbot-fastapi/artifacts/cache-baseline*.json
 
 # ─── Docker override (local only) ────────────────────────────────────────────
 docker-compose.override.yml

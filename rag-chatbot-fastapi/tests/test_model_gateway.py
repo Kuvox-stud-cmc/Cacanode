@@ -27,6 +27,15 @@ class FakeOllamaResponse:
         return {"message": {"role": "assistant", "content": "The answer is four."}}
 
 
+class UsageOllamaResponse(FakeOllamaResponse):
+    def json(self) -> dict[str, object]:
+        return {
+            "message": {"role": "assistant", "content": "The answer is four."},
+            "prompt_eval_count": 31,
+            "eval_count": 7,
+        }
+
+
 class FakeOllamaClient:
     last_url = ""
     last_json: dict[str, Any] = {}
@@ -53,9 +62,20 @@ class SlowOllamaClient(FakeOllamaClient):
         return FakeOllamaResponse()
 
 
+class UsageOllamaClient(FakeOllamaClient):
+    async def post(self, url: str, json: dict[str, object]) -> UsageOllamaResponse:
+        FakeOllamaClient.last_url = url
+        FakeOllamaClient.last_json = dict(json)
+        return UsageOllamaResponse()
+
+
 class FakeOpenAIResponse:
     content = "OpenAI answer."
     response_metadata: dict[str, str] = {}
+
+
+class UsageOpenAIResponse(FakeOpenAIResponse):
+    usage_metadata = {"input_tokens": 41, "output_tokens": 9}
 
 
 class EmptyOpenAIResponse:
@@ -79,6 +99,12 @@ class EmptyChatOpenAI(FakeChatOpenAI):
     async def ainvoke(self, messages: list[Any]) -> EmptyOpenAIResponse:
         FakeChatOpenAI.last_messages = messages
         return EmptyOpenAIResponse()
+
+
+class UsageChatOpenAI(FakeChatOpenAI):
+    async def ainvoke(self, messages: list[Any]) -> UsageOpenAIResponse:
+        FakeChatOpenAI.last_messages = messages
+        return UsageOpenAIResponse()
 
 
 class FailingChatOpenAI(FakeChatOpenAI):
@@ -155,6 +181,20 @@ async def test_ollama_preserves_composed_message_content(monkeypatch: pytest.Mon
 
 
 @pytest.mark.asyncio
+async def test_ollama_complete_with_usage_extracts_native_token_counts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("app.infrastructure.model_gateway.httpx.AsyncClient", UsageOllamaClient)
+    gateway = OllamaChatModel(settings())
+
+    completion = await gateway.complete_with_usage([{"role": "user", "content": "what is 2+2?"}])
+
+    assert completion.content == "The answer is four."
+    assert completion.input_tokens == 31
+    assert completion.output_tokens == 7
+
+
+@pytest.mark.asyncio
 async def test_openai_chat_model_passes_configured_client_options(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -186,6 +226,26 @@ async def test_openai_chat_model_passes_configured_client_options(
     assert len(FakeChatOpenAI.last_messages) == 2
     assert FakeChatOpenAI.last_messages[0].content == "answer tersely"
     assert FakeChatOpenAI.last_messages[1].content == "hello"
+
+
+@pytest.mark.asyncio
+async def test_openai_complete_with_usage_extracts_langchain_usage_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("app.infrastructure.model_gateway.ChatOpenAI", UsageChatOpenAI)
+    gateway = OpenAIChatModel(
+        settings(
+            LLM_PROVIDER="openai",
+            OPENAI_API_KEY="test-key",
+            OPENAI_MODEL="gpt-test",
+        )
+    )
+
+    completion = await gateway.complete_with_usage([{"role": "user", "content": "hello"}])
+
+    assert completion.content == "OpenAI answer."
+    assert completion.input_tokens == 41
+    assert completion.output_tokens == 9
 
 
 def test_openai_chat_model_omits_temperature_for_reasoning_models(
@@ -308,7 +368,10 @@ async def test_ollama_timeout_records_counter_and_raises_model_timeout(
 
     after = metric_value("cacanode_ai_chat_model_timeouts_total", labels)
     assert after == before + 1
-    assert metric_value(
-        "cacanode_ai_chat_model_seconds_count",
-        {"provider": "ollama", "model": "timeout-model", "outcome": "timeout"},
-    ) >= 1
+    assert (
+        metric_value(
+            "cacanode_ai_chat_model_seconds_count",
+            {"provider": "ollama", "model": "timeout-model", "outcome": "timeout"},
+        )
+        >= 1
+    )

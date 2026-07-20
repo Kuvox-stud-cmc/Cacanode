@@ -16,6 +16,7 @@ import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -29,16 +30,28 @@ import com.cacanode.api.document.enums.DocumentStatus;
 import com.cacanode.api.document.enums.DocumentType;
 import jakarta.validation.Valid;
 import com.cacanode.api.document.service.DocumentService;
+import com.cacanode.api.chat.ai.AiInferenceClient;
+import com.cacanode.api.chat.dto.ChatDtos;
 
 import jakarta.servlet.http.HttpServletRequest;
-import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Autowired;
 
 @RestController
 @RequestMapping("/api/v1/documents")
-@RequiredArgsConstructor
 public class DocumentController extends BaseController {
 
     private final DocumentService documentService;
+    private final AiInferenceClient inferenceClient;
+
+    @Autowired
+    public DocumentController(DocumentService documentService, AiInferenceClient inferenceClient) {
+        this.documentService = documentService;
+        this.inferenceClient = inferenceClient;
+    }
+
+    public DocumentController(DocumentService documentService) {
+        this(documentService, null);
+    }
 
     @GetMapping
     public List<DocumentListItemResponse> list(
@@ -108,6 +121,22 @@ public class DocumentController extends BaseController {
                 .contentLength(download.content().length)
                 .header(HttpHeaders.CONTENT_DISPOSITION, disposition.toString())
                 .body(download.content());
+    }
+
+    @GetMapping("/{documentId}/units")
+    public List<ChatDtos.DocumentUnitResponse> units(
+            @PathVariable UUID documentId,
+            @RequestHeader(value = "X-Request-ID", required = false) String requestId,
+            HttpServletRequest request
+    ) {
+        UUID tenantId = getTenantId(request);
+        var document = documentService.get(tenantId, documentId);
+        if (inferenceClient == null) {
+            throw new IllegalStateException("AI inference client is unavailable");
+        }
+        return inferenceClient.listDocumentUnits(
+                tenantId, document.knowledgeBaseId(), documentId,
+                requestId == null ? UUID.randomUUID().toString() : requestId);
     }
 
     @PatchMapping("/{documentId}/visibility")

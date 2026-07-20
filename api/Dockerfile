@@ -3,6 +3,7 @@ WORKDIR /workspace/api
 COPY api/.mvn .mvn
 COPY api/mvnw api/pom.xml ./
 RUN chmod +x mvnw && ./mvnw -B -DskipTests dependency:go-offline
+COPY proto ../proto
 COPY api/src src
 RUN ./mvnw -B -DskipTests clean package
 

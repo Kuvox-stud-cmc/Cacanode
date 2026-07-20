@@ -1,6 +1,7 @@
 package com.cacanode.api.tenant.dto;
 
 import com.cacanode.api.tenant.enums.WidgetPosition;
+import com.cacanode.api.tenant.enums.WidgetIconStyle;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
@@ -19,7 +20,8 @@ public final class WidgetConfigDtos {
             WidgetPosition position,
             boolean active,
             List<String> allowedOrigins,
-            Boolean hideCacanodeBranding
+            Boolean hideCacanodeBranding,
+            WidgetIconStyle iconStyle
     ) {
     }
 
@@ -32,7 +34,9 @@ public final class WidgetConfigDtos {
             boolean active,
             List<String> allowedOrigins,
             boolean hideCacanodeBranding,
-            boolean showCacanodeBranding
+            boolean showCacanodeBranding,
+            String iconUrl,
+            WidgetIconStyle iconStyle
     ) {
     }
 }

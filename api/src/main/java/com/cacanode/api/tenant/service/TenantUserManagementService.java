@@ -7,6 +7,10 @@ import com.cacanode.api.auth.repository.RefreshTokenRepository;
 import com.cacanode.api.auth.service.AuthService;
 import com.cacanode.api.auth.service.JwtService;
 import com.cacanode.api.common.enums.LogAction;
+import com.cacanode.api.common.cache.BusinessCache;
+import com.cacanode.api.common.cache.BusinessCacheInvalidationPublisher;
+import com.cacanode.api.common.cache.CacheKeyFactory;
+import com.cacanode.api.common.cache.VersionedJsonCache;
 import com.cacanode.api.common.event.AuditLogEvent;
 import com.cacanode.api.common.event.UserInvitedEvent;
 import com.cacanode.api.common.exception.custom.BadRequestException;
@@ -52,6 +56,12 @@ public class TenantUserManagementService {
     private final AuthService authService;
     private final ApplicationEventPublisher eventPublisher;
     private final TenantEntitlementService entitlementService;
+    @Autowired(required = false)
+    private VersionedJsonCache businessCache;
+    @Autowired(required = false)
+    private CacheKeyFactory cacheKeyFactory;
+    @Autowired(required = false)
+    private BusinessCacheInvalidationPublisher businessInvalidationPublisher;
 
     @Autowired
     public TenantUserManagementService(
@@ -89,14 +99,30 @@ public class TenantUserManagementService {
 
     @Transactional
     public DirectoryResponse getDirectory(UUID tenantId, UUID currentUserId) {
-        LocalDateTime now = LocalDateTime.now();
+        DirectoryResponse snapshot;
+        if (businessCache == null || cacheKeyFactory == null) {
+            snapshot = loadDirectorySnapshot(tenantId);
+        } else {
+            snapshot = businessCache.getOrLoad(
+                    BusinessCache.USER_DIRECTORY,
+                    cacheKeyFactory.build("user-directory", "tenant", tenantId.toString()),
+                    DirectoryResponse.class,
+                    () -> loadDirectorySnapshot(tenantId)
+            );
+        }
+        return decorateDirectory(snapshot, currentUserId, LocalDateTime.now());
+    }
+
+    private DirectoryResponse loadDirectorySnapshot(UUID tenantId) {
         List<Invitation> invitations = invitationRepository.findByTenant_IdOrderByCreatedAtDesc(tenantId);
+        LocalDateTime now = LocalDateTime.now();
         invitations.stream()
-                .filter(i -> i.getStatus() == InvitationStatus.PENDING && !i.getExpiresAt().isAfter(now))
-                .forEach(i -> i.setStatus(InvitationStatus.EXPIRED));
+                .filter(invitation -> invitation.getStatus() == InvitationStatus.PENDING
+                        && !invitation.getExpiresAt().isAfter(now))
+                .forEach(invitation -> invitation.setStatus(InvitationStatus.EXPIRED));
 
         List<MemberResponse> members = userRepository.findByTenant_IdOrderByFullNameAsc(tenantId).stream()
-                .map(user -> toMember(user, currentUserId))
+                .map(user -> toMember(user, null))
                 .toList();
         List<InvitationResponse> pending = invitations.stream()
                 .filter(i -> i.getStatus() == InvitationStatus.PENDING || i.getStatus() == InvitationStatus.EXPIRED)
@@ -140,6 +166,7 @@ public class TenantUserManagementService {
         publishInvitationEmail(invitation, token);
         audit(tenantId, actorId, LogAction.USER_INVITE, "invitation", invitation.getId(),
                 Map.of("email", email, "role", role.name()));
+        invalidateMembers(tenantId);
         return toInvitation(invitation);
     }
 
@@ -171,6 +198,7 @@ public class TenantUserManagementService {
         publishInvitationEmail(invitation, token);
         audit(tenantId, actorId, LogAction.USER_INVITATION_RESENT, "invitation", invitationId,
                 Map.of("email", invitation.getEmail()));
+        invalidateMembers(tenantId);
         return toInvitation(invitation);
     }
 
@@ -184,6 +212,7 @@ public class TenantUserManagementService {
         invitationRepository.save(invitation);
         audit(tenantId, actorId, LogAction.USER_INVITATION_CANCELLED, "invitation", invitationId,
                 Map.of("email", invitation.getEmail()));
+        invalidateMembers(tenantId);
     }
 
     @Transactional
@@ -201,6 +230,7 @@ public class TenantUserManagementService {
         userRepository.save(user);
         audit(tenantId, actorId, LogAction.USER_ROLE_CHANGED, "user", userId,
                 Map.of("from", previousRole.name(), "to", role.name()));
+        invalidateMembers(tenantId);
         return toMember(user, actorId);
     }
 
@@ -227,6 +257,7 @@ public class TenantUserManagementService {
         audit(tenantId, actorId,
                 status == UserStatus.ACTIVE ? LogAction.USER_REACTIVATED : LogAction.USER_DEACTIVATED,
                 "user", userId, Map.of("status", status.name()));
+        invalidateMembers(tenantId);
         return toMember(user, actorId);
     }
 
@@ -266,7 +297,32 @@ public class TenantUserManagementService {
 
         audit(invitation.getTenant().getId(), user.getId(), LogAction.USER_INVITATION_ACCEPTED,
                 "invitation", invitation.getId(), Map.of("email", email));
+        invalidateMembers(invitation.getTenant().getId());
         return authService.issueAuthTokens(toAuthDto(user), response, true);
+    }
+
+    private DirectoryResponse decorateDirectory(DirectoryResponse snapshot, UUID currentUserId, LocalDateTime now) {
+        List<MemberResponse> members = snapshot.members().stream()
+                .map(member -> new MemberResponse(member.id(), member.email(), member.fullName(), member.role(),
+                        member.status(), member.joinedAt(), member.lastLoginAt(), member.id().equals(currentUserId)))
+                .toList();
+        List<InvitationResponse> invitations = snapshot.invitations().stream()
+                .map(invitation -> invitation.status() == InvitationStatus.PENDING
+                        && !invitation.expiresAt().isAfter(now)
+                        ? new InvitationResponse(invitation.id(), invitation.email(), invitation.role(),
+                        InvitationStatus.EXPIRED, invitation.invitedAt(), invitation.expiresAt(),
+                        invitation.lastSentAt())
+                        : invitation)
+                .filter(invitation -> invitation.status() == InvitationStatus.PENDING
+                        || invitation.status() == InvitationStatus.EXPIRED)
+                .toList();
+        return new DirectoryResponse(members, invitations);
+    }
+
+    private void invalidateMembers(UUID tenantId) {
+        if (businessInvalidationPublisher != null) {
+            businessInvalidationPublisher.memberMutation(tenantId);
+        }
     }
 
     private void validateAcceptable(Invitation invitation) {
@@ -327,7 +383,8 @@ public class TenantUserManagementService {
 
     private MemberResponse toMember(User user, UUID currentUserId) {
         return new MemberResponse(user.getId(), user.getEmail(), user.getFullName(), user.getRole(),
-                user.getStatus(), user.getCreatedAt(), user.getLastLoginAt(), user.getId().equals(currentUserId));
+                user.getStatus(), user.getCreatedAt(), user.getLastLoginAt(),
+                currentUserId != null && user.getId().equals(currentUserId));
     }
 
     private InvitationResponse toInvitation(Invitation invitation) {

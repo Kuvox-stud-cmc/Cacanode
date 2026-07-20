@@ -2,7 +2,6 @@ import { parsePublicEnv } from '@/constants/env';
 
 const validEnv = {
   EXPO_PUBLIC_API_BASE_URL: 'http://localhost:8080/api/v1/',
-  EXPO_PUBLIC_AI_API_BASE_URL: 'http://localhost:8000/api/v1///',
   EXPO_PUBLIC_WEB_APP_URL: 'http://localhost:3000/',
 };
 
@@ -10,7 +9,6 @@ describe('parsePublicEnv', () => {
   it('validates and removes trailing slashes from public URLs', () => {
     expect(parsePublicEnv(validEnv, { allowInsecureHttp: true })).toEqual({
       apiBaseUrl: 'http://localhost:8080/api/v1',
-      aiApiBaseUrl: 'http://localhost:8000/api/v1',
       webAppUrl: 'http://localhost:3000',
     });
   });
@@ -20,13 +18,12 @@ describe('parsePublicEnv', () => {
       parsePublicEnv(
         {
           EXPO_PUBLIC_API_BASE_URL: undefined,
-          EXPO_PUBLIC_AI_API_BASE_URL: undefined,
           EXPO_PUBLIC_WEB_APP_URL: undefined,
         },
         { allowInsecureHttp: true },
       ),
     ).toThrow(
-      'Invalid public mobile environment configuration: EXPO_PUBLIC_API_BASE_URL, EXPO_PUBLIC_AI_API_BASE_URL, EXPO_PUBLIC_WEB_APP_URL',
+      'Invalid public mobile environment configuration: EXPO_PUBLIC_API_BASE_URL, EXPO_PUBLIC_WEB_APP_URL',
     );
   });
 

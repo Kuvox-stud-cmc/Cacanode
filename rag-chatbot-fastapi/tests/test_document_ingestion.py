@@ -81,8 +81,7 @@ def minimal_pdf(text: str | None) -> bytes:
     for offset in offsets:
         pdf += f"{offset:010d} 00000 n \n".encode("ascii")
     pdf += (
-        f"trailer\n<< /Size {len(objects) + 1} /Root 1 0 R >>\n"
-        f"startxref\n{xref}\n%%EOF\n"
+        f"trailer\n<< /Size {len(objects) + 1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n"
     ).encode("ascii")
     return pdf
 
@@ -333,7 +332,8 @@ async def test_qdrant_adapter_explains_legacy_unnamed_vector_collection() -> Non
 
     client.get_collection = legacy_collection  # type: ignore[method-assign]
     store = QdrantChunkStore(
-        Settings(QDRANT_COLLECTION="knowledge_units_v1"), client=client  # type: ignore[arg-type]
+        Settings(QDRANT_COLLECTION="knowledge_units_v1"),
+        client=client,  # type: ignore[arg-type]
     )
 
     with pytest.raises(PermanentIngestionError, match="legacy unnamed-vector schema"):

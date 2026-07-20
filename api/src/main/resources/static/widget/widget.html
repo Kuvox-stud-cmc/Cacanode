@@ -10,9 +10,15 @@
 <main id="widget" class="widget" data-open="false">
     <section class="panel" aria-label="Support conversation">
         <header class="header">
-            <div>
+            <div class="header-identity">
+                <span class="header-icon-shell" aria-hidden="true">
+                    <img id="header-icon" class="widget-icon" alt="" hidden>
+                    <span id="header-icon-fallback" class="icon-fallback" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5.75h14a1.75 1.75 0 0 1 1.75 1.75v7A1.75 1.75 0 0 1 19 16.25h-7.2L7.2 19.7a.75.75 0 0 1-1.2-.6v-2.85H5a1.75 1.75 0 0 1-1.75-1.75v-7A1.75 1.75 0 0 1 5 5.75Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M7.5 10.75h9" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></span>
+                </span>
+                <span class="header-copy">
                 <strong id="display-name">Assistant</strong>
                 <span>Online</span>
+                </span>
             </div>
             <button id="close" class="icon-button" type="button" aria-label="Close chat">&#10005;</button>
         </header>
@@ -23,7 +29,10 @@
         </form>
         <div id="branding" class="branding" hidden>Powered by CacaNode</div>
     </section>
-    <button id="launcher" class="launcher" type="button" aria-label="Open support chat">&#9993;</button>
+    <button id="launcher" class="launcher" type="button" aria-label="Open support chat">
+        <img id="launcher-icon" class="widget-icon" alt="" hidden>
+        <span id="launcher-icon-fallback" class="icon-fallback" aria-hidden="true" hidden><svg viewBox="0 0 24 24"><path d="M5 5.75h14a1.75 1.75 0 0 1 1.75 1.75v7A1.75 1.75 0 0 1 19 16.25h-7.2L7.2 19.7a.75.75 0 0 1-1.2-.6v-2.85H5a1.75 1.75 0 0 1-1.75-1.75v-7A1.75 1.75 0 0 1 5 5.75Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M7.5 10.75h9" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></span>
+    </button>
 </main>
 
 <dialog id="ticket-dialog">
@@ -47,6 +56,8 @@
   var sessionId = null;
   var parentOrigin = null;
   var currentDraft = null;
+  var iconObjectUrl = null;
+  var previewChatApiBaseUrl = null;
   var widget = document.getElementById("widget");
   var messages = document.getElementById("messages");
   var composer = document.getElementById("composer");
@@ -58,14 +69,75 @@
     options = options || {};
     options.headers = Object.assign({"Content-Type": "application/json", "Authorization": "Bearer " + token}, options.headers || {});
     if (parentOrigin) options.headers["X-Parent-Origin"] = parentOrigin;
-    return fetch(path, options).then(async function (response) {
+    var url = path;
+    if (previewChatApiBaseUrl && path.startsWith("/api/v1/widget/chat/")) {
+      url = previewChatApiBaseUrl.replace(/\/$/, "") + path.slice("/api/v1".length);
+    }
+    return fetch(url, options).then(async function (response) {
       var body = response.status === 204 ? null : await response.json().catch(function () { return null; });
       if (!response.ok) {
-        var message = body && body.error && body.error.message || body && body.message || "Request failed";
+        var message = body && body.error && body.error.message || body && body.message
+          || body && body.detail || "Request failed";
         throw new Error(message);
       }
       return body;
     });
+  }
+
+  function apiBlob(path) {
+    var headers = {"Authorization": "Bearer " + token};
+    if (parentOrigin) headers["X-Parent-Origin"] = parentOrigin;
+    return fetch(path, {headers: headers}).then(async function (response) {
+      if (!response.ok) throw new Error("Unable to load widget icon");
+      return response.blob();
+    });
+  }
+
+  function setIconFallbackVisible(visible) {
+    ["launcher-icon-fallback", "header-icon-fallback"].forEach(function (id) {
+      var fallback = document.getElementById(id);
+      fallback.hidden = !visible;
+      fallback.style.display = visible ? "" : "none";
+    });
+  }
+
+  function resetIcon(showFallback) {
+    ["launcher-icon", "header-icon"].forEach(function (id) {
+      var image = document.getElementById(id);
+      image.removeAttribute("src");
+      image.hidden = true;
+    });
+    setIconFallbackVisible(showFallback);
+    if (iconObjectUrl) URL.revokeObjectURL(iconObjectUrl);
+    iconObjectUrl = null;
+  }
+
+  async function loadIcon(path) {
+    if (!path) return;
+    setIconFallbackVisible(false);
+    var objectUrl = null;
+    try {
+      var blob = path.startsWith("data:")
+        ? await fetch(path).then(function (response) { return response.blob(); })
+        : await apiBlob(path);
+      objectUrl = URL.createObjectURL(blob);
+      var images = [document.getElementById("launcher-icon"), document.getElementById("header-icon")];
+      await Promise.all(images.map(function (image) {
+        return new Promise(function (resolve, reject) {
+          image.onload = resolve;
+          image.onerror = reject;
+          image.src = objectUrl;
+        });
+      }));
+      if (iconObjectUrl) URL.revokeObjectURL(iconObjectUrl);
+      iconObjectUrl = objectUrl;
+      objectUrl = null;
+      images.forEach(function (image) { image.hidden = false; });
+      setIconFallbackVisible(false);
+    } catch (error) {
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      resetIcon(false);
+    }
   }
 
   function addMessage(role, content) {
@@ -82,15 +154,23 @@
     if (open) input.focus();
   }
 
-  async function initialize(incomingToken, origin) {
+  function applyConfig(nextConfig) {
+    config = nextConfig;
+    previewChatApiBaseUrl = config.previewChatApiBaseUrl || null;
+    document.getElementById("display-name").textContent = config.displayName;
+    document.documentElement.style.setProperty("--primary", config.primaryColor);
+    document.getElementById("branding").hidden = !config.showCacanodeBranding;
+    widget.dataset.iconStyle = config.iconStyle || "STANDARD";
+    if (config.iconUrl) void loadIcon(config.iconUrl);
+    else resetIcon(!config.hasCustomIcon);
+    parent.postMessage({source: "cacanode-widget", type: "position", position: config.position}, parentOrigin);
+  }
+
+  async function initialize(incomingToken, origin, previewConfig) {
     token = incomingToken;
     parentOrigin = origin;
     try {
-      config = await api("/api/v1/public/widget/config", {headers: {"X-Parent-Origin": parentOrigin}});
-      document.getElementById("display-name").textContent = config.displayName;
-      document.documentElement.style.setProperty("--primary", config.primaryColor);
-      document.getElementById("branding").hidden = !config.showCacanodeBranding;
-      parent.postMessage({source: "cacanode-widget", type: "position", position: config.position}, parentOrigin);
+      applyConfig(previewConfig || await api("/api/v1/public/widget/config", {headers: {"X-Parent-Origin": parentOrigin}}));
       addMessage("assistant", config.welcomeMessage);
       var visitorKey = "cacanode-visitor:" + parentOrigin;
       var visitorId = localStorage.getItem(visitorKey);
@@ -111,10 +191,15 @@
   }
 
   window.addEventListener("message", function (event) {
-    if (event.source !== parent || !event.data || event.data.source !== "cacanode-host" || event.data.type !== "init") return;
-    if (token) return;
-    initialize(event.data.token, event.origin);
+    if (event.source !== parent || !event.data || event.data.source !== "cacanode-host") return;
+    if (event.data.type === "preview-config" && token && event.data.config) {
+      applyConfig(event.data.config);
+      return;
+    }
+    if (event.data.type !== "init" || token) return;
+    initialize(event.data.token, event.origin, event.data.previewConfig);
   });
+  window.addEventListener("unload", function () { resetIcon(false); });
 
   document.getElementById("launcher").addEventListener("click", function () { setOpen(true); });
   document.getElementById("close").addEventListener("click", function () { setOpen(false); });

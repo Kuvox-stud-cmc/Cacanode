@@ -3,12 +3,14 @@ package com.cacanode.api.tenant.service;
 import com.cacanode.api.common.exception.custom.BadRequestException;
 import com.cacanode.api.common.exception.custom.UnauthorizedException;
 import com.cacanode.api.tenant.dto.IntegrationTokenDtos;
+import com.cacanode.api.tenant.cache.IntegrationTokenCacheInvalidationPublisher;
 import com.cacanode.api.tenant.model.Chatbot;
 import com.cacanode.api.tenant.model.IntegrationToken;
 import com.cacanode.api.tenant.model.KnowledgeBase;
 import com.cacanode.api.tenant.model.Tenant;
 import com.cacanode.api.tenant.repository.ChatbotRepository;
 import com.cacanode.api.tenant.repository.IntegrationTokenRepository;
+import com.cacanode.api.tenant.repository.WidgetConfigRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -41,6 +43,7 @@ class IntegrationTokenServiceTest {
         chatbotRepository = mock(ChatbotRepository.class);
         service = new IntegrationTokenService(repository, chatbotRepository);
         ReflectionTestUtils.setField(service, "pepper", "test-pepper");
+        ReflectionTestUtils.setField(service, "legacyPepper", "");
 
         tenantId = UUID.randomUUID();
         Tenant tenant = new Tenant();
@@ -102,5 +105,63 @@ class IntegrationTokenServiceTest {
                 "Bearer " + secret,
                 IntegrationTokenService.API_SCOPE
         ));
+    }
+
+    @Test
+    void revokeAndRotatePublishOnlyTheOldExactHash() {
+        IntegrationTokenCacheInvalidationPublisher publisher =
+                mock(IntegrationTokenCacheInvalidationPublisher.class);
+        service = new IntegrationTokenService(repository, chatbotRepository, null, publisher);
+        ReflectionTestUtils.setField(service, "pepper", "test-pepper");
+        ReflectionTestUtils.setField(service, "legacyPepper", "");
+        UUID tokenId = UUID.randomUUID();
+        IntegrationToken token = new IntegrationToken();
+        token.setTokenHash("old-hash");
+        token.setName("Token");
+        token.setScopes(List.of(IntegrationTokenService.WIDGET_SCOPE));
+        token.setTenant(chatbot.getTenant());
+        token.setChatbot(chatbot);
+        when(repository.findByIdAndTenant_Id(tokenId, tenantId)).thenReturn(Optional.of(token));
+
+        service.revoke(tenantId, tokenId);
+        service.rotate(tenantId, tokenId);
+
+        verify(publisher, org.mockito.Mockito.times(2)).publishTokenHash("old-hash");
+    }
+
+    @Test
+    void managedWidgetTokenCannotBeRevokedOrRotatedFromGenericTokenApi() {
+        WidgetConfigRepository widgetConfigRepository = mock(WidgetConfigRepository.class);
+        ReflectionTestUtils.setField(service, "widgetConfigRepository", widgetConfigRepository);
+        UUID tokenId = UUID.randomUUID();
+        when(widgetConfigRepository.existsByManagedWidgetToken_IdAndTenant_Id(tokenId, tenantId))
+                .thenReturn(true);
+
+        assertThrows(BadRequestException.class, () -> service.revoke(tenantId, tokenId));
+        assertThrows(BadRequestException.class, () -> service.rotate(tenantId, tokenId));
+    }
+
+    @Test
+    void authenticatesLegacyPepperAndMigratesHashWithoutRotatingSecret() {
+        String secret = "ccn_it_legacy_widget";
+        IntegrationTokenService legacyService = new IntegrationTokenService(repository, chatbotRepository);
+        ReflectionTestUtils.setField(legacyService, "pepper", "legacy-pepper");
+        ReflectionTestUtils.setField(service, "legacyPepper", "legacy-pepper");
+
+        IntegrationToken token = new IntegrationToken();
+        token.setId(UUID.randomUUID());
+        token.setTenant(chatbot.getTenant());
+        token.setChatbot(chatbot);
+        token.setScopes(List.of(IntegrationTokenService.WIDGET_SCOPE));
+        token.setTokenHash(legacyService.hash(secret));
+        when(repository.findByTokenHash(service.hash(secret))).thenReturn(Optional.empty());
+        when(repository.findByTokenHash(legacyService.hash(secret))).thenReturn(Optional.of(token));
+        when(repository.save(token)).thenReturn(token);
+
+        var principal = service.authenticateForAnyChatScope("Bearer " + secret);
+
+        assertTrue(principal.tokenId().equals(token.getId()));
+        assertTrue(token.getTokenHash().equals(service.hash(secret)));
+        verify(repository).save(token);
     }
 }

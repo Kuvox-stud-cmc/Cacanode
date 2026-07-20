@@ -1,37 +1,16 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field, replace
-from datetime import UTC, datetime, timedelta
-import calendar
-import math
+from dataclasses import dataclass, field, replace
+from datetime import UTC, datetime
 from typing import Any, Protocol
 from uuid import uuid4
 
-from app.rag.errors import (
-    ChatQuotaExceededError,
-    ChatSessionStoreUnavailableError,
-    ChatWorkspaceNotFoundError,
-)
 from app.rag.models import AssistantMessage, ChatMessage, ChatSession, Citation
-from app.rag.prompts import DEFAULT_CUSTOMER_ANSWER_PROMPT
+from app.rag.prompts import default_customer_answer_prompt
 
 
 class ChatSessionStore(Protocol):
-    def create(
-        self,
-        *,
-        tenant_id: str,
-        user_id: str | None,
-        chatbot_id: str,
-        knowledge_base_id: str,
-        locale: str,
-        channel: str = "EMPLOYEE_PLAYGROUND",
-        external_user_id: str | None = None,
-        customer_name: str | None = None,
-        customer_email: str | None = None,
-        customer_metadata: dict[str, Any] | None = None,
-        integration_token_id: str | None = None,
-    ) -> ChatSession: ...
+    def create(self, **kwargs: Any) -> ChatSession: ...
 
     def get_for_tenant(self, session_id: str, tenant_id: str) -> ChatSession | None: ...
 
@@ -48,19 +27,17 @@ class ChatSessionStore(Protocol):
         after: int | None = None,
     ) -> list[ChatMessage]: ...
 
-    def close_for_tenant(self, session_id: str, tenant_id: str) -> bool: ...
-
     def consume_message_quota(self, tenant_id: str) -> None: ...
-
-    def list_playground_sessions(
-        self, *, tenant_id: str, user_id: str, limit: int, offset: int
-    ) -> list[dict[str, Any]]: ...
-
-    def hide_playground_session(self, *, session_id: str, tenant_id: str, user_id: str) -> bool: ...
 
     def customer_visible_document_ids(
         self, *, tenant_id: str, knowledge_base_id: str
     ) -> list[str]: ...
+
+    def close_for_tenant(self, session_id: str, tenant_id: str) -> bool: ...
+
+    def list_playground_sessions(self, **kwargs: Any) -> list[dict[str, Any]]: ...
+
+    def hide_playground_session(self, **kwargs: Any) -> bool: ...
 
 
 @dataclass(slots=True)
@@ -78,48 +55,42 @@ class StoredSession:
 
 
 class InMemoryChatSessionStore:
+    """Test-only session store; production generation uses GenerationChatSessionStore."""
+
     def __init__(self) -> None:
         self._sessions: dict[str, StoredSession] = {}
         self._hidden_sessions: set[str] = set()
         self._customer_answer_prompts: dict[str, str] = {}
+        self._tenant_names: dict[str, str] = {}
         self.customer_document_ids: list[str] = []
 
     def set_customer_answer_prompt(self, tenant_id: str, prompt: str) -> None:
         self._customer_answer_prompts[tenant_id] = prompt
 
-    def create(
-        self,
-        *,
-        tenant_id: str,
-        user_id: str | None,
-        chatbot_id: str,
-        knowledge_base_id: str,
-        locale: str,
-        channel: str = "EMPLOYEE_PLAYGROUND",
-        external_user_id: str | None = None,
-        customer_name: str | None = None,
-        customer_email: str | None = None,
-        customer_metadata: dict[str, Any] | None = None,
-        integration_token_id: str | None = None,
-    ) -> ChatSession:
-        del customer_metadata
+    def set_tenant_name(self, tenant_id: str, tenant_name: str) -> None:
+        self._tenant_names[tenant_id] = tenant_name
+
+    def create(self, **kwargs: Any) -> ChatSession:
+        tenant_id = str(kwargs["tenant_id"])
+        tenant_name = self._tenant_names.get(tenant_id, tenant_id)
         session = ChatSession(
             id=str(uuid4()),
             tenant_id=tenant_id,
-            user_id=user_id,
-            chatbot_id=chatbot_id,
-            knowledge_base_id=knowledge_base_id,
-            locale=locale,
-            channel=channel,
-            external_user_id=external_user_id,
-            customer_name=customer_name,
-            customer_email=customer_email,
-            integration_token_id=integration_token_id,
+            user_id=kwargs.get("user_id"),
+            chatbot_id=str(kwargs["chatbot_id"]),
+            knowledge_base_id=str(kwargs["knowledge_base_id"]),
+            locale=str(kwargs["locale"]),
+            channel=str(kwargs.get("channel", "EMPLOYEE_PLAYGROUND")),
+            external_user_id=kwargs.get("external_user_id"),
+            customer_name=kwargs.get("customer_name"),
+            customer_email=kwargs.get("customer_email"),
+            integration_token_id=kwargs.get("integration_token_id"),
             customer_answer_prompt=self._customer_answer_prompts.get(
-                tenant_id, DEFAULT_CUSTOMER_ANSWER_PROMPT
+                tenant_id, default_customer_answer_prompt(tenant_name)
             ),
+            tenant_name=tenant_name,
         )
-        self._sessions[session.id] = StoredSession(session=session)
+        self._sessions[session.id] = StoredSession(session)
         return session
 
     def get_for_tenant(self, session_id: str, tenant_id: str) -> ChatSession | None:
@@ -132,22 +103,18 @@ class InMemoryChatSessionStore:
             return None
         return replace(
             stored.session,
+            tenant_name=self._tenant_names.get(tenant_id, stored.session.tenant_name),
             customer_answer_prompt=self._customer_answer_prompts.get(
-                tenant_id, DEFAULT_CUSTOMER_ANSWER_PROMPT
+                tenant_id, stored.session.customer_answer_prompt
             ),
         )
 
     def add_user_message(self, session_id: str, content: str) -> None:
-        self._sessions[session_id].messages.append(StoredMessage(role="user", content=content))
+        self._sessions[session_id].messages.append(StoredMessage("user", content))
 
     def add_assistant_message(self, session_id: str, message: AssistantMessage) -> None:
         self._sessions[session_id].messages.append(
-            StoredMessage(
-                role=message.role,
-                content=message.content,
-                citations=message.citations,
-                action=message.action,
-            )
+            StoredMessage(message.role, message.content, message.citations, message.action)
         )
 
     def list_messages(
@@ -159,14 +126,8 @@ class InMemoryChatSessionStore:
         after: int | None = None,
     ) -> list[ChatMessage]:
         stored = self._sessions.get(session_id)
-        if (
-            stored is None
-            or stored.session.tenant_id != tenant_id
-            or session_id in self._hidden_sessions
-        ):
+        if stored is None or stored.session.tenant_id != tenant_id:
             return []
-
-        start = after or 0
         return [
             ChatMessage(
                 role=item.role,
@@ -176,8 +137,17 @@ class InMemoryChatSessionStore:
                 action=item.action,
             )
             for index, item in enumerate(stored.messages, start=1)
-            if index > start
+            if index > (after or 0)
         ][:limit]
+
+    def consume_message_quota(self, tenant_id: str) -> None:
+        del tenant_id
+
+    def customer_visible_document_ids(
+        self, *, tenant_id: str, knowledge_base_id: str
+    ) -> list[str]:
+        del tenant_id, knowledge_base_id
+        return list(self.customer_document_ids)
 
     def close_for_tenant(self, session_id: str, tenant_id: str) -> bool:
         stored = self._sessions.get(session_id)
@@ -186,191 +156,66 @@ class InMemoryChatSessionStore:
         del self._sessions[session_id]
         return True
 
-    def consume_message_quota(self, tenant_id: str) -> None:
-        del tenant_id
-
-    def list_playground_sessions(
-        self, *, tenant_id: str, user_id: str, limit: int, offset: int
-    ) -> list[dict[str, Any]]:
+    def list_playground_sessions(self, **kwargs: Any) -> list[dict[str, Any]]:
+        tenant_id = str(kwargs["tenant_id"])
+        user_id = str(kwargs["user_id"])
         rows = []
         for stored in self._sessions.values():
             session = stored.session
-            if session.id in self._hidden_sessions:
-                continue
             if (
-                session.tenant_id != tenant_id
-                or session.user_id != user_id
-                or session.channel != "EMPLOYEE_PLAYGROUND"
+                session.tenant_id == tenant_id
+                and session.user_id == user_id
+                and session.channel == "EMPLOYEE_PLAYGROUND"
+                and session.id not in self._hidden_sessions
             ):
-                continue
-            first = next(
-                (
-                    item.content.strip()
-                    for item in stored.messages
-                    if item.role == "user" and item.content.strip()
-                ),
-                "",
-            )
-            rows.append({
-                "id": session.id,
-                "title": first[:60] or datetime.now(UTC).strftime("%b %d, %Y"),
-                "message_count": len(stored.messages),
-                "status": "OPEN",
-                "created_at": datetime.now(UTC),
-                "last_activity_at": datetime.now(UTC),
-            })
-        return rows[offset:offset + min(max(limit, 1), 100)]
+                first = next(
+                    (item.content for item in stored.messages if item.role == "user"), ""
+                )
+                rows.append(
+                    {
+                        "id": session.id,
+                        "title": first[:60] or datetime.now(UTC).date().isoformat(),
+                        "message_count": len(stored.messages),
+                        "status": "OPEN",
+                        "created_at": datetime.now(UTC),
+                        "last_activity_at": datetime.now(UTC),
+                    }
+                )
+        offset = int(kwargs.get("offset", 0))
+        limit = int(kwargs.get("limit", 50))
+        return rows[offset : offset + limit]
 
-    def hide_playground_session(self, *, session_id: str, tenant_id: str, user_id: str) -> bool:
+    def hide_playground_session(self, **kwargs: Any) -> bool:
+        session_id = str(kwargs["session_id"])
         stored = self._sessions.get(session_id)
         if (
             stored is None
-            or stored.session.tenant_id != tenant_id
-            or stored.session.user_id != user_id
+            or stored.session.tenant_id != str(kwargs["tenant_id"])
+            or stored.session.user_id != str(kwargs["user_id"])
         ):
             return False
         self._hidden_sessions.add(session_id)
         return True
 
-    def customer_visible_document_ids(self, *, tenant_id: str, knowledge_base_id: str) -> list[str]:
-        del tenant_id, knowledge_base_id
-        return list(self.customer_document_ids)
 
+@dataclass(slots=True)
+class GenerationChatSessionStore:
+    """Generation-scoped adapter over context supplied authoritatively by Spring."""
 
-class PostgresChatSessionStore:
-    def __init__(self, postgres_url: str) -> None:
-        try:
-            import psycopg
-            from psycopg.rows import dict_row
-            from psycopg.types.json import Jsonb
-        except ImportError as exc:  # pragma: no cover - depends on production extras.
-            raise RuntimeError(
-                "psycopg is required for Postgres chat sessions. Install project dependencies."
-            ) from exc
-
-        self._postgres_url = postgres_url
-        self._psycopg = psycopg
-        self._dict_row = dict_row
-        self._jsonb = Jsonb
-
-    def create(
-        self,
-        *,
-        tenant_id: str,
-        user_id: str | None,
-        chatbot_id: str,
-        knowledge_base_id: str,
-        locale: str,
-        channel: str = "EMPLOYEE_PLAYGROUND",
-        external_user_id: str | None = None,
-        customer_name: str | None = None,
-        customer_email: str | None = None,
-        customer_metadata: dict[str, Any] | None = None,
-        integration_token_id: str | None = None,
-    ) -> ChatSession:
-        session_id = str(uuid4())
-        with self._connect() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    INSERT INTO chat_sessions (
-                        id, tenant_id, user_id, chatbot_id, knowledge_base_id, locale, status,
-                        channel, external_user_id, customer_name, customer_email,
-                        customer_metadata, integration_token_id, last_activity_at
-                    )
-                    SELECT %s, %s, %s, c.id, kb.id, %s, 'OPEN', %s, %s, %s, %s, %s, %s, NOW()
-                    FROM chatbots c
-                    JOIN knowledge_bases kb
-                      ON kb.id = %s
-                     AND kb.tenant_id = %s
-                     AND kb.status = 'ACTIVE'
-                    WHERE c.id = %s
-                      AND c.tenant_id = %s
-                      AND c.knowledge_base_id = kb.id
-                      AND c.status = 'ACTIVE'
-                    """,
-                    (
-                        session_id,
-                        tenant_id,
-                        user_id,
-                        locale,
-                        channel,
-                        external_user_id,
-                        customer_name,
-                        customer_email,
-                        self._jsonb(customer_metadata or {}),
-                        integration_token_id,
-                        knowledge_base_id,
-                        tenant_id,
-                        chatbot_id,
-                        tenant_id,
-                    ),
-                )
-                inserted = cur.rowcount
-                if inserted and channel != "EMPLOYEE_PLAYGROUND":
-                    self._insert_outbox_event(
-                        cur,
-                        tenant_id=tenant_id,
-                        event_type="conversation.started",
-                        aggregate_id=session_id,
-                        payload={
-                            "conversationId": session_id,
-                            "chatbotId": chatbot_id,
-                            "channel": channel,
-                            "externalUserId": external_user_id,
-                        },
-                    )
-            conn.commit()
-        if inserted == 0:
-            raise ChatWorkspaceNotFoundError("Chat workspace was not found")
-        return ChatSession(
-            id=session_id,
-            tenant_id=tenant_id,
-            user_id=user_id,
-            chatbot_id=chatbot_id,
-            knowledge_base_id=knowledge_base_id,
-            locale=locale,
-            channel=channel,
-            external_user_id=external_user_id,
-            customer_name=customer_name,
-            customer_email=customer_email,
-            integration_token_id=integration_token_id,
-        )
+    session: ChatSession
+    prior_messages: list[ChatMessage]
+    visible_document_ids: list[str]
 
     def get_for_tenant(self, session_id: str, tenant_id: str) -> ChatSession | None:
-        with self._connect() as conn:
-            with conn.cursor(row_factory=self._dict_row) as cur:
-                cur.execute(
-                    """
-                    SELECT s.id, s.tenant_id, s.user_id, s.chatbot_id,
-                           s.knowledge_base_id, s.locale, s.channel, s.external_user_id,
-                           s.customer_name, s.customer_email, s.integration_token_id,
-                           t.customer_answer_prompt
-                    FROM chat_sessions s
-                    JOIN tenants t ON t.id = s.tenant_id
-                    WHERE s.id = %s
-                      AND s.tenant_id = %s
-                      AND s.status = 'OPEN'
-                      AND s.hidden_at IS NULL
-                    """,
-                    (session_id, tenant_id),
-                )
-                row = cur.fetchone()
-        if row is None:
+        if self.session.id != session_id or self.session.tenant_id != tenant_id:
             return None
-        return self._session_from_row(row)
+        return self.session
 
     def add_user_message(self, session_id: str, content: str) -> None:
-        self._insert_message(session_id=session_id, role="user", content=content, citations=[])
+        del session_id, content
 
     def add_assistant_message(self, session_id: str, message: AssistantMessage) -> None:
-        self._insert_message(
-            session_id=session_id,
-            role=message.role,
-            content=message.content,
-            citations=[asdict(citation) for citation in message.citations],
-            action=message.action,
-        )
+        del session_id, message
 
     def list_messages(
         self,
@@ -380,470 +225,36 @@ class PostgresChatSessionStore:
         limit: int = 50,
         after: int | None = None,
     ) -> list[ChatMessage]:
-        with self._connect() as conn:
-            with conn.cursor(row_factory=self._dict_row) as cur:
-                cur.execute(
-                    """
-                    SELECT 1
-                    FROM chat_sessions
-                    WHERE id = %s
-                      AND tenant_id = %s
-                      AND hidden_at IS NULL
-                    """,
-                    (session_id, tenant_id),
-                )
-                if cur.fetchone() is None:
-                    return []
-
-                cur.execute(
-                    """
-                    SELECT role, content, citations, sequence_number, action
-                    FROM chat_messages
-                    WHERE session_id = %s
-                      AND sequence_number > %s
-                    ORDER BY sequence_number ASC
-                    LIMIT %s
-                    """,
-                    (session_id, after or 0, min(max(limit, 1), 200)),
-                )
-                rows = cur.fetchall()
-        return [self._message_from_row(row) for row in rows]
-
-    def list_playground_sessions(
-        self, *, tenant_id: str, user_id: str, limit: int, offset: int
-    ) -> list[dict[str, Any]]:
-        with self._connect() as conn:
-            with conn.cursor(row_factory=self._dict_row) as cur:
-                cur.execute(
-                    """
-                    SELECT s.id,
-                           COALESCE(NULLIF(LEFT(first_message.content, 60), ''),
-                                    TO_CHAR(s.created_at, 'Mon DD, YYYY')) AS title,
-                           COUNT(m.id) AS message_count,
-                           s.status, s.created_at, s.last_activity_at
-                    FROM chat_sessions s
-                    LEFT JOIN LATERAL (
-                        SELECT BTRIM(content) AS content
-                        FROM chat_messages
-                        WHERE session_id = s.id AND role = 'user'
-                        ORDER BY sequence_number ASC
-                        LIMIT 1
-                    ) first_message ON TRUE
-                    LEFT JOIN chat_messages m ON m.session_id = s.id
-                    WHERE s.tenant_id = %s
-                      AND s.user_id = %s
-                      AND s.channel = 'EMPLOYEE_PLAYGROUND'
-                      AND s.hidden_at IS NULL
-                    GROUP BY s.id, first_message.content
-                    ORDER BY s.last_activity_at DESC, s.created_at DESC
-                    LIMIT %s OFFSET %s
-                    """,
-                    (tenant_id, user_id, min(max(limit, 1), 100), max(offset, 0)),
-                )
-                return [dict(row) for row in cur.fetchall()]
-
-    def hide_playground_session(self, *, session_id: str, tenant_id: str, user_id: str) -> bool:
-        with self._connect() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    UPDATE chat_sessions
-                    SET hidden_at = NOW(), status = 'CLOSED',
-                        closed_at = COALESCE(closed_at, NOW()),
-                        updated_at = NOW()
-                    WHERE id = %s AND tenant_id = %s AND user_id = %s
-                      AND channel = 'EMPLOYEE_PLAYGROUND' AND hidden_at IS NULL
-                    """,
-                    (session_id, tenant_id, user_id),
-                )
-                updated = cur.rowcount
-            conn.commit()
-        return updated > 0
-
-    def customer_visible_document_ids(self, *, tenant_id: str, knowledge_base_id: str) -> list[str]:
-        with self._connect() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    SELECT id FROM documents
-                    WHERE tenant_id = %s AND knowledge_base_id = %s
-                      AND status = 'COMPLETED'
-                      AND visibility = 'CUSTOMER_AND_EMPLOYEE'
-                    """,
-                    (tenant_id, knowledge_base_id),
-                )
-                return [str(row[0]) for row in cur.fetchall()]
-
-    def close_for_tenant(self, session_id: str, tenant_id: str) -> bool:
-        with self._connect() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    UPDATE chat_sessions
-                    SET status = 'CLOSED',
-                        closed_at = %s,
-                        updated_at = %s
-                    WHERE id = %s
-                      AND tenant_id = %s
-                      AND status = 'OPEN'
-                    RETURNING channel, chatbot_id, external_user_id
-                    """,
-                    (
-                        datetime.now(UTC).replace(tzinfo=None),
-                        datetime.now(UTC).replace(tzinfo=None),
-                        session_id,
-                        tenant_id,
-                    ),
-                )
-                updated = cur.rowcount
-                row = cur.fetchone() if updated else None
-                if row is not None and row[0] != "EMPLOYEE_PLAYGROUND":
-                    self._insert_outbox_event(
-                        cur,
-                        tenant_id=tenant_id,
-                        event_type="conversation.closed",
-                        aggregate_id=session_id,
-                        payload={
-                            "conversationId": session_id,
-                            "chatbotId": str(row[1]),
-                            "channel": row[0],
-                            "externalUserId": row[2],
-                        },
-                    )
-            conn.commit()
-        return updated > 0
+        if self.get_for_tenant(session_id, tenant_id) is None:
+            return []
+        start = max(after or 0, 0)
+        return [
+            message for index, message in enumerate(self.prior_messages, start=1) if index > start
+        ][:limit]
 
     def consume_message_quota(self, tenant_id: str) -> None:
-        now = datetime.now(UTC).replace(tzinfo=None)
-        with self._connect() as conn:
-            with conn.cursor(row_factory=self._dict_row) as cur:
-                cur.execute(
-                    """
-                    SELECT t.max_messages, s.plan_code, s.status, s.quota_anchor_at,
-                           s.trial_ends_at, s.paid_through_at
-                    FROM tenants t
-                    JOIN billing_subscriptions s ON s.tenant_id = t.id
-                    WHERE t.id = %s
-                    FOR UPDATE OF t
-                    """,
-                    (tenant_id,),
-                )
-                tenant = cur.fetchone()
-                if tenant is None:
-                    raise ChatWorkspaceNotFoundError("Tenant was not found")
-                period_start, period_end = self._billing_period(tenant, now)
-                cur.execute(
-                    """
-                    SELECT message_count
-                    FROM usage_metrics
-                    WHERE tenant_id = %s AND period_start = %s
-                    """,
-                    (tenant_id, period_start),
-                )
-                usage = cur.fetchone()
-                current = 0 if usage is None else int(usage["message_count"])
-                limit = tenant["max_messages"]
-                if limit is not None and current >= int(limit):
-                    raise ChatQuotaExceededError("Tenant message quota exceeded")
-                cur.execute(
-                    """
-                    INSERT INTO usage_metrics (
-                        tenant_id, period_year, period_month, period_start, period_end,
-                        message_count, document_count, storage_mb_used, token_count
-                    ) VALUES (%s, %s, %s, %s, %s, 1, 0, 0, 0)
-                    ON CONFLICT (tenant_id, period_start)
-                    DO UPDATE SET message_count = usage_metrics.message_count + 1,
-                                  updated_at = NOW()
-                    RETURNING message_count, warning_80_sent, exceeded_sent
-                    """,
-                    (
-                        tenant_id,
-                        period_start.year,
-                        period_start.month,
-                        period_start,
-                        period_end,
-                    ),
-                )
-                updated = cur.fetchone()
-                if limit is not None:
-                    count = int(updated["message_count"])
-                    warning_threshold = math.ceil(int(limit) * 0.8)
-                    if count >= warning_threshold and not updated["warning_80_sent"]:
-                        if self._mark_quota_notice(cur, tenant_id, period_start, "warning_80_sent"):
-                            self._insert_quota_notification(
-                                cur, tenant_id, "QUOTA_WARNING",
-                                "Message quota is at 80%",
-                                f"You have used {count} of {limit} messages in this billing period.",
-                            )
-                    if count >= int(limit) and not updated["exceeded_sent"]:
-                        if self._mark_quota_notice(cur, tenant_id, period_start, "exceeded_sent"):
-                            self._insert_quota_notification(
-                                cur, tenant_id, "QUOTA_EXCEEDED",
-                                "Message quota reached",
-                                "Additional messages are blocked until the next reset or a Pro renewal.",
-                            )
-            conn.commit()
+        del tenant_id
 
-    def _billing_period(self, tenant: dict[str, Any], now: datetime) -> tuple[datetime, datetime]:
-        anchor = tenant["quota_anchor_at"]
-        if tenant["plan_code"] == "TRIAL":
-            return anchor, tenant["trial_ends_at"]
-        effective_now = now
-        paid_through = tenant["paid_through_at"]
-        if paid_through is not None and (
-            tenant["status"] == "GRACE" or now >= paid_through
+    def customer_visible_document_ids(self, *, tenant_id: str, knowledge_base_id: str) -> list[str]:
+        if (
+            tenant_id != self.session.tenant_id
+            or knowledge_base_id != self.session.knowledge_base_id
         ):
-            effective_now = paid_through - timedelta(microseconds=1)
-        start = anchor
-        end = self._plus_month(start)
-        while effective_now >= end:
-            start = end
-            end = self._plus_month(end)
-        if paid_through is not None and end > paid_through:
-            end = paid_through
-        return start, end
+            return []
+        return list(self.visible_document_ids)
 
-    def _plus_month(self, value: datetime) -> datetime:
-        month_index = value.month
-        year = value.year + month_index // 12
-        month = month_index % 12 + 1
-        day = min(value.day, calendar.monthrange(year, month)[1])
-        return value.replace(year=year, month=month, day=day)
+    def create(self, **kwargs: Any) -> ChatSession:
+        del kwargs
+        raise RuntimeError("Session creation is owned by Spring")
 
-    def _mark_quota_notice(
-        self, cur: Any, tenant_id: str, period_start: datetime, column: str
-    ) -> bool:
-        if column not in {"warning_80_sent", "exceeded_sent"}:
-            raise ValueError("Invalid quota notice column")
-        cur.execute(
-            f"""
-            UPDATE usage_metrics SET {column} = TRUE, updated_at = NOW()
-            WHERE tenant_id = %s AND period_start = %s AND {column} = FALSE
-            RETURNING id
-            """,
-            (tenant_id, period_start),
-        )
-        return cur.fetchone() is not None
+    def close_for_tenant(self, session_id: str, tenant_id: str) -> bool:
+        del session_id, tenant_id
+        raise RuntimeError("Session closure is owned by Spring")
 
-    def _insert_quota_notification(
-        self, cur: Any, tenant_id: str, notification_type: str, title: str, message: str
-    ) -> None:
-        cur.execute(
-            """
-            INSERT INTO notifications (tenant_id, type, title, message, status, sent_at)
-            VALUES (%s, %s, %s, %s, 'SENT', NOW())
-            """,
-            (tenant_id, notification_type, title, message),
-        )
+    def list_playground_sessions(self, **kwargs: Any) -> list[dict[str, Any]]:
+        del kwargs
+        raise RuntimeError("Conversation history is owned by Spring")
 
-    def list_external_conversations(
-        self,
-        *,
-        tenant_id: str,
-        status: str | None,
-        channel: str | None,
-        limit: int,
-        offset: int,
-    ) -> list[dict[str, Any]]:
-        conditions = ["s.tenant_id = %s", "s.channel IN ('WIDGET', 'CUSTOM_API')"]
-        params: list[Any] = [tenant_id]
-        if status:
-            conditions.append("s.status = %s")
-            params.append(status)
-        if channel:
-            conditions.append("s.channel = %s")
-            params.append(channel)
-        params.extend([min(max(limit, 1), 100), max(offset, 0)])
-        with self._connect() as conn:
-            with conn.cursor(row_factory=self._dict_row) as cur:
-                cur.execute(
-                    f"""
-                    SELECT s.id, s.channel, s.external_user_id, s.customer_name,
-                           s.customer_email, s.status, s.created_at, s.updated_at, s.closed_at,
-                           COUNT(m.id) AS message_count
-                    FROM chat_sessions s
-                    LEFT JOIN chat_messages m ON m.session_id = s.id
-                    WHERE {' AND '.join(conditions)}
-                    GROUP BY s.id
-                    ORDER BY s.created_at DESC, s.id DESC
-                    LIMIT %s OFFSET %s
-                    """,
-                    tuple(params),
-                )
-                return [dict(row) for row in cur.fetchall()]
-
-    def get_external_conversation(
-        self, *, tenant_id: str, session_id: str
-    ) -> tuple[dict[str, Any], list[ChatMessage]] | None:
-        with self._connect() as conn:
-            with conn.cursor(row_factory=self._dict_row) as cur:
-                cur.execute(
-                    """
-                    SELECT id, channel, external_user_id, customer_name, customer_email,
-                           customer_metadata, status, created_at, updated_at, closed_at
-                    FROM chat_sessions
-                    WHERE id = %s AND tenant_id = %s
-                      AND channel IN ('WIDGET', 'CUSTOM_API')
-                    """,
-                    (session_id, tenant_id),
-                )
-                conversation = cur.fetchone()
-                if conversation is None:
-                    return None
-                cur.execute(
-                    """
-                    SELECT role, content, citations, sequence_number, action
-                    FROM chat_messages WHERE session_id = %s ORDER BY sequence_number
-                    """,
-                    (session_id,),
-                )
-                messages = [self._message_from_row(row) for row in cur.fetchall()]
-                return dict(conversation), messages
-
-    def close_idle_external(self, idle_minutes: int = 30) -> int:
-        with self._connect() as conn:
-            with conn.cursor(row_factory=self._dict_row) as cur:
-                cur.execute(
-                    """
-                    UPDATE chat_sessions
-                    SET status = 'CLOSED', closed_at = NOW(), updated_at = NOW()
-                    WHERE status = 'OPEN'
-                      AND channel IN ('WIDGET', 'CUSTOM_API')
-                      AND last_activity_at < NOW() - (%s * INTERVAL '1 minute')
-                    RETURNING id, tenant_id, chatbot_id, channel, external_user_id
-                    """,
-                    (idle_minutes,),
-                )
-                rows = cur.fetchall()
-                for row in rows:
-                    self._insert_outbox_event(
-                        cur,
-                        tenant_id=str(row["tenant_id"]),
-                        event_type="conversation.closed",
-                        aggregate_id=str(row["id"]),
-                        payload={
-                            "conversationId": str(row["id"]),
-                            "chatbotId": str(row["chatbot_id"]),
-                            "channel": row["channel"],
-                            "externalUserId": row["external_user_id"],
-                            "reason": "idle_timeout",
-                        },
-                    )
-            conn.commit()
-        return len(rows)
-
-    def _insert_message(
-        self,
-        *,
-        session_id: str,
-        role: str,
-        content: str,
-        citations: list[dict[str, Any]],
-        action: dict[str, Any] | None = None,
-    ) -> None:
-        with self._connect() as conn:
-            with conn.cursor(row_factory=self._dict_row) as cur:
-                cur.execute(
-                    """
-                    SELECT tenant_id, user_id
-                    FROM chat_sessions
-                    WHERE id = %s
-                      AND status = 'OPEN'
-                    FOR UPDATE
-                    """,
-                    (session_id,),
-                )
-                session = cur.fetchone()
-                if session is None:
-                    raise KeyError(session_id)
-
-                cur.execute(
-                    """
-                    SELECT COALESCE(MAX(sequence_number), 0) + 1 AS next_sequence
-                    FROM chat_messages
-                    WHERE session_id = %s
-                    """,
-                    (session_id,),
-                )
-                next_sequence = cur.fetchone()["next_sequence"]
-                cur.execute(
-                    """
-                    INSERT INTO chat_messages (
-                        session_id, tenant_id, user_id, role, content, citations,
-                        sequence_number, action
-                    )
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                    """,
-                    (
-                        session_id,
-                        session["tenant_id"],
-                        session["user_id"],
-                        role,
-                        content,
-                        self._jsonb(citations),
-                        next_sequence,
-                        self._jsonb(action or {}),
-                    ),
-                )
-                cur.execute(
-                    "UPDATE chat_sessions SET updated_at = %s, last_activity_at = %s WHERE id = %s",
-                    (
-                        datetime.now(UTC).replace(tzinfo=None),
-                        datetime.now(UTC).replace(tzinfo=None),
-                        session_id,
-                    ),
-                )
-            conn.commit()
-
-    def _connect(self) -> Any:
-        try:
-            return self._psycopg.connect(self._postgres_url)
-        except self._psycopg.OperationalError as exc:
-            raise ChatSessionStoreUnavailableError("Chat session store is unavailable") from exc
-
-    def _session_from_row(self, row: dict[str, Any]) -> ChatSession:
-        return ChatSession(
-            id=str(row["id"]),
-            tenant_id=str(row["tenant_id"]),
-            user_id=str(row["user_id"]) if row["user_id"] is not None else None,
-            chatbot_id=str(row["chatbot_id"]),
-            knowledge_base_id=str(row["knowledge_base_id"]),
-            locale=str(row["locale"]),
-            channel=str(row["channel"]),
-            external_user_id=row["external_user_id"],
-            customer_name=row["customer_name"],
-            customer_email=row["customer_email"],
-            integration_token_id=(
-                str(row["integration_token_id"])
-                if row["integration_token_id"] is not None
-                else None
-            ),
-            customer_answer_prompt=str(row["customer_answer_prompt"] or ""),
-        )
-
-    def _message_from_row(self, row: dict[str, Any]) -> ChatMessage:
-        return ChatMessage(
-            role=str(row["role"]),
-            content=str(row["content"]),
-            citations=[Citation(**citation) for citation in row["citations"]],
-            sequence_number=int(row["sequence_number"]),
-            action=dict(row["action"]) if row["action"] else None,
-        )
-
-    def _insert_outbox_event(
-        self,
-        cursor: Any,
-        *,
-        tenant_id: str,
-        event_type: str,
-        aggregate_id: str,
-        payload: dict[str, Any],
-    ) -> None:
-        cursor.execute(
-            """
-            INSERT INTO webhook_outbox (
-                tenant_id, event_type, aggregate_id, payload, status, next_attempt_at
-            ) VALUES (%s, %s, %s, %s, 'PENDING', NOW())
-            """,
-            (tenant_id, event_type, aggregate_id, self._jsonb(payload)),
-        )
+    def hide_playground_session(self, **kwargs: Any) -> bool:
+        del kwargs
+        raise RuntimeError("Conversation history is owned by Spring")

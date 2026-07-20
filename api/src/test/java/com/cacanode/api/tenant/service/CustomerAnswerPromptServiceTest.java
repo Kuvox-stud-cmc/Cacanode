@@ -43,6 +43,7 @@ class CustomerAnswerPromptServiceTest {
         actorId = UUID.randomUUID();
         tenant = new Tenant();
         tenant.setId(tenantId);
+        tenant.setName("Acme");
         tenant.setUpdatedAt(LocalDateTime.of(2026, 7, 14, 10, 0));
         when(tenantRepository.findById(tenantId)).thenReturn(Optional.of(tenant));
         when(tenantRepository.saveAndFlush(any(Tenant.class))).thenAnswer(invocation -> {
@@ -90,13 +91,13 @@ class CustomerAnswerPromptServiceTest {
 
         var response = service.update(tenantId, actorId, " \n\t ");
 
-        assertEquals(CustomerAnswerPromptDefaults.PLATFORM_DEFAULT, response.prompt());
+        assertEquals(CustomerAnswerPromptDefaults.forTenant("Acme"), response.prompt());
         assertTrue(response.usingDefault());
         ArgumentCaptor<AuditLogEvent> eventCaptor = ArgumentCaptor.forClass(AuditLogEvent.class);
         verify(eventPublisher).publishEvent(eventCaptor.capture());
         assertEquals(true, eventCaptor.getValue().getMetadata().get("reset"));
         assertEquals(
-                CustomerAnswerPromptDefaults.PLATFORM_DEFAULT.length(),
+                CustomerAnswerPromptDefaults.forTenant("Acme").length(),
                 eventCaptor.getValue().getMetadata().get("promptLength")
         );
     }
@@ -139,7 +140,19 @@ class CustomerAnswerPromptServiceTest {
 
         var response = service.get(tenantId);
 
-        assertEquals(CustomerAnswerPromptDefaults.PLATFORM_DEFAULT, response.prompt());
+        assertEquals(CustomerAnswerPromptDefaults.forTenant("Acme"), response.prompt());
         assertTrue(response.usingDefault());
+    }
+
+    @Test
+    void legacyDefaultIsPresentedAsTenantSpecificDefault() {
+        tenant.setCustomerAnswerPrompt(CustomerAnswerPromptDefaults.LEGACY_PLATFORM_DEFAULT);
+
+        var response = service.get(tenantId);
+
+        assertEquals(CustomerAnswerPromptDefaults.forTenant("Acme"), response.prompt());
+        assertTrue(response.usingDefault());
+        assertTrue(response.prompt().contains("greetings, thanks, farewells"));
+        assertTrue(response.prompt().contains("Respond to every customer message politely"));
     }
 }

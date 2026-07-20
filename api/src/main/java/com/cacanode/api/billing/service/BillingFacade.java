@@ -18,6 +18,10 @@ import com.cacanode.api.billing.repository.BillingPaymentOrderRepository;
 import com.cacanode.api.billing.repository.BillingSubscriptionRepository;
 import com.cacanode.api.billing.repository.BillingWebhookEventRepository;
 import com.cacanode.api.common.event.TenantCreatedEvent;
+import com.cacanode.api.common.cache.BusinessCache;
+import com.cacanode.api.common.cache.BusinessCacheInvalidationPublisher;
+import com.cacanode.api.common.cache.CacheKeyFactory;
+import com.cacanode.api.common.cache.VersionedJsonCache;
 import com.cacanode.api.common.event.AuditLogEvent;
 import com.cacanode.api.common.event.BillingActivatedEvent;
 import com.cacanode.api.common.enums.LogAction;
@@ -32,6 +36,7 @@ import com.cacanode.api.tenant.enums.TenantStatus;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.event.EventListener;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -43,6 +48,8 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.LocalDateTime;
+import java.time.LocalDate;
+import java.time.Clock;
 import java.time.ZoneOffset;
 import java.util.HexFormat;
 import java.util.List;
@@ -70,10 +77,24 @@ public class BillingFacade implements BillingModuleApi {
     private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper;
     private final ApplicationEventPublisher eventPublisher;
+    @Autowired(required = false)
+    private VersionedJsonCache businessCache;
+    @Autowired(required = false)
+    private CacheKeyFactory cacheKeyFactory;
+    @Autowired(required = false)
+    private BusinessCacheInvalidationPublisher businessInvalidationPublisher;
 
     @Override
     public UsageDto.DashboardSummary dashboardSummary(UUID tenantId) {
-        return analyticsService.dashboardSummary(tenantId);
+        if (businessCache == null || cacheKeyFactory == null) {
+            return analyticsService.dashboardSummary(tenantId);
+        }
+        return businessCache.getOrLoad(
+                BusinessCache.DASHBOARD,
+                cacheKeyFactory.build("dashboard-summary", "tenant", tenantId.toString()),
+                UsageDto.DashboardSummary.class,
+                () -> analyticsService.dashboardSummary(tenantId)
+        );
     }
 
     @Override
@@ -81,7 +102,19 @@ public class BillingFacade implements BillingModuleApi {
         if (!tenantModuleApi.getEntitlements(tenantId).advancedAnalytics()) {
             throw new org.springframework.security.access.AccessDeniedException("Advanced analytics requires Pro");
         }
-        return analyticsService.analytics(tenantId, scope, days);
+        if (businessCache == null || cacheKeyFactory == null) {
+            return analyticsService.analytics(tenantId, scope, days);
+        }
+        LocalDate end = LocalDate.now(Clock.systemUTC());
+        LocalDate start = end.minusDays(days - 1L);
+        return businessCache.getOrLoad(
+                BusinessCache.ANALYTICS,
+                cacheKeyFactory.build("analytics", "tenant", tenantId.toString(), "scope",
+                        scope.name().toLowerCase(java.util.Locale.ROOT), "start", start.toString(),
+                        "end", end.toString()),
+                UsageDto.AnalyticsResponse.class,
+                () -> analyticsService.analytics(tenantId, scope, days)
+        );
     }
 
     @Override
@@ -105,11 +138,24 @@ public class BillingFacade implements BillingModuleApi {
         subscription.setEntitlementSnapshot(catalog.entitlements(BillingPlanCode.TRIAL));
         subscriptionRepository.save(subscription);
         applyProjection(subscription);
+        invalidateBilling(event.tenantId());
     }
 
     @Override
     @Transactional(readOnly = true)
     public BillingDtos.AccountResponse account(UUID tenantId) {
+        if (businessCache == null || cacheKeyFactory == null) {
+            return loadAccountAuthoritative(tenantId);
+        }
+        return businessCache.getOrLoad(
+                BusinessCache.BILLING_ACCOUNT,
+                cacheKeyFactory.build("billing-account", "tenant", tenantId.toString()),
+                BillingDtos.AccountResponse.class,
+                () -> loadAccountAuthoritative(tenantId)
+        );
+    }
+
+    private BillingDtos.AccountResponse loadAccountAuthoritative(UUID tenantId) {
         BillingSubscription subscription = subscriptionRepository.findByTenantId(tenantId)
                 .orElseThrow(() -> new ResourceNotFoundException("Billing account was not found"));
         LocalDateTime now = utcNow();
@@ -185,6 +231,7 @@ public class BillingFacade implements BillingModuleApi {
             }
             throw exception;
         }
+        invalidateBilling(tenantId);
 
         try {
             PaymentGateway.CreatedPayment created = paymentGateway.createPayment(new PaymentGateway.CreatePayment(
@@ -199,6 +246,7 @@ public class BillingFacade implements BillingModuleApi {
         } catch (PaymentGatewayException exception) {
             order.setStatus(PaymentOrderStatus.FAILED);
             order.setFailureReason(exception.getMessage());
+            invalidateBilling(tenantId);
             throw exception;
         }
     }
@@ -218,13 +266,15 @@ public class BillingFacade implements BillingModuleApi {
                 .orElseThrow(() -> new ResourceNotFoundException("Billing account was not found"));
         if (subscription.getPlanCode() == BillingPlanCode.TRIAL) {
             moveToStarter(subscription, utcNow());
-            return new BillingDtos.DowngradeResponse(false, utcNow(), account(tenantId));
+            return new BillingDtos.DowngradeResponse(false, utcNow(), loadAccountAuthoritative(tenantId));
         }
         if (subscription.getPlanCode() == BillingPlanCode.PRO) {
             subscription.setCancelAtPeriodEnd(true);
-            return new BillingDtos.DowngradeResponse(true, subscription.getGraceEndsAt(), account(tenantId));
+            invalidateBilling(tenantId);
+            return new BillingDtos.DowngradeResponse(true, subscription.getGraceEndsAt(),
+                    loadAccountAuthoritative(tenantId));
         }
-        return new BillingDtos.DowngradeResponse(false, null, account(tenantId));
+        return new BillingDtos.DowngradeResponse(false, null, loadAccountAuthoritative(tenantId));
     }
 
     @Override
@@ -255,6 +305,7 @@ public class BillingFacade implements BillingModuleApi {
         if (webhookRepository.findByPayloadHash(payloadHash).isPresent()) {
             return;
         }
+        invalidateBilling(order.getTenantId());
         if (order.getStatus() == PaymentOrderStatus.PAID) {
             saveWebhook(order, verified.providerReference(), payloadHash, true, "DUPLICATE", null);
             return;
@@ -283,6 +334,7 @@ public class BillingFacade implements BillingModuleApi {
         if (order == null || !OPEN_PAYMENT_STATUSES.contains(order.getStatus())) {
             return;
         }
+        invalidateBilling(order.getTenantId());
         if (!order.getExpiresAt().isAfter(utcNow())) {
             order.setStatus(PaymentOrderStatus.EXPIRED);
             return;
@@ -347,6 +399,7 @@ public class BillingFacade implements BillingModuleApi {
         eventPublisher.publishEvent(new BillingActivatedEvent(
                 order.getTenantId(), order.getUserId(), order.getId(),
                 order.getBillingInterval().name(), paidThrough));
+        invalidateBilling(order.getTenantId());
     }
 
     void moveToStarter(BillingSubscription subscription, LocalDateTime effectiveAt) {
@@ -361,6 +414,7 @@ public class BillingFacade implements BillingModuleApi {
         subscription.setQuotaAnchorAt(effectiveAt);
         subscription.setCancelAtPeriodEnd(false);
         applyProjection(subscription);
+        invalidateBilling(subscription.getTenantId());
     }
 
     void applyProjection(BillingSubscription subscription) {
@@ -373,6 +427,12 @@ public class BillingFacade implements BillingModuleApi {
                 e.maxStorageMb(), subscription.getTrialEndsAt(), subscription.getQuotaAnchorAt(),
                 subscription.getPaidThroughAt(), subscription.getGraceEndsAt(), e.apiAccess(), e.webhooks(),
                 e.advancedAnalytics(), e.customBranding()));
+    }
+
+    private void invalidateBilling(UUID tenantId) {
+        if (businessInvalidationPublisher != null) {
+            businessInvalidationPublisher.billing(tenantId);
+        }
     }
 
     private void saveWebhook(BillingPaymentOrder order, String reference, String hash,

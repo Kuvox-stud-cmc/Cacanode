@@ -4,7 +4,7 @@ Cacanode is a proprietary, Vietnamese-first, multi-tenant SaaS platform for buil
 
 The product exposes two chat delivery surfaces:
 
-1. **Cacanode Chat API** — a headless JSON and Server-Sent Events (SSE) API for customers that build their own chatbot UI, mobile chat, support console, or conversational workflow.
+1. **Cacanode Chat API** — a headless JSON API for customers that build their own chatbot UI, mobile chat, support console, or conversational workflow.
 2. **Cacanode Chat Widget** — a hosted, configurable JavaScript widget for customers that need a ready-to-embed website chatbot.
 
 Both surfaces use the same tenant-isolated knowledge base, chatbot configuration, retrieval pipeline, conversation model, usage limits, and source-citation format.
@@ -14,7 +14,7 @@ Both surfaces use the same tenant-isolated knowledge base, chatbot configuration
 | Product type | Hosted multi-tenant SaaS |
 | Primary market | Vietnamese businesses and Vietnamese-language applications |
 | Integration modes | Headless Chat API and hosted JavaScript widget |
-| Streaming protocol | Server-Sent Events over HTTPS |
+| Public protocol | JSON REST over HTTPS; Spring synchronously delegates inference over gRPC |
 | Retrieval | Qdrant dense + BM25 sparse search, Kuzu graph evidence, and TEI reranking |
 | Generative model | Self-hosted Gemma 4 instruction model |
 | Text embedding | Self-hosted EmbeddingGemma |
@@ -32,7 +32,8 @@ Implemented foundations include:
 - Next.js management-console shell and authentication client.
 - Spring Boot identity, tenant, persistence, and versioned-route compatibility.
 - Backend-authoritative Starter, Trial, Pro, and Enterprise entitlements with PayOS-hosted checkout, verified webhook activation, manual renewal, reconciliation, quota enforcement, and subscription lifecycle management.
-- FastAPI chat/session contracts, grounded citations, document ingestion, structural chunking, dense/sparse/graph retrieval, reranking fallbacks, request IDs, health checks, and worker lifecycles.
+- Spring-owned chat/session contracts, idempotency, quota accounting, citations, and conversation persistence.
+- A stateless internal FastAPI gRPC inference service with generation-result deduplication, structural ingestion, dense/sparse/graph retrieval, reranking, health checks, and worker lifecycles.
 - PostgreSQL, Redis, RabbitMQ, Qdrant, Kuzu storage, SeaweedFS, gateway, and application Compose definitions.
 - Optional dedicated-worker and GPU model-serving profiles.
 
@@ -220,7 +221,7 @@ A tenant may create multiple chatbots. Each chatbot references one knowledge bas
 - A chat session belongs to one tenant and one chatbot.
 - A message belongs to one session.
 - Retrieval is always scoped to the chatbot's tenant and knowledge base.
-- Responses may be streamed through SSE or returned as completed JSON.
+- Responses are returned as completed JSON after the internal unary gRPC generation completes.
 - Tenant-specific factual claims include machine-readable source citations.
 - Conversation history is available only when permitted by the credential scope.
 
@@ -238,14 +239,15 @@ flowchart TB
     Widget --> Gateway
     Dashboard --> Gateway
 
-    Gateway --> Business[Spring Boot Business API]
-    Gateway --> AI[FastAPI Chat and AI API]
+    Gateway --> Business[Spring Boot Public and Business API]
 
     Business --> PostgreSQL[(PostgreSQL)]
     Business --> Redis[(Redis)]
     Business --> RabbitMQ[(RabbitMQ)]
+    Business -->|mTLS gRPC| AI[Stateless FastAPI Inference]
 
     AI --> Orchestration[LangChain Orchestration Adapters]
+    AI --> Redis
     Orchestration --> LLM[Gemma 4 / vLLM]
     Orchestration --> TextEmbed[EmbeddingGemma Service]
     Orchestration --> Qdrant[(Qdrant)]
@@ -277,9 +279,7 @@ flowchart TB
     ASRWorker --> LLM
     LLM --> Graph
 
-    AI -. SSE .-> Gateway
-    Gateway -. SSE .-> CustomerApp
-    Gateway -. SSE .-> Widget
+    AI -. no PostgreSQL network .- PostgreSQL
 ```
 
 ### External boundary
@@ -308,9 +308,9 @@ The public Chat API is a Cacanode API contract. The internal vLLM OpenAI-compati
 |---|---|
 | API Gateway | TLS termination, routing, request IDs, CORS, response buffering controls, public rate limiting |
 | Management Console | Tenant, chatbot, source, credential, widget, and usage administration |
-| Hosted Widget | Browser chat UI, client-token bootstrap, SSE rendering, local session state |
-| Spring Boot Business API | Identity, tenants, roles, chatbots, subscriptions, PayOS payment links, quota projections, credentials, audit records |
-| FastAPI Chat and AI API | Public chat contract, SSE, retrieval, context assembly, GraphRAG execution |
+| Hosted Widget | Browser chat UI, client-token bootstrap, JSON rendering, local session state |
+| Spring Boot Business API | All public REST routes; identity, integration-token authentication, sessions/messages/turns, idempotency, quota, citations, revisions, webhooks, documents, and PostgreSQL ownership |
+| FastAPI inference service | Internal unary gRPC generation, Qdrant document-unit reads, derived-index deletion, retrieval, context assembly, GraphRAG execution, and no PostgreSQL access |
 | Gemma model service | Text generation, query routing, summarization, structured entity and relation extraction |
 | Embedding service | EmbeddingGemma query and document vectors, batching, normalization, model versioning |
 | Document worker | Parsing, structure extraction, chunking, table normalization, provenance |
@@ -323,8 +323,25 @@ The public Chat API is a Cacanode API contract. The internal vLLM OpenAI-compati
 | PostgreSQL | Business, identity, chat, source, usage, model, and audit metadata |
 | Qdrant | Tenant-filtered vector retrieval across named vector spaces |
 | SeaweedFS | Raw sources and derived binary artifacts |
-| Redis | Cache, distributed locks, short-lived state, and rate-limit counters |
-| RabbitMQ | Durable asynchronous ingestion and reindex jobs |
+| Redis | Rate-limit counters, Spring business caches, AI embedding/retrieval/semantic caches, and ten-minute generation-ID result deduplication |
+| RabbitMQ | Durable asynchronous ingestion and reindex jobs through Spring outbox/inbox, publisher confirms, retry, and DLQ routing |
+
+### Redis cache status
+
+Spring and FastAPI provide shared, fail-open cache infrastructure. Spring uses a string-key,
+raw-byte `RedisTemplate` for business caches while retaining `StringRedisTemplate` for public rate
+limiting. FastAPI reuses one application-lifetime binary Redis client for embeddings, retrieval,
+semantic answers, and generation-ID deduplication. Optional caches are
+implemented but disabled by default.
+
+PostgreSQL remains authoritative for business, identity, billing, document, and chat data. Qdrant and Kuzu remain authoritative for retrieval and graph data. Redis errors never replace a successful authoritative read with an HTTP failure.
+
+Available cache groups cover Spring business reads, model-versioned
+embeddings, and knowledge-revision-aware retrieval results. Enable and measure one domain at a
+time. Generated LLM answers are not cached, and no distributed cache lock is active. Keys use the
+versioned `ccn:v1` namespace; tenant-owned values use trusted tenant scope, and free-form text is
+hashed rather than stored in keys. See the [caching guide](docs/CACHING.md) for TTLs, invalidation,
+metrics, tests, evidence requirements, and rollback.
 
 ---
 
@@ -573,7 +590,7 @@ Deleting a source removes:
 - Derived pages, frames, audio, OCR, transcripts, and thumbnails.
 - Qdrant points.
 - Kuzu nodes and relationships whose evidence belongs only to that source.
-- Source-specific cache entries.
+- Source-specific cache entries when a later cache phase enables them.
 - Pending jobs for obsolete source versions.
 
 Deletion is tenant-scoped, idempotent, auditable, and safe to retry.
@@ -1421,7 +1438,7 @@ Tenant scope is enforced at every layer:
 - Qdrant queries include server-generated tenant and knowledge-base filters.
 - Kuzu traversals begin from tenant-scoped nodes and reject cross-tenant edges.
 - SeaweedFS objects use tenant prefixes and authorized access.
-- Redis keys include tenant scope.
+- Tenant-owned cache keys include trusted tenant scope; free-form identities are canonicalized and hashed.
 - RabbitMQ jobs contain signed or validated tenant and source context.
 - Logs and metrics avoid raw tenant content.
 
@@ -1498,12 +1515,13 @@ Model cold starts, very large context, GPU saturation, reindexing, and unavailab
 - A failed ingestion stage records a retryable or terminal error code.
 - Retries use bounded exponential backoff and dead-letter queues.
 - Public errors include a request ID and safe message.
+- Redis-backed rate limiting and optional caches fail open; PostgreSQL, Qdrant, Kuzu, and model services remain authoritative.
 
 ### Observability
 
 The platform exports:
 
-- Request rate, latency, status, and active SSE streams.
+- Request rate, latency, status, and active gRPC generations.
 - Time to first token and tokens per second.
 - Retrieval latency and result counts by modality.
 - Qdrant and Kuzu latency.
@@ -1511,6 +1529,14 @@ The platform exports:
 - Ingestion duration by file type and stage.
 - GPU memory, utilization, batch size, and model queue time.
 - Tenant usage counters without raw message content.
+- Cache hit, miss, bypass, write, invalidation, error, latency, and payload-size metrics using controlled cache names.
+- Raw Redis operation outcomes for cache and rate-limit components without keys, tokens, tenant IDs, queries, or exception messages.
+- Cache authoritative-call counts and latency through `cacanode_cache_authoritative_seconds{service,cache,outcome}`.
+- Process-local stampede observations through
+  `cacanode_cache_authoritative_loads_in_flight`,
+  `cacanode_cache_same_key_overlaps_total`, and
+  `cacanode_cache_same_key_concurrency`. These metrics use only controlled service/cache labels;
+  tracker state contains SHA-256 key digests and is removed after every load.
 
 Logs are structured JSON and include `request_id`, `tenant_id`, `chatbot_id`, and `session_id` where permitted.
 
@@ -1520,6 +1546,17 @@ Logs are structured JSON and include `request_id`, `tenant_id`, `chatbot_id`, an
 
 Create `.env` from `.env.example`. Production values are provided by the deployment secret store.
 Authentication uses the existing HS256 JWT setup: Spring signs access and verification tokens with `TOKEN_KEY`; refresh tokens remain opaque server-stored values, and `EXPIRY_DAYS` controls their cookie/storage lifetime.
+
+All optional caches are default-off. Integration-token authentication and `last_used_at` updates
+are authoritative Spring transactions. A Spring business cache requires `CACHE_ENABLED`,
+`BUSINESS_READ_CACHE_ENABLED`, and its
+domain flag. Embedding and retrieval caching require their respective FastAPI flags. PostgreSQL,
+Ollama, and the hybrid retrieval pipeline remain authoritative, and Redis errors fail open.
+
+The repository also includes guarded stampede/cold-start evidence tooling, but no lock,
+coalescing, prewarming, or refresh job. Destructive cold runs are restricted to loopback Redis
+database 15 with an affirmative CLI flag. See the [caching guide](docs/CACHING.md) for exact
+configuration and rollout gates.
 
 ```dotenv
 # Runtime
@@ -1543,6 +1580,32 @@ POSTGRES_PASSWORD=change-me
 
 # Redis and RabbitMQ
 REDIS_URL=redis://redis:6379/0
+REDIS_CONNECT_TIMEOUT_SECONDS=1
+REDIS_OPERATION_TIMEOUT_SECONDS=1
+CACHE_ENABLED=false
+CACHE_KEY_PREFIX=ccn:v1
+CACHE_TTL_JITTER_PERCENT=10
+BUSINESS_READ_CACHE_ENABLED=false
+WIDGET_CONFIG_CACHE_ENABLED=false
+WIDGET_CONFIG_CACHE_TTL_SECONDS=120
+CUSTOMER_ANSWER_PROMPT_CACHE_ENABLED=false
+CUSTOMER_ANSWER_PROMPT_CACHE_TTL_SECONDS=120
+BILLING_ACCOUNT_CACHE_ENABLED=false
+BILLING_ACCOUNT_CACHE_TTL_SECONDS=30
+WORKSPACE_CACHE_ENABLED=false
+WORKSPACE_CACHE_TTL_SECONDS=300
+DASHBOARD_CACHE_ENABLED=false
+DASHBOARD_CACHE_TTL_SECONDS=20
+ANALYTICS_CACHE_ENABLED=false
+ANALYTICS_CACHE_TTL_SECONDS=60
+USER_DIRECTORY_CACHE_ENABLED=false
+USER_DIRECTORY_CACHE_TTL_SECONDS=30
+DOCUMENT_LIST_CACHE_ENABLED=false
+DOCUMENT_LIST_CACHE_TTL_SECONDS=15
+EMBEDDING_CACHE_ENABLED=false
+EMBEDDING_CACHE_TTL_SECONDS=86400
+RETRIEVAL_CACHE_ENABLED=false
+RETRIEVAL_CACHE_TTL_SECONDS=120
 RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/
 
 # SeaweedFS
@@ -1653,6 +1716,11 @@ BILLING_CATALOG_VERSION=2026-07-15
 LOG_LEVEL=INFO
 OTEL_EXPORTER_OTLP_ENDPOINT=
 DISABLE_EXTERNAL_TELEMETRY=true
+
+# Internal Spring -> FastAPI gRPC (plaintext only for local development)
+AI_GRPC_TARGET=localhost:50051
+AI_GRPC_PLAINTEXT=true
+GENERATION_RESULT_CACHE_TTL_SECONDS=600
 ```
 
 No environment variable accepts a tenant-supplied model-provider key.
@@ -1671,7 +1739,7 @@ No environment variable accepts a tenant-supplied model-provider key.
 ### Start local development
 
 The development infrastructure target starts PostgreSQL, Redis, RabbitMQ, Qdrant, Ollama,
-SeaweedFS, and the Kuzu graph service through Docker Compose. The AI/chat FastAPI app runs on the
+SeaweedFS, and the Kuzu graph service through Docker Compose. The internal FastAPI inference app runs on the
 host with auto-reload:
 
 ```bash
@@ -1680,7 +1748,8 @@ cp .env.example .env
 make dev
 ```
 
-The AI API reaches Graph on `http://localhost:8010`. Reranking is disabled by default locally
+Spring reaches inference on `localhost:50051`, and inference reaches Graph on
+`http://localhost:8010`. Reranking is disabled by default locally
 because TEI does not publish an ARM64 image. Large BGE rerankers can exhaust Docker Desktop memory
 under x86 emulation, starving Ollama and SeaweedFS. Local and low-resource production opt-in uses
 the much smaller Vietnamese-capable `cross-encoder/mmarco-mMiniLMv2-L12-H384-v1` model instead.
@@ -1698,7 +1767,7 @@ make dev-down
 
 The production profile is designed for a 4-vCPU / 8-GB CPU droplet. It uses hosted OpenAI
 generation, embedding-only Ollama, the Kuzu graph service, and a lightweight CPU multilingual
-reranker. Follow [DEPLOYMENT.md](DEPLOYMENT.md) for DNS, HTTPS, droplet bootstrap, GitHub Actions,
+reranker. Follow the [deployment guide](docs/DEPLOYMENT.md) for DNS, HTTPS, droplet bootstrap, GitHub Actions,
 secrets, smoke tests, and rollback.
 
 For a manual start after creating `.env.production`:
@@ -1770,10 +1839,10 @@ Use `docker compose down -v` only when intentionally deleting local databases, q
 | Endpoint | Meaning |
 |---|---|
 | `/health/live` | Process is running |
-| `/health/ready` | Required dependencies are available |
+| `/health/ready` | Service-specific readiness state; checks differ by service |
 | `/metrics` | Private Prometheus-compatible metrics endpoint |
 
-Readiness for the AI API requires the active model, embedding service, Qdrant, Kuzu, PostgreSQL, and Redis dependencies needed for the requested operation.
+AI API readiness reports model configuration and worker state. It intentionally does not ping Redis; Redis-backed rate limiting and the disabled cache infrastructure remain fail-open.
 
 ---
 
@@ -1784,6 +1853,8 @@ Readiness for the AI API requires the active model, embedding service, Qdrant, K
 - Authentication and refresh-token rotation.
 - Role and scope enforcement.
 - Tenant isolation across PostgreSQL, Qdrant, Kuzu, SeaweedFS, Redis, and queues.
+- Cache key construction, raw-byte preservation, TTL jitter, bypass, hit, miss, write, invalidation, metrics, and Redis-error fallback.
+- FastAPI Redis lifecycle reuse, no startup ping, one-time shutdown close, rate-limit `429`, and connection/timeout fail-open behavior.
 - Integration-key creation, rotation, revocation, and one-time display.
 - Client-token expiry, origin, chatbot, user, and scope restrictions.
 - Chat session lifecycle.

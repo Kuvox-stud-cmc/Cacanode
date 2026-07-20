@@ -4,6 +4,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
+import java.util.OptionalLong;
 
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
@@ -18,6 +19,12 @@ import org.springframework.security.access.AccessDeniedException;
 import com.cacanode.api.common.exception.custom.BadRequestException;
 import com.cacanode.api.common.exception.custom.InternalServerErrorException;
 import com.cacanode.api.common.exception.custom.ResourceNotFoundException;
+import com.cacanode.api.common.cache.BusinessCache;
+import com.cacanode.api.common.cache.BusinessCacheInvalidationPublisher;
+import com.cacanode.api.common.cache.DocumentListGenerationStore;
+import com.cacanode.api.common.cache.VersionedJsonCache;
+import com.cacanode.api.document.cache.DocumentListCacheKeyFactory;
+import com.cacanode.api.document.cache.DocumentListCacheValue;
 import com.cacanode.api.document.dto.DocumentListItemResponse;
 import com.cacanode.api.document.dto.DocumentDownloadResponse;
 import com.cacanode.api.document.dto.DocumentStatusResponse;
@@ -35,6 +42,7 @@ import com.cacanode.api.document.storage.DocumentStorage;
 import com.cacanode.api.tenant.enums.KnowledgeBaseStatus;
 import com.cacanode.api.tenant.repository.KnowledgeBaseRepository;
 import com.cacanode.api.tenant.api.TenantModuleApi;
+import com.cacanode.api.tenant.service.KnowledgeBaseRevisionService;
 
 import org.springframework.beans.factory.annotation.Autowired;
 
@@ -52,6 +60,15 @@ public class DocumentService {
     private final DocumentIndexCleanup indexCleanup;
     private final ApplicationEventPublisher eventPublisher;
     private final TenantModuleApi tenantModuleApi;
+    private final KnowledgeBaseRevisionService revisionService;
+    @Autowired(required = false)
+    private VersionedJsonCache businessCache;
+    @Autowired(required = false)
+    private DocumentListGenerationStore generationStore;
+    @Autowired(required = false)
+    private DocumentListCacheKeyFactory documentCacheKeyFactory;
+    @Autowired(required = false)
+    private BusinessCacheInvalidationPublisher businessInvalidationPublisher;
 
     @Autowired
     public DocumentService(
@@ -61,7 +78,8 @@ public class DocumentService {
             DocumentIngestionPublisher ingestionPublisher,
             DocumentIndexCleanup indexCleanup,
             ApplicationEventPublisher eventPublisher,
-            TenantModuleApi tenantModuleApi
+            TenantModuleApi tenantModuleApi,
+            KnowledgeBaseRevisionService revisionService
     ) {
         this.documentRepository = documentRepository;
         this.knowledgeBaseRepository = knowledgeBaseRepository;
@@ -70,6 +88,7 @@ public class DocumentService {
         this.indexCleanup = indexCleanup;
         this.eventPublisher = eventPublisher;
         this.tenantModuleApi = tenantModuleApi;
+        this.revisionService = revisionService;
     }
 
     public DocumentService(
@@ -81,7 +100,7 @@ public class DocumentService {
             ApplicationEventPublisher eventPublisher
     ) {
         this(documentRepository, knowledgeBaseRepository, documentStorage, ingestionPublisher,
-                indexCleanup, eventPublisher, null);
+                indexCleanup, eventPublisher, null, null);
     }
 
     DocumentUploadResponse upload(UUID tenantId, UUID userId, UUID knowledgeBaseId, MultipartFile file) {
@@ -133,6 +152,7 @@ public class DocumentService {
         } catch (RuntimeException e) {
             document.setStatus(DocumentStatus.FAILED);
             document.setErrorMessage("DOCUMENT_STORAGE_FAILED");
+            invalidateDocuments(tenantId, knowledgeBaseId);
             if (e instanceof InternalServerErrorException) {
                 throw e;
             }
@@ -159,12 +179,14 @@ public class DocumentService {
         } catch (RuntimeException e) {
             document.setStatus(DocumentStatus.FAILED);
             document.setErrorMessage("INGESTION_PUBLISH_FAILED");
+            invalidateDocuments(tenantId, knowledgeBaseId);
             if (e instanceof InternalServerErrorException) {
                 throw e;
             }
             throw new InternalServerErrorException("Unable to publish document ingestion request");
         }
 
+        invalidateDocuments(tenantId, knowledgeBaseId);
         return toUploadResponse(document);
     }
 
@@ -191,7 +213,12 @@ public class DocumentService {
         }
         Document document = documentRepository.findByIdAndTenantId(documentId, tenantId)
                 .orElseThrow(() -> new ResourceNotFoundException("Document not found"));
+        if (document.getVisibility() == visibility) {
+            return toStatusResponse(document);
+        }
         document.setVisibility(visibility);
+        incrementSearchRevision(tenantId, document.getKnowledgeBaseId());
+        invalidateDocuments(tenantId, document.getKnowledgeBaseId());
         return toStatusResponse(document);
     }
 
@@ -214,11 +241,15 @@ public class DocumentService {
                     documentId,
                     document.getStoragePath()
             ));
+            incrementSearchRevision(tenantId, document.getKnowledgeBaseId());
+            invalidateDocuments(tenantId, document.getKnowledgeBaseId());
             return;
         }
         indexCleanup.delete(tenantId, document.getKnowledgeBaseId(), documentId);
         documentStorage.delete(document.getStoragePath());
         documentRepository.delete(document);
+        incrementSearchRevision(tenantId, document.getKnowledgeBaseId());
+        invalidateDocuments(tenantId, document.getKnowledgeBaseId());
     }
 
     @Transactional(readOnly = true)
@@ -251,6 +282,24 @@ public class DocumentService {
 
     @Transactional(readOnly = true)
     public List<DocumentListItemResponse> list(UUID tenantId, UUID knowledgeBaseId) {
+        if (!documentCachingAvailable()) {
+            return loadLegacyList(tenantId, knowledgeBaseId);
+        }
+        OptionalLong generation = generationStore.current(tenantId, knowledgeBaseId);
+        if (generation.isEmpty()) {
+            return businessCache.bypassAndLoad(BusinessCache.DOCUMENT_LIST,
+                    () -> loadLegacyList(tenantId, knowledgeBaseId));
+        }
+        var filters = documentCacheKeyFactory.legacy();
+        return businessCache.getOrLoad(
+                BusinessCache.DOCUMENT_LIST,
+                documentCacheKeyFactory.key(tenantId, knowledgeBaseId, generation.getAsLong(), filters),
+                DocumentListCacheValue.class,
+                () -> new DocumentListCacheValue(loadLegacyList(tenantId, knowledgeBaseId))
+        ).documents();
+    }
+
+    private List<DocumentListItemResponse> loadLegacyList(UUID tenantId, UUID knowledgeBaseId) {
         requireActiveKnowledgeBase(tenantId, knowledgeBaseId);
 
         return documentRepository
@@ -271,8 +320,6 @@ public class DocumentService {
             DocumentType type,
             DocumentVisibility visibility
     ) {
-        requireActiveKnowledgeBase(tenantId, knowledgeBaseId);
-
         int requestedPage = page == null ? 0 : page;
         int requestedSize = size == null ? DEFAULT_PAGE_SIZE : size;
         if (requestedPage < 0) {
@@ -282,10 +329,43 @@ public class DocumentService {
             throw new BadRequestException("Size must be between 1 and 100");
         }
 
-        String query = StringUtils.hasText(searchText) ? searchText.trim() : null;
+        String query = StringUtils.hasText(searchText) ? searchText.strip() : null;
         if (query != null && query.length() > MAX_SEARCH_LENGTH) {
             throw new BadRequestException("Search text must be 200 characters or fewer");
         }
+
+        if (!documentCachingAvailable()) {
+            return loadPagedList(tenantId, knowledgeBaseId, requestedPage, requestedSize, query,
+                    status, type, visibility);
+        }
+        var filters = documentCacheKeyFactory.paged(
+                requestedPage, requestedSize, query, status, type, visibility);
+        OptionalLong generation = generationStore.current(tenantId, knowledgeBaseId);
+        if (generation.isEmpty()) {
+            return businessCache.bypassAndLoad(BusinessCache.DOCUMENT_LIST,
+                    () -> loadPagedList(tenantId, knowledgeBaseId, requestedPage, requestedSize,
+                            filters.searchText(), status, type, visibility));
+        }
+        return businessCache.getOrLoad(
+                BusinessCache.DOCUMENT_LIST,
+                documentCacheKeyFactory.key(tenantId, knowledgeBaseId, generation.getAsLong(), filters),
+                DocumentListCacheValue.class,
+                () -> new DocumentListCacheValue(loadPagedList(tenantId, knowledgeBaseId,
+                        requestedPage, requestedSize, filters.searchText(), status, type, visibility))
+        ).documents();
+    }
+
+    private List<DocumentListItemResponse> loadPagedList(
+            UUID tenantId,
+            UUID knowledgeBaseId,
+            int requestedPage,
+            int requestedSize,
+            String query,
+            DocumentStatus status,
+            DocumentType type,
+            DocumentVisibility visibility
+    ) {
+        requireActiveKnowledgeBase(tenantId, knowledgeBaseId);
 
         Specification<Document> specification = (root, criteriaQuery, builder) -> builder.and(
                 builder.equal(root.get("tenantId"), tenantId),
@@ -326,12 +406,52 @@ public class DocumentService {
         DocumentStatus status = parseStatus(event.status());
         return documentRepository.findByIdAndTenantId(event.documentId(), event.tenantId())
                 .map(document -> {
+                    DocumentStatus previousStatus = document.getStatus();
+                    if (!isMonotonicTransition(previousStatus, status)) {
+                        return true;
+                    }
                     document.setStatus(status);
                     document.setChunkCount(event.chunkCount());
                     document.setErrorMessage(event.errorMessage());
+                    if (status == DocumentStatus.COMPLETED
+                            && previousStatus != DocumentStatus.COMPLETED) {
+                        incrementSearchRevision(event.tenantId(), document.getKnowledgeBaseId());
+                    }
+                    invalidateDocuments(event.tenantId(), document.getKnowledgeBaseId());
                     return true;
                 })
                 .orElse(false);
+    }
+
+    private boolean isMonotonicTransition(DocumentStatus current, DocumentStatus next) {
+        if (current == next) {
+            return false;
+        }
+        if (current == DocumentStatus.COMPLETED || current == DocumentStatus.FAILED) {
+            return false;
+        }
+        if (current == DocumentStatus.PROCESSING) {
+            return next == DocumentStatus.COMPLETED || next == DocumentStatus.FAILED;
+        }
+        return next == DocumentStatus.PROCESSING
+                || next == DocumentStatus.COMPLETED
+                || next == DocumentStatus.FAILED;
+    }
+
+    private boolean documentCachingAvailable() {
+        return businessCache != null && generationStore != null && documentCacheKeyFactory != null;
+    }
+
+    private void invalidateDocuments(UUID tenantId, UUID knowledgeBaseId) {
+        if (businessInvalidationPublisher != null) {
+            businessInvalidationPublisher.documentMutation(tenantId, knowledgeBaseId);
+        }
+    }
+
+    private void incrementSearchRevision(UUID tenantId, UUID knowledgeBaseId) {
+        if (revisionService != null) {
+            revisionService.increment(tenantId, knowledgeBaseId);
+        }
     }
 
     private void validateFile(MultipartFile file) {

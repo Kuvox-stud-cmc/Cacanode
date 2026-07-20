@@ -6,7 +6,7 @@ CONDA ?= conda
 CONDA_ENV ?= rag-chatbot
 VENV ?= .venv
 APP_HOST ?= 0.0.0.0
-APP_PORT ?= 8000
+APP_PORT ?= 18000
 GRAPH_HOST ?= 0.0.0.0
 GRAPH_PORT ?= 8010
 UVICORN_ARGS ?=
@@ -17,6 +17,13 @@ REINDEX_ARGS ?=
 EVALUATION_DATASET ?= tests/data/retrieval_vi_v1.json
 EVALUATION_RESULTS ?= artifacts/full-pipeline.json
 EVALUATION_LABEL ?= full-pipeline
+PHASE5_PRODUCTION_OBSERVATION ?= artifacts/phase-5-production.json
+PHASE5_SEEDED_REPORT ?= artifacts/phase-5-seeded.json
+PHASE5_DECISION_REPORT ?= artifacts/phase-5-decision.json
+PHASE5_MARKDOWN_REPORT ?= artifacts/phase-5-evidence.md
+PHASE5_HARNESS_ARGS ?=
+CACHE_DISABLED_RESULTS ?= artifacts/retrieval-cache-disabled.json
+CACHE_ENABLED_RESULTS ?= artifacts/retrieval-cache-enabled.json
 DOCKER_COMPOSE ?= docker compose
 DEV_COMPOSE_FILE ?= ../docker-compose.yml
 DEV_INFRA_SERVICES ?= postgres redis rabbitmq qdrant ollama seaweedfs-master \
@@ -42,8 +49,10 @@ PYTHON_RUN := $(VENV_PYTHON)
 endif
 
 .PHONY: help env install install-dev setup run run-ai dev dev-ai run-graph dev-graph \
-	dev-infra dev-down dev-reranker dev-reranker-down reindex reindex-dry-run \
-	evaluate-retrieval test check lint typecheck clean
+	dev-infra dev-down dev-reranker dev-reranker-down \
+	evaluate-retrieval compare-retrieval-cache baseline-cache baseline-cache-enabled \
+	cleanup-semantic-answer-cache \
+	cleanup-semantic-answer-cache-dry-run test check lint typecheck clean
 
 help:
 	$(info Available targets:)
@@ -61,9 +70,11 @@ help:
 	$(info   make dev-down             Stop the local infrastructure started for development)
 	$(info   make dev-reranker         Explicitly start TEI reranking; not recommended on Apple Silicon)
 	$(info   make dev-reranker-down    Stop the optional TEI reranker)
-	$(info   make reindex              Reindex completed documents into TARGET_COLLECTION)
-	$(info   make reindex-dry-run      Preview the same reindex operation)
 	$(info   make evaluate-retrieval   Score recorded retrieval rankings)
+	$(info   make baseline-cache       Capture the cache-disabled local latency baseline as JSON)
+	$(info   make baseline-cache-enabled Label a cache-enabled comparison run as JSON)
+	$(info   make cleanup-semantic-answer-cache Delete expired semantic answer-cache points)
+	$(info   make cleanup-semantic-answer-cache-dry-run Preview the bounded cleanup)
 	$(info   make test                 Run pytest)
 	$(info   make lint                 Run Ruff checks)
 	$(info   make typecheck            Run mypy)
@@ -73,10 +84,10 @@ help:
 
 env:
 ifeq ($(PYTHON_MODE),conda)
-	$(PYTHON_RUN) --version
+	@$(PYTHON_RUN) --version 1>&2
 else
-	$(PYTHON) -m venv $(VENV)
-	$(PYTHON_RUN) --version
+	@$(PYTHON) -m venv $(VENV)
+	@$(PYTHON_RUN) --version 1>&2
 endif
 
 install: env
@@ -123,22 +134,30 @@ dev-reranker:
 dev-reranker-down:
 	$(DOCKER_COMPOSE) -f $(DEV_COMPOSE_FILE) stop reranker-service
 
-reindex: env
-	$(PYTHON_RUN) -m app.maintenance.reindex_documents \
-		--target-collection $(TARGET_COLLECTION) \
-		--batch-size $(REINDEX_BATCH_SIZE) $(REINDEX_ARGS)
-
-reindex-dry-run: env
-	$(PYTHON_RUN) -m app.maintenance.reindex_documents \
-		--target-collection $(TARGET_COLLECTION) \
-		--batch-size $(REINDEX_BATCH_SIZE) \
-		--dry-run $(REINDEX_ARGS)
-
 evaluate-retrieval: env
 	$(PYTHON_RUN) -m app.maintenance.evaluate_retrieval \
 		--dataset $(EVALUATION_DATASET) \
 		--results $(EVALUATION_RESULTS) \
 		--label $(EVALUATION_LABEL)
+
+compare-retrieval-cache: env
+	$(PYTHON_RUN) -m app.maintenance.compare_retrieval_results \
+		--dataset $(EVALUATION_DATASET) \
+		--cache-disabled-results $(CACHE_DISABLED_RESULTS) \
+		--cache-enabled-results $(CACHE_ENABLED_RESULTS) \
+		--tolerance 0.001
+
+baseline-cache: env
+	@BASELINE_CACHE_ENABLED=false $(PYTHON_RUN) -m app.maintenance.cache_baseline
+
+baseline-cache-enabled: env
+	@BASELINE_CACHE_ENABLED=true $(PYTHON_RUN) -m app.maintenance.cache_baseline
+
+cleanup-semantic-answer-cache: env
+	$(PYTHON_RUN) -m app.maintenance.cleanup_semantic_answer_cache --apply
+
+cleanup-semantic-answer-cache-dry-run: env
+	$(PYTHON_RUN) -m app.maintenance.cleanup_semantic_answer_cache
 
 test: env
 	$(PYTHON_RUN) -m pytest $(PYTEST_ARGS)

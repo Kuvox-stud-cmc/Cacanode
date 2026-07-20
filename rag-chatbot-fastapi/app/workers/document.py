@@ -9,6 +9,7 @@ import aio_pika
 from aio_pika.abc import AbstractIncomingMessage
 
 from app.core.config import Settings
+from app.ingestion.embedding import EmbeddingClient
 from app.ingestion.errors import PermanentIngestionError, TransientIngestionError
 from app.ingestion.events import DocumentIngestRequestedEvent, partial_status_ids, status_event
 from app.ingestion.factory import create_document_ingestion_pipeline
@@ -33,9 +34,10 @@ class DocumentWorker:
         settings: Settings,
         pipeline: DocumentIngestionPipeline | None = None,
         connection: Any | None = None,
+        embedder: EmbeddingClient | None = None,
     ):
         self._settings = settings
-        self._pipeline = pipeline or create_document_ingestion_pipeline(settings)
+        self._pipeline = pipeline or create_document_ingestion_pipeline(settings, embedder=embedder)
         self._connection: Any | None = connection
         self._owns_connection = connection is None
         self._channel: Any | None = None

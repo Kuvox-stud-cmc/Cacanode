@@ -1,10 +1,15 @@
 package com.cacanode.api.tenant.service.implement;
 
-import com.cacanode.api.tenant.api.RegisterTenantCommand;
+import com.cacanode.api.common.event.TenantCreatedEvent;
+import com.cacanode.api.common.cache.BusinessCacheInvalidationPublisher;
+import com.cacanode.api.common.exception.custom.ResourceNotFoundException;
+import com.cacanode.api.tenant.CustomerAnswerPromptDefaults;
 import com.cacanode.api.tenant.api.ApplyTenantEntitlementsCommand;
+import com.cacanode.api.tenant.api.RegisterTenantCommand;
 import com.cacanode.api.tenant.api.TenantEntitlements;
 import com.cacanode.api.tenant.api.TenantModuleApi;
 import com.cacanode.api.tenant.api.TenantUserResult;
+import com.cacanode.api.tenant.cache.IntegrationTokenCacheInvalidationPublisher;
 import com.cacanode.api.tenant.dto.UserAuthDto;
 import com.cacanode.api.tenant.enums.TenantPlan;
 import com.cacanode.api.tenant.enums.TenantStatus;
@@ -17,12 +22,11 @@ import com.cacanode.api.tenant.repository.UserRepository;
 import com.cacanode.api.tenant.service.TenantWorkspaceService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.context.ApplicationEventPublisher;
-import com.cacanode.api.common.event.TenantCreatedEvent;
-import com.cacanode.api.common.exception.custom.ResourceNotFoundException;
 
 import java.text.Normalizer;
 import java.time.LocalDateTime;
@@ -40,6 +44,9 @@ public class TenantModuleApiImpl implements TenantModuleApi {
         private final UserRepository userRepository;
         private final TenantWorkspaceService tenantWorkspaceService;
         private final ApplicationEventPublisher eventPublisher;
+        private final IntegrationTokenCacheInvalidationPublisher cacheInvalidationPublisher;
+        @Autowired(required = false)
+        private BusinessCacheInvalidationPublisher businessInvalidationPublisher;
 
         @Override
         @Transactional
@@ -48,6 +55,8 @@ public class TenantModuleApiImpl implements TenantModuleApi {
                 // 1. Create tenant
                 Tenant tenant = new Tenant();
                 tenant.setName(command.getCompanyName());
+                tenant.setCustomerAnswerPrompt(
+                                CustomerAnswerPromptDefaults.forTenant(command.getCompanyName()));
                 tenant.setSlug(generateSlug(command.getCompanyName()));
                 tenant.setPlan(TenantPlan.TRIAL);
                 tenant.setStatus(TenantStatus.TRIAL);
@@ -202,6 +211,8 @@ public class TenantModuleApiImpl implements TenantModuleApi {
         public void applyEntitlements(ApplyTenantEntitlementsCommand command) {
                 Tenant tenant = tenantRepository.findByIdForUpdate(command.tenantId())
                                 .orElseThrow(() -> new ResourceNotFoundException("Tenant not found"));
+                boolean apiAccessChanged = tenant.isApiAccessEnabled() != command.apiAccess();
+                boolean brandingChanged = tenant.isCustomBrandingEnabled() != command.customBranding();
                 tenant.setPlan(command.plan());
                 tenant.setStatus(command.status());
                 tenant.setMaxMessages(command.maxMessages());
@@ -216,6 +227,12 @@ public class TenantModuleApiImpl implements TenantModuleApi {
                 tenant.setWebhooksEnabled(command.webhooks());
                 tenant.setAdvancedAnalyticsEnabled(command.advancedAnalytics());
                 tenant.setCustomBrandingEnabled(command.customBranding());
+                if (apiAccessChanged) {
+                        cacheInvalidationPublisher.publishTenantTokens(tenant.getId());
+                }
+                if (businessInvalidationPublisher != null) {
+                        businessInvalidationPublisher.entitlements(tenant.getId(), brandingChanged);
+                }
         }
 
         private TenantEntitlements toEntitlements(Tenant tenant) {

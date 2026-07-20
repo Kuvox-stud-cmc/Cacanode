@@ -3,6 +3,7 @@ import logging
 from dataclasses import dataclass
 
 from app.core.config import Settings
+from app.ingestion.embedding import EmbeddingClient
 from app.workers.document import DocumentWorker
 
 logger = logging.getLogger(__name__)
@@ -20,12 +21,19 @@ class WorkerState:
 class WorkerManager:
     """Runs worker lifecycles."""
 
-    def __init__(self, settings: Settings, kinds: tuple[str, ...] | None = None):
+    def __init__(
+        self,
+        settings: Settings,
+        kinds: tuple[str, ...] | None = None,
+        *,
+        embedder: EmbeddingClient | None = None,
+    ):
         selected = kinds or settings.worker_kinds
         unknown = sorted(set(selected) - set(SUPPORTED_WORKERS))
         if unknown:
             raise ValueError(f"Unsupported worker kinds: {', '.join(unknown)}")
         self._settings = settings
+        self._embedder = embedder
         self._states = {kind: WorkerState(kind=kind) for kind in selected}
         self._tasks: list[asyncio.Task[None]] = []
         self._stop = asyncio.Event()
@@ -56,7 +64,10 @@ class WorkerManager:
             logger.info("Worker %s started", state.kind)
             try:
                 while not self._stop.is_set():
-                    worker = DocumentWorker(self._settings)
+                    worker = DocumentWorker(
+                        self._settings,
+                        embedder=self._embedder,
+                    )
                     try:
                         await worker.run(self._stop)
                     except asyncio.CancelledError:

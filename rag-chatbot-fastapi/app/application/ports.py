@@ -2,10 +2,13 @@ from collections.abc import AsyncIterator, Sequence
 from typing import Any, Protocol
 
 from app.domain.models import KnowledgeUnit
+from app.rag.models import ModelCompletion
 
 
 class ChatModelPort(Protocol):
     async def complete(self, messages: Sequence[dict[str, Any]]) -> str: ...
+
+    async def complete_with_usage(self, messages: Sequence[dict[str, Any]]) -> ModelCompletion: ...
 
     def stream(self, messages: Sequence[dict[str, Any]]) -> AsyncIterator[str]: ...
 
@@ -54,7 +57,6 @@ class RerankerPort(Protocol):
 class ObjectStoragePort(Protocol):
     async def put(self, key: str, content: bytes, content_type: str) -> str: ...
 
-    async def delete_prefix(self, prefix: str) -> None: ...
 
 
 class JobQueuePort(Protocol):

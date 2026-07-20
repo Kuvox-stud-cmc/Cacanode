@@ -1,4 +1,4 @@
-import { getAiApiBase } from "@/lib/auth-api";
+import { getApiBase } from "@/lib/auth-api";
 import { parseApiError, readJsonOrThrow } from "@/lib/api-error";
 import type { ApiRequest } from "@/lib/documents-api";
 
@@ -26,17 +26,17 @@ export async function listCustomerConversations(
 ): Promise<CustomerConversation[]> {
   const params = new URLSearchParams({ limit: "100" });
   if (status) params.set("conversation_status", status);
-  return readJsonOrThrow(await request(`${getAiApiBase()}/chat/conversations?${params}`));
+  return readJsonOrThrow(await request(`${getApiBase()}/chat/conversations?${params}`));
 }
 
 export async function getCustomerConversation(
   request: ApiRequest,
   id: string,
 ): Promise<CustomerConversationDetail> {
-  return readJsonOrThrow(await request(`${getAiApiBase()}/chat/conversations/${id}`));
+  return readJsonOrThrow(await request(`${getApiBase()}/chat/conversations/${id}`));
 }
 
 export async function closeCustomerConversation(request: ApiRequest, id: string): Promise<void> {
-  const response = await request(`${getAiApiBase()}/chat/sessions/${id}`, { method: "DELETE" });
+  const response = await request(`${getApiBase()}/chat/sessions/${id}`, { method: "DELETE" });
   if (!response.ok) throw await parseApiError(response);
 }

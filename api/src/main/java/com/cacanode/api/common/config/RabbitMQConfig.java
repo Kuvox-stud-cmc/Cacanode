@@ -38,6 +38,7 @@ public class RabbitMQConfig {
     @Bean
     public Queue documentStatusQueue() {
         return QueueBuilder.durable(RabbitMqTopology.STATUS_QUEUE)
+                .deadLetterExchange(RabbitMqTopology.DEAD_LETTER_EXCHANGE)
                 .build();
     }
 
@@ -45,6 +46,11 @@ public class RabbitMQConfig {
     public Queue documentIngestionDeadLetterQueue() {
         return QueueBuilder.durable(RabbitMqTopology.INGESTION_DLQ)
                 .build();
+    }
+
+    @Bean
+    public Queue documentStatusDeadLetterQueue() {
+        return QueueBuilder.durable(RabbitMqTopology.STATUS_DLQ).build();
     }
 
     @Bean
@@ -74,6 +80,14 @@ public class RabbitMQConfig {
         return BindingBuilder.bind(documentIngestionDeadLetterQueue)
                 .to(deadLetterExchange)
                 .with("#");
+    }
+
+    @Bean
+    public Binding documentStatusDeadLetterBinding(
+            Queue documentStatusDeadLetterQueue, TopicExchange deadLetterExchange) {
+        return BindingBuilder.bind(documentStatusDeadLetterQueue)
+                .to(deadLetterExchange)
+                .with("document.ingest.*");
     }
 
     private Binding statusBinding(Queue queue, TopicExchange exchange, String routingKey) {

@@ -76,4 +76,11 @@ public class Tenant extends BaseEntity {
     @Column(name = "customer_answer_prompt", nullable = false, columnDefinition = "TEXT")
     private String customerAnswerPrompt = CustomerAnswerPromptDefaults.PLATFORM_DEFAULT;
 
+    @PrePersist
+    void applyTenantAnswerPromptDefault() {
+        if (CustomerAnswerPromptDefaults.shouldUseTenantDefault(customerAnswerPrompt, name)) {
+            customerAnswerPrompt = CustomerAnswerPromptDefaults.forTenant(name);
+        }
+    }
+
 }

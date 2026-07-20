@@ -1,5 +1,6 @@
 package com.cacanode.api.common.filter;
 
+import com.cacanode.api.common.cache.CacheMetrics;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -21,12 +22,14 @@ import static org.mockito.Mockito.when;
 class PublicRateLimitFilterTest {
 
     private StringRedisTemplate redisTemplate;
+    private CacheMetrics cacheMetrics;
     private PublicRateLimitFilter filter;
 
     @BeforeEach
     void setUp() {
         redisTemplate = mock(StringRedisTemplate.class);
-        filter = new PublicRateLimitFilter(redisTemplate);
+        cacheMetrics = mock(CacheMetrics.class);
+        filter = new PublicRateLimitFilter(redisTemplate, cacheMetrics);
         ReflectionTestUtils.setField(filter, "enabled", true);
         ReflectionTestUtils.setField(filter, "requestsPerMinute", 120L);
     }
@@ -46,6 +49,7 @@ class PublicRateLimitFilterTest {
         assertNotNull(response.getHeader("Retry-After"));
         assertEquals("application/json", response.getContentType());
         assertEquals(null, chain.getRequest());
+        verify(cacheMetrics).redisOperation("public-rate-limit", "increment", "success");
     }
 
     @Test
@@ -62,6 +66,7 @@ class PublicRateLimitFilterTest {
         );
 
         assertNotNull(chain.getRequest());
+        verify(cacheMetrics).redisOperation("public-rate-limit", "increment", "success");
     }
 
     @Test
@@ -78,6 +83,7 @@ class PublicRateLimitFilterTest {
         );
 
         assertNotNull(chain.getRequest());
+        verify(cacheMetrics).redisOperation("public-rate-limit", "increment", "error");
     }
 
     @Test

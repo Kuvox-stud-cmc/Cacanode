@@ -18,9 +18,20 @@ app:
     invitation-link: ${INVITATION_LINK:https://cacanode.com/accept-invitation}
   integrations:
     token-pepper: ${INTEGRATION_TOKEN_PEPPER}
+    legacy-token-pepper: ${INTEGRATION_TOKEN_LEGACY_PEPPER:}
+    secret-encryption-key: ${INTEGRATION_SECRET_ENCRYPTION_KEY}
+    legacy-secret-encryption-key: ${INTEGRATION_SECRET_LEGACY_ENCRYPTION_KEY:}
   ai:
-    base-url: ${AI_API_BASE_URL:http://ai-api:8000}
-    ingestion-token: ${INGESTION_INTERNAL_TOKEN}
+    grpc:
+      target: ${AI_GRPC_TARGET:ai-api:50051}
+      plaintext: ${AI_GRPC_PLAINTEXT:false}
+      ca-certificate: ${AI_GRPC_CA_CERTIFICATE:/run/cacanode-grpc/ca.crt}
+      client-certificate: ${AI_GRPC_CLIENT_CERTIFICATE:/run/cacanode-grpc/spring-client.crt}
+      client-key: ${AI_GRPC_CLIENT_KEY:/run/cacanode-grpc/spring-client.key}
+      authority-override: ${AI_GRPC_AUTHORITY_OVERRIDE:ai-api}
+      answer-deadline-seconds: ${AI_ANSWER_DEADLINE_SECONDS:100}
+      document-units-deadline-seconds: ${AI_DOCUMENT_UNITS_DEADLINE_SECONDS:10}
+      deletion-deadline-seconds: ${AI_DELETION_DEADLINE_SECONDS:15}
   webhooks:
     encryption-key: ${WEBHOOK_ENCRYPTION_KEY}
     allow-private-networks: false
@@ -63,7 +74,6 @@ spring:
   data:
     redis:
       url: ${REDIS_URL}
-      timeout: 2000ms
   rabbitmq:
     addresses: ${RABBITMQ_URL}
     publisher-confirm-type: correlated

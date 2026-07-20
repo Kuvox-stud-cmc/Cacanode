@@ -1,6 +1,10 @@
 package com.cacanode.api.tenant.service;
 
 import com.cacanode.api.common.enums.LogAction;
+import com.cacanode.api.common.cache.BusinessCache;
+import com.cacanode.api.common.cache.BusinessCacheInvalidationPublisher;
+import com.cacanode.api.common.cache.CacheKeyFactory;
+import com.cacanode.api.common.cache.VersionedJsonCache;
 import com.cacanode.api.common.event.AuditLogEvent;
 import com.cacanode.api.common.exception.custom.BadRequestException;
 import com.cacanode.api.common.exception.custom.ResourceNotFoundException;
@@ -9,6 +13,7 @@ import com.cacanode.api.tenant.dto.CustomerAnswerPromptDtos;
 import com.cacanode.api.tenant.model.Tenant;
 import com.cacanode.api.tenant.repository.TenantRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -23,10 +28,24 @@ public class CustomerAnswerPromptService {
 
     private final TenantRepository tenantRepository;
     private final ApplicationEventPublisher eventPublisher;
+    @Autowired(required = false)
+    private VersionedJsonCache businessCache;
+    @Autowired(required = false)
+    private CacheKeyFactory cacheKeyFactory;
+    @Autowired(required = false)
+    private BusinessCacheInvalidationPublisher businessInvalidationPublisher;
 
     @Transactional(readOnly = true)
     public CustomerAnswerPromptDtos.Response get(UUID tenantId) {
-        return toResponse(findTenant(tenantId));
+        if (businessCache == null || cacheKeyFactory == null) {
+            return loadAuthoritative(tenantId);
+        }
+        return businessCache.getOrLoad(
+                BusinessCache.CUSTOMER_ANSWER_PROMPT,
+                cacheKeyFactory.build("customer-answer-prompt", "tenant", tenantId.toString()),
+                CustomerAnswerPromptDtos.Response.class,
+                () -> loadAuthoritative(tenantId)
+        );
     }
 
     @Transactional
@@ -35,15 +54,17 @@ public class CustomerAnswerPromptService {
             throw new BadRequestException("Prompt is required");
         }
 
+        Tenant tenant = findTenant(tenantId);
         String trimmedPrompt = submittedPrompt.strip();
         boolean reset = trimmedPrompt.isEmpty();
-        String prompt = reset ? CustomerAnswerPromptDefaults.PLATFORM_DEFAULT : trimmedPrompt;
+        String prompt = reset
+                ? CustomerAnswerPromptDefaults.forTenant(tenant.getName())
+                : trimmedPrompt;
         int promptLength = prompt.codePointCount(0, prompt.length());
         if (promptLength > MAX_PROMPT_LENGTH) {
             throw new BadRequestException("Prompt must be 4,000 characters or fewer");
         }
 
-        Tenant tenant = findTenant(tenantId);
         tenant.setCustomerAnswerPrompt(prompt);
         tenant = tenantRepository.saveAndFlush(tenant);
 
@@ -59,7 +80,15 @@ public class CustomerAnswerPromptService {
                 ))
                 .build());
 
+        if (businessInvalidationPublisher != null) {
+            businessInvalidationPublisher.prompt(tenantId);
+        }
+
         return toResponse(tenant);
+    }
+
+    private CustomerAnswerPromptDtos.Response loadAuthoritative(UUID tenantId) {
+        return toResponse(findTenant(tenantId));
     }
 
     private Tenant findTenant(UUID tenantId) {
@@ -69,12 +98,12 @@ public class CustomerAnswerPromptService {
 
     private CustomerAnswerPromptDtos.Response toResponse(Tenant tenant) {
         String storedPrompt = tenant.getCustomerAnswerPrompt();
-        String prompt = storedPrompt == null || storedPrompt.strip().isEmpty()
-                ? CustomerAnswerPromptDefaults.PLATFORM_DEFAULT
-                : storedPrompt.strip();
+        String tenantDefault = CustomerAnswerPromptDefaults.forTenant(tenant.getName());
+        String prompt = CustomerAnswerPromptDefaults.shouldUseTenantDefault(
+                storedPrompt, tenant.getName()) ? tenantDefault : storedPrompt.strip();
         return new CustomerAnswerPromptDtos.Response(
                 prompt,
-                CustomerAnswerPromptDefaults.PLATFORM_DEFAULT.equals(prompt),
+                tenantDefault.equals(prompt),
                 tenant.getUpdatedAt()
         );
     }

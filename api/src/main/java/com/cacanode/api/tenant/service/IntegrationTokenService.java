@@ -3,11 +3,14 @@ package com.cacanode.api.tenant.service;
 import com.cacanode.api.common.exception.custom.BadRequestException;
 import com.cacanode.api.common.exception.custom.ResourceNotFoundException;
 import com.cacanode.api.common.exception.custom.UnauthorizedException;
+import com.cacanode.api.tenant.api.TenantModuleApi;
+import com.cacanode.api.tenant.cache.IntegrationTokenCacheInvalidationPublisher;
 import com.cacanode.api.tenant.dto.IntegrationTokenDtos;
 import com.cacanode.api.tenant.model.Chatbot;
 import com.cacanode.api.tenant.model.IntegrationToken;
 import com.cacanode.api.tenant.repository.ChatbotRepository;
 import com.cacanode.api.tenant.repository.IntegrationTokenRepository;
+import com.cacanode.api.tenant.repository.WidgetConfigRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -22,9 +25,10 @@ import java.time.LocalDateTime;
 import java.util.Base64;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
-import com.cacanode.api.tenant.api.TenantModuleApi;
+import com.cacanode.api.tenant.enums.TenantStatus;
 
 @Service
 public class IntegrationTokenService {
@@ -36,24 +40,32 @@ public class IntegrationTokenService {
     private final IntegrationTokenRepository repository;
     private final ChatbotRepository chatbotRepository;
     private final TenantModuleApi tenantModuleApi;
+    private final IntegrationTokenCacheInvalidationPublisher cacheInvalidationPublisher;
+    @Autowired(required = false)
+    private WidgetConfigRepository widgetConfigRepository;
 
     @Autowired
     public IntegrationTokenService(
             IntegrationTokenRepository repository,
             ChatbotRepository chatbotRepository,
-            TenantModuleApi tenantModuleApi
+            TenantModuleApi tenantModuleApi,
+            IntegrationTokenCacheInvalidationPublisher cacheInvalidationPublisher
     ) {
         this.repository = repository;
         this.chatbotRepository = chatbotRepository;
         this.tenantModuleApi = tenantModuleApi;
+        this.cacheInvalidationPublisher = cacheInvalidationPublisher;
     }
 
     public IntegrationTokenService(IntegrationTokenRepository repository, ChatbotRepository chatbotRepository) {
-        this(repository, chatbotRepository, null);
+        this(repository, chatbotRepository, null, null);
     }
 
     @Value("${app.integrations.token-pepper:development-integration-token-pepper}")
     private String pepper;
+
+    @Value("${app.integrations.legacy-token-pepper:}")
+    private String legacyPepper;
 
     @Transactional(readOnly = true)
     public List<IntegrationTokenDtos.Item> list(UUID tenantId) {
@@ -93,16 +105,20 @@ public class IntegrationTokenService {
 
     @Transactional
     public void revoke(UUID tenantId, UUID tokenId) {
+        rejectManagedWidgetToken(tenantId, tokenId);
         IntegrationToken token = repository.findByIdAndTenant_Id(tokenId, tenantId)
                 .orElseThrow(() -> new ResourceNotFoundException("Integration token was not found"));
         token.setRevokedAt(LocalDateTime.now());
+        publishTokenInvalidation(token.getTokenHash());
     }
 
     @Transactional
     public IntegrationTokenDtos.Created rotate(UUID tenantId, UUID tokenId) {
+        rejectManagedWidgetToken(tenantId, tokenId);
         IntegrationToken token = repository.findByIdAndTenant_Id(tokenId, tenantId)
                 .orElseThrow(() -> new ResourceNotFoundException("Integration token was not found"));
         token.setRevokedAt(LocalDateTime.now());
+        publishTokenInvalidation(token.getTokenHash());
         LocalDateTime expiresAt = token.getExpiresAt() != null
                 && token.getExpiresAt().isAfter(LocalDateTime.now())
                 ? token.getExpiresAt() : null;
@@ -113,15 +129,39 @@ public class IntegrationTokenService {
 
     @Transactional
     public Principal authenticate(String authorization, String requiredScope) {
+        return authenticate(authorization, requiredScope, null);
+    }
+
+    @Transactional
+    public Principal authenticate(String authorization, String requiredScope, String parentOrigin) {
         String secret = bearerSecret(authorization);
-        IntegrationToken token = repository.findByTokenHash(hash(secret))
-                .orElseThrow(() -> new UnauthorizedException("Integration token is invalid"));
+        IntegrationToken token = findBySecret(secret);
         LocalDateTime now = LocalDateTime.now();
         if (token.getRevokedAt() != null || (token.getExpiresAt() != null && !token.getExpiresAt().isAfter(now))) {
             throw new UnauthorizedException("Integration token is expired or revoked");
         }
         if (!token.getScopes().contains(requiredScope)) {
             throw new UnauthorizedException("Integration token does not have the required scope");
+        }
+        if (!"ACTIVE".equals(token.getChatbot().getStatus().name())
+                || !"ACTIVE".equals(token.getChatbot().getKnowledgeBase().getStatus().name())) {
+            throw new UnauthorizedException("Integration token is invalid");
+        }
+        if (token.getTenant().getStatus() != TenantStatus.ACTIVE
+                && token.getTenant().getStatus() != TenantStatus.TRIAL) {
+            throw new UnauthorizedException("Integration token is invalid");
+        }
+        if (WIDGET_SCOPE.equals(requiredScope) && widgetConfigRepository != null
+                && widgetConfigRepository.findByChatbot_IdAndTenant_Id(
+                        token.getChatbot().getId(), token.getTenant().getId())
+                .filter(config -> config.isActive()).isEmpty()) {
+            throw new UnauthorizedException("Integration token is invalid");
+        }
+        if (WIDGET_SCOPE.equals(requiredScope)
+                && !token.getChatbot().getAllowedOrigins().isEmpty()
+                && !token.getChatbot().getAllowedOrigins().contains(parentOrigin)) {
+            throw new org.springframework.security.access.AccessDeniedException(
+                    "Website origin is not allowed");
         }
         if (tenantModuleApi != null && API_SCOPE.equals(requiredScope)
                 && !tenantModuleApi.getEntitlements(token.getTenant().getId()).apiAccess()) {
@@ -140,8 +180,7 @@ public class IntegrationTokenService {
     @Transactional
     public Principal authenticateForAnyChatScope(String authorization) {
         String secret = bearerSecret(authorization);
-        IntegrationToken token = repository.findByTokenHash(hash(secret))
-                .orElseThrow(() -> new UnauthorizedException("Integration token is invalid"));
+        IntegrationToken token = findBySecret(secret);
         LocalDateTime now = LocalDateTime.now();
         if (token.getRevokedAt() != null || (token.getExpiresAt() != null && !token.getExpiresAt().isAfter(now))) {
             throw new UnauthorizedException("Integration token is expired or revoked");
@@ -157,9 +196,44 @@ public class IntegrationTokenService {
     }
 
     public String hash(String secret) {
+        return hash(secret, pepper);
+    }
+
+    @Transactional
+    public void migrateHashIfRequired(IntegrationToken token, String secret) {
+        String currentHash = hash(secret);
+        if (currentHash.equals(token.getTokenHash())) {
+            return;
+        }
+        if (legacyPepper == null || legacyPepper.isBlank()
+                || !hash(secret, legacyPepper).equals(token.getTokenHash())) {
+            throw new IllegalStateException("Integration token hash does not match configured peppers");
+        }
+        String legacyHash = token.getTokenHash();
+        token.setTokenHash(currentHash);
+        repository.save(token);
+        publishTokenInvalidation(legacyHash);
+    }
+
+    private IntegrationToken findBySecret(String secret) {
+        String currentHash = hash(secret);
+        Optional<IntegrationToken> current = repository.findByTokenHash(currentHash);
+        if (current.isPresent()) {
+            return current.get();
+        }
+        if (legacyPepper == null || legacyPepper.isBlank() || legacyPepper.equals(pepper)) {
+            throw new UnauthorizedException("Integration token is invalid");
+        }
+        IntegrationToken legacy = repository.findByTokenHash(hash(secret, legacyPepper))
+                .orElseThrow(() -> new UnauthorizedException("Integration token is invalid"));
+        migrateHashIfRequired(legacy, secret);
+        return legacy;
+    }
+
+    private String hash(String secret, String configuredPepper) {
         try {
             Mac mac = Mac.getInstance("HmacSHA256");
-            mac.init(new SecretKeySpec(pepper.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
+            mac.init(new SecretKeySpec(configuredPepper.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
             return HexFormat.of().formatHex(mac.doFinal(secret.getBytes(StandardCharsets.UTF_8)));
         } catch (GeneralSecurityException e) {
             throw new IllegalStateException("Unable to hash integration token", e);
@@ -177,6 +251,19 @@ public class IntegrationTokenService {
         byte[] bytes = new byte[length];
         RANDOM.nextBytes(bytes);
         return bytes;
+    }
+
+    private void publishTokenInvalidation(String tokenHash) {
+        if (cacheInvalidationPublisher != null) {
+            cacheInvalidationPublisher.publishTokenHash(tokenHash);
+        }
+    }
+
+    private void rejectManagedWidgetToken(UUID tenantId, UUID tokenId) {
+        if (widgetConfigRepository != null
+                && widgetConfigRepository.existsByManagedWidgetToken_IdAndTenant_Id(tokenId, tenantId)) {
+            throw new BadRequestException("The automatic widget token is managed from Widget settings");
+        }
     }
 
     private IntegrationTokenDtos.Item toItem(IntegrationToken token) {

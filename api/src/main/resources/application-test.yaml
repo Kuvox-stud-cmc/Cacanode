@@ -7,6 +7,10 @@ app:
       - "http://127.0.0.1:*"
   security:
     cookie-secure: false
+  ai:
+    grpc:
+      target: localhost:50051
+      plaintext: true
   seaweedfs:
     s3-endpoint: http://localhost:8333
     bucket: cacanode
@@ -29,7 +33,7 @@ spring:
   flyway:
     enabled: false
   datasource:
-    url: jdbc:h2:mem:testdb;MODE=PostgreSQL;INIT=CREATE DOMAIN IF NOT EXISTS JSONB AS JSON;DB_CLOSE_DELAY=-1
+    url: jdbc:h2:mem:cacanode-${random.uuid};MODE=PostgreSQL;INIT=CREATE DOMAIN IF NOT EXISTS JSONB AS JSON;DB_CLOSE_DELAY=-1
     username: sa
     password:
     driver-class-name: org.h2.Driver

@@ -184,6 +184,64 @@ def test_graph_requires_evidence_and_replacement_is_idempotent(tmp_path: object)
         )
 
 
+def test_graph_scopes_matching_unit_ids_to_their_source(tmp_path: object) -> None:
+    repository = KuzuGraphRepository(str(tmp_path) + "/graph-scoped-units")
+
+    def batch(source_id: str, source_name: str) -> GraphBatch:
+        return GraphBatch(
+            tenant_id="tenant-a",
+            knowledge_base_id="kb-a",
+            source_id=source_id,
+            source_name=source_name,
+            units=(
+                {
+                    "unit_id": "shared-structural-unit",
+                    "text": f"Acme policy from {source_name}",
+                    "page_number": 1,
+                },
+            ),
+            entities=(
+                EntityMention(
+                    name="Acme",
+                    normalized_name="acme",
+                    entity_type="organization",
+                    evidence_unit_id="shared-structural-unit",
+                ),
+            ),
+        )
+
+    repository.replace_source(batch("source-a", "first.txt"))
+    repository.replace_source(batch("source-b", "second.txt"))
+    repository.replace_source(batch("source-a", "first.txt"))
+
+    results = repository.search(
+        GraphSearchRequest(tenant_id="tenant-a", knowledge_base_id="kb-a", query="Acme")
+    )
+    assert {(result["document_id"], result["unit_id"]) for result in results} == {
+        ("source-a", "shared-structural-unit"),
+        ("source-b", "shared-structural-unit"),
+    }
+
+
+def test_graph_preserves_constraint_error_when_kuzu_ends_transaction(tmp_path: object) -> None:
+    repository = KuzuGraphRepository(str(tmp_path) + "/graph-rollback")
+    duplicate_units = GraphBatch(
+        tenant_id="tenant-a",
+        knowledge_base_id="kb-a",
+        source_id="source-a",
+        source_name="duplicate.txt",
+        units=(
+            {"unit_id": "duplicate", "text": "First", "page_number": 1},
+            {"unit_id": "duplicate", "text": "Second", "page_number": 1},
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="duplicated primary key") as error:
+        repository.replace_source(duplicate_units)
+
+    assert "No active transaction for ROLLBACK" not in str(error.value)
+
+
 @pytest.mark.asyncio
 async def test_graph_extraction_splits_batches_when_model_hits_output_limit() -> None:
     class LengthLimitedModel:

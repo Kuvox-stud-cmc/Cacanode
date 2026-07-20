@@ -55,6 +55,8 @@ public class SecurityConfig {
             "/api/chat/widget-config",
             "/api/v1/public/**",
             "/api/v1/external/tickets",
+            "/api/v1/widget/chat/**",
+            "/api/v1/external/chat/**",
             "/widget/**"
     };
 

@@ -4,8 +4,16 @@ server:
 spring:
   application:
     name: cacanode-api
+  servlet:
+    multipart:
+      max-file-size: ${MAX_UPLOAD_FILE_SIZE:20MB}
+      max-request-size: ${MAX_UPLOAD_REQUEST_SIZE:21MB}
   profiles:
     active: ${SPRING_PROFILES_ACTIVE:dev}
+  data:
+    redis:
+      connect-timeout: ${REDIS_CONNECT_TIMEOUT_SECONDS:1}s
+      timeout: ${REDIS_OPERATION_TIMEOUT_SECONDS:1}s
 management:
   endpoints:
     web:
@@ -18,6 +26,31 @@ logging:
     web: INFO
 
 app:
+  cache:
+    enabled: ${CACHE_ENABLED:false}
+    key-prefix: ${CACHE_KEY_PREFIX:ccn:v1}
+    ttl-jitter-percent: ${CACHE_TTL_JITTER_PERCENT:10}
+    integration-token-enabled: ${INTEGRATION_TOKEN_CACHE_ENABLED:false}
+    integration-token-ttl-seconds: ${INTEGRATION_TOKEN_CACHE_TTL_SECONDS:60}
+    business-read-enabled: ${BUSINESS_READ_CACHE_ENABLED:false}
+    widget-config-enabled: ${WIDGET_CONFIG_CACHE_ENABLED:false}
+    widget-config-ttl-seconds: ${WIDGET_CONFIG_CACHE_TTL_SECONDS:120}
+    customer-answer-prompt-enabled: ${CUSTOMER_ANSWER_PROMPT_CACHE_ENABLED:false}
+    customer-answer-prompt-ttl-seconds: ${CUSTOMER_ANSWER_PROMPT_CACHE_TTL_SECONDS:120}
+    billing-account-enabled: ${BILLING_ACCOUNT_CACHE_ENABLED:false}
+    billing-account-ttl-seconds: ${BILLING_ACCOUNT_CACHE_TTL_SECONDS:30}
+    workspace-enabled: ${WORKSPACE_CACHE_ENABLED:false}
+    workspace-ttl-seconds: ${WORKSPACE_CACHE_TTL_SECONDS:300}
+    dashboard-enabled: ${DASHBOARD_CACHE_ENABLED:false}
+    dashboard-ttl-seconds: ${DASHBOARD_CACHE_TTL_SECONDS:20}
+    analytics-enabled: ${ANALYTICS_CACHE_ENABLED:false}
+    analytics-ttl-seconds: ${ANALYTICS_CACHE_TTL_SECONDS:60}
+    user-directory-enabled: ${USER_DIRECTORY_CACHE_ENABLED:false}
+    user-directory-ttl-seconds: ${USER_DIRECTORY_CACHE_TTL_SECONDS:30}
+    document-list-enabled: ${DOCUMENT_LIST_CACHE_ENABLED:false}
+    document-list-ttl-seconds: ${DOCUMENT_LIST_CACHE_TTL_SECONDS:15}
+    embedding-enabled: ${EMBEDDING_CACHE_ENABLED:false}
+    retrieval-enabled: ${RETRIEVAL_CACHE_ENABLED:false}
   rate-limit:
     enabled: ${PUBLIC_RATE_LIMIT_ENABLED:true}
     public-requests-per-minute: ${PUBLIC_RATE_LIMIT_PER_MINUTE:120}

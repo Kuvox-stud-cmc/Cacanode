@@ -1,55 +1,25 @@
-from app.core.config import DEFAULT_POSTGRES_PASSWORD, Settings
+from __future__ import annotations
+
+import pytest
+from pydantic import ValidationError
+
+from app.core.config import Settings
 
 
-def test_postgres_url_uses_component_password_when_url_has_placeholder() -> None:
-    settings = Settings(
-        _env_file=(),
-        POSTGRES_URL=f"postgresql://cacanode:{DEFAULT_POSTGRES_PASSWORD}@localhost:5432/cacanode",
-        POSTGRES_PASSWORD="real-secret",
-    )
-
-    assert settings.POSTGRES_URL == "postgresql://cacanode:real-secret@localhost:5432/cacanode"
+def test_ai_settings_have_no_postgres_or_business_auth_fields() -> None:
+    configured = Settings(_env_file=())
+    assert not any(name.startswith("POSTGRES_") for name in type(configured).model_fields)
+    assert "TOKEN_KEY" not in type(configured).model_fields
+    assert "INTEGRATION_TOKEN_PEPPER" not in type(configured).model_fields
 
 
-def test_postgres_url_keeps_explicit_non_placeholder_password() -> None:
-    settings = Settings(
-        _env_file=(),
-        POSTGRES_URL="postgresql://cacanode:explicit@localhost:5432/cacanode",
-        POSTGRES_PASSWORD="real-secret",
-    )
-
-    assert settings.POSTGRES_URL == "postgresql://cacanode:explicit@localhost:5432/cacanode"
+def test_grpc_defaults_are_plaintext_for_local_development() -> None:
+    configured = Settings(_env_file=())
+    assert configured.GRPC_PLAINTEXT is True
+    assert configured.GRPC_PORT == 50051
+    assert configured.GENERATION_RESULT_CACHE_TTL_SECONDS == 600
 
 
-def test_llm_provider_defaults_to_ollama_with_openai_fields_available() -> None:
-    settings = Settings(_env_file=())
-
-    assert settings.LLM_PROVIDER == "ollama"
-    assert settings.OPENAI_API_KEY == ""
-    assert settings.OPENAI_MODEL == "o4-mini"
-
-
-def test_model_configured_uses_ollama_settings_for_ollama_provider() -> None:
-    settings = Settings(_env_file=(), LLM_PROVIDER="ollama", LLM_MODEL_ID="gemma4:12b")
-
-    assert settings.model_configured is True
-
-
-def test_model_configured_uses_openai_settings_for_openai_provider() -> None:
-    configured = Settings(
-        _env_file=(),
-        LLM_PROVIDER="openai",
-        LLM_MODEL_ID="",
-        OPENAI_API_KEY="test-key",
-        OPENAI_MODEL="gpt-test",
-    )
-    missing_key = Settings(
-        _env_file=(),
-        LLM_PROVIDER="openai",
-        LLM_MODEL_ID="gemma4:12b",
-        OPENAI_API_KEY="",
-        OPENAI_MODEL="gpt-test",
-    )
-
-    assert configured.model_configured is True
-    assert missing_key.model_configured is False
+def test_mtls_requires_complete_server_material() -> None:
+    with pytest.raises(ValidationError, match="mTLS material"):
+        Settings(_env_file=(), GRPC_PLAINTEXT=False)

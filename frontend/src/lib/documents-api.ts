@@ -5,7 +5,7 @@ import type {
   DocumentUploadResponse,
   DocumentVisibility,
 } from "@/types";
-import { getAiApiBase, getApiBase } from "@/lib/auth-api";
+import { getApiBase } from "@/lib/auth-api";
 import { readJsonOrThrow } from "@/lib/api-error";
 
 export type ApiRequest = (endpoint: string, options?: RequestInit) => Promise<Response>;
@@ -61,7 +61,7 @@ export async function getDocumentUnitsApi(
   request: ApiRequest,
   documentId: string,
 ): Promise<DocumentUnit[]> {
-  const res = await request(`${getAiApiBase()}/documents/${documentId}/units`);
+  const res = await request(`${getApiBase()}/documents/${documentId}/units`);
   return readJsonOrThrow<DocumentUnit[]>(res);
 }
 

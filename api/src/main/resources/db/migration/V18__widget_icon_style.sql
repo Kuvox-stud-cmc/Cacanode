@@ -1,0 +1,2 @@
+ALTER TABLE widget_configs
+    ADD COLUMN icon_style VARCHAR(30) NOT NULL DEFAULT 'STANDARD';

@@ -52,4 +52,7 @@ public class KnowledgeBase extends BaseEntity {
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 50)
     private KnowledgeBaseStatus status = KnowledgeBaseStatus.ACTIVE;
+
+    @Column(name = "search_revision", nullable = false)
+    private long searchRevision;
 }

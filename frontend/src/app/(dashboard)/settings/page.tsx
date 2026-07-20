@@ -1,8 +1,9 @@
 "use client";
 
 import { Suspense, useEffect, useMemo, useState } from "react";
+import type { CSSProperties } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Check, Copy, CreditCard, KeyRound, Loader2, Play, Plus, RefreshCw, RotateCcw, Trash2 } from "lucide-react";
+import { Check, Code2, Copy, CreditCard, KeyRound, Loader2, Play, Plus, RefreshCw, RotateCcw, ShieldCheck, Trash2 } from "lucide-react";
 import toast from "react-hot-toast";
 import PlanCardGrid, {
   normalizePlanId,
@@ -11,10 +12,14 @@ import PlanCardGrid, {
 import { useAuthStore } from "@/components/providers/StoreProvider";
 import { useApiClient } from "@/hooks/useApiClient";
 import { publicConfig } from "@/lib/public-config";
+import InteractiveWidgetPreview from "@/components/widget/InteractiveWidgetPreview";
 import {
   createIntegrationToken,
   createWebhook,
+  deleteWidgetIcon,
   deleteWebhook,
+  downloadWidgetIcon,
+  getWidgetEmbed,
   getWidgetSettings,
   listIntegrationTokens,
   listWebhooks,
@@ -23,10 +28,12 @@ import {
   rotateWebhookSecret,
   testWebhook,
   updateWidgetSettings,
+  uploadWidgetIcon,
   type IntegrationScope,
   type IntegrationToken,
   type WebhookEndpoint,
   type WidgetSettings,
+  type WidgetEmbed,
 } from "@/lib/integrations-api";
 import {
   getCustomerAnswerPrompt,
@@ -63,6 +70,24 @@ import {
 } from "@/lib/billing-api";
 
 const WEBHOOK_EVENTS = ["conversation.started", "conversation.closed", "ticket.created"];
+const WIDGET_ICON_STYLES: Array<{
+  value: WidgetSettings["iconStyle"];
+  label: string;
+  description: string;
+}> = [
+  { value: "STANDARD", label: "Default", description: "Balanced drop shadow" },
+  { value: "GLOW", label: "Glow", description: "Bright branded halo" },
+  { value: "PULSE", label: "Pulse", description: "Gentle attention animation" },
+  { value: "SOFT_SHADOW", label: "Soft", description: "Wide floating shadow" },
+];
+
+function widgetIconStyleClass(style: WidgetSettings["iconStyle"]): string {
+  return `widget-launcher-style widget-launcher-style--${(style ?? "STANDARD").toLowerCase().replace("_", "-")}`;
+}
+
+function widgetIconStyleVars(color: string): CSSProperties {
+  return { backgroundColor: color, "--widget-launcher-color": color } as CSSProperties;
+}
 
 function formatDate(value: string | null): string {
   return value ? new Date(value).toLocaleString() : "Never";
@@ -85,6 +110,11 @@ function SettingsPageContent() {
   const { request } = useApiClient();
   const [loading, setLoading] = useState(true);
   const [widget, setWidget] = useState<WidgetSettings | null>(null);
+  const [widgetIconPreview, setWidgetIconPreview] = useState<string | null>(null);
+  const [widgetIconBusy, setWidgetIconBusy] = useState(false);
+  const [widgetEmbed, setWidgetEmbed] = useState<WidgetEmbed | null>(null);
+  const [widgetEmbedLoading, setWidgetEmbedLoading] = useState(true);
+  const [widgetEmbedError, setWidgetEmbedError] = useState<string | null>(null);
   const [origins, setOrigins] = useState("");
   const [tokens, setTokens] = useState<IntegrationToken[]>([]);
   const [webhooks, setWebhooks] = useState<WebhookEndpoint[]>([]);
@@ -119,17 +149,28 @@ function SettingsPageContent() {
     let cancelled = false;
     Promise.all([
       getWidgetSettings(request),
-      listIntegrationTokens(request),
+      (async () => {
+        const embedResult = await getWidgetEmbed(request)
+          .then((embed) => ({ embed, error: null as string | null }))
+          .catch((error: unknown) => ({
+            embed: null,
+            error: error instanceof Error ? error.message : "Unable to load widget installation code",
+          }));
+        return { ...embedResult, tokens: await listIntegrationTokens(request) };
+      })(),
       listWebhooks(request),
       getCustomerAnswerPrompt(request),
       getBillingAccount(request),
       getPublicBillingPlans(),
     ])
-      .then(([widgetResult, tokenResult, webhookResult, promptResult, accountResult, plansResult]) => {
+      .then(([widgetResult, integrationResult, webhookResult, promptResult, accountResult, plansResult]) => {
         if (cancelled) return;
-        setWidget(widgetResult);
+        setWidget({ ...widgetResult, iconStyle: widgetResult.iconStyle ?? "STANDARD" });
+        setWidgetEmbed(integrationResult.embed);
+        setWidgetEmbedError(integrationResult.error);
+        setWidgetEmbedLoading(false);
         setOrigins(widgetResult.allowedOrigins.join("\n"));
-        setTokens(tokenResult);
+        setTokens(integrationResult.tokens);
         setWebhooks(webhookResult);
         setPromptSettings(promptResult);
         setPromptDraft(promptResult.prompt);
@@ -139,9 +180,31 @@ function SettingsPageContent() {
         setPlan(accountResult.planCode);
       })
       .catch((error) => toast.error(error instanceof Error ? error.message : "Unable to load settings"))
-      .finally(() => !cancelled && setLoading(false));
+      .finally(() => {
+        if (!cancelled) {
+          setWidgetEmbedLoading(false);
+          setLoading(false);
+        }
+      });
     return () => { cancelled = true; };
   }, [request, router, setPlan, user]);
+
+  useEffect(() => {
+    if (!widget?.iconUrl) return;
+    let cancelled = false;
+    downloadWidgetIcon(request)
+      .then((blob) => {
+        if (!cancelled) setWidgetIconPreview(URL.createObjectURL(blob));
+      })
+      .catch(() => {
+        if (!cancelled) setWidgetIconPreview(null);
+      });
+    return () => { cancelled = true; };
+  }, [request, widget?.iconUrl]);
+
+  useEffect(() => () => {
+    if (widgetIconPreview) URL.revokeObjectURL(widgetIconPreview);
+  }, [widgetIconPreview]);
 
   useEffect(() => {
     const paymentId = searchParams.get("paymentId");
@@ -186,6 +249,15 @@ function SettingsPageContent() {
     return `<script async src="${widgetUrl}" data-token="${newSecret}"></script>`;
   }, [newSecret, newSecretScopes]);
 
+  const managedWidgetEmbedCode = useMemo(() => {
+    if (!widgetEmbed) return null;
+    const configuredUrl = publicConfig.widgetUrl;
+    const fallbackUrl = publicConfig.apiBaseUrl
+      ? new URL("/widget/v1/cacanode-chat.js", publicConfig.apiBaseUrl).toString()
+      : "/widget/v1/cacanode-chat.js";
+    return `<script async src="${configuredUrl ?? fallbackUrl}" data-token="${widgetEmbed.secret}"></script>`;
+  }, [widgetEmbed]);
+
   async function saveWidget() {
     if (!widget) return;
     setSaving(true);
@@ -201,6 +273,57 @@ function SettingsPageContent() {
       toast.error(error instanceof Error ? error.message : "Unable to save widget settings");
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function reloadWidgetEmbed() {
+    setWidgetEmbedLoading(true);
+    setWidgetEmbedError(null);
+    try {
+      setWidgetEmbed(await getWidgetEmbed(request));
+    } catch (error) {
+      setWidgetEmbed(null);
+      setWidgetEmbedError(error instanceof Error ? error.message : "Unable to load widget installation code");
+    } finally {
+      setWidgetEmbedLoading(false);
+    }
+  }
+
+  async function uploadIcon(file: File | undefined) {
+    if (!file) return;
+    if (!["image/png", "image/jpeg", "image/webp"].includes(file.type) || file.size > 2 * 1024 * 1024) {
+      toast.error("Choose a PNG, JPEG, or WebP image up to 2 MB");
+      return;
+    }
+    setWidgetIconBusy(true);
+    try {
+      const updated = await uploadWidgetIcon(request, file);
+      setWidget(updated);
+      try {
+        const blob = await downloadWidgetIcon(request);
+        setWidgetIconPreview(URL.createObjectURL(blob));
+      } catch {
+        setWidgetIconPreview(null);
+      }
+      toast.success("Widget icon uploaded");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to upload widget icon");
+    } finally {
+      setWidgetIconBusy(false);
+    }
+  }
+
+  async function removeIcon() {
+    setWidgetIconBusy(true);
+    try {
+      await deleteWidgetIcon(request);
+      setWidget((current) => current ? { ...current, iconUrl: null } : current);
+      setWidgetIconPreview(null);
+      toast.success("Widget icon removed");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to remove widget icon");
+    } finally {
+      setWidgetIconBusy(false);
     }
   }
 
@@ -382,6 +505,33 @@ function SettingsPageContent() {
                   <div className="space-y-1.5"><Label>Primary color</Label><div className="flex gap-2"><input type="color" className="h-9 w-12" value={widget.primaryColor} onChange={(event) => setWidget({ ...widget, primaryColor: event.target.value })} /><Input value={widget.primaryColor} onChange={(event) => setWidget({ ...widget, primaryColor: event.target.value })} /></div></div>
                   <div className="space-y-1.5"><Label>Position</Label><select className="h-9 w-full rounded-md border border-slate-200 px-3 text-sm" value={widget.position} onChange={(event) => setWidget({ ...widget, position: event.target.value as WidgetSettings["position"] })}><option value="BOTTOM_RIGHT">Bottom right</option><option value="BOTTOM_LEFT">Bottom left</option></select></div>
                 </div>
+                <div className="space-y-2">
+                  <Label htmlFor="widget-icon">Widget icon</Label>
+                  <div className="flex flex-wrap items-center gap-3">
+                    <label htmlFor="widget-icon" className="inline-flex h-9 cursor-pointer items-center rounded-md border border-slate-200 bg-white px-3 text-sm font-medium hover:bg-slate-50">
+                      {widgetIconBusy ? "Uploading..." : widget.iconUrl ? "Replace icon" : "Upload icon"}
+                    </label>
+                    <input id="widget-icon" className="sr-only" type="file" accept="image/png,image/jpeg,image/webp" disabled={widgetIconBusy}
+                      onChange={(event) => { void uploadIcon(event.target.files?.[0]); event.currentTarget.value = ""; }} />
+                    {widget.iconUrl && <Button type="button" variant="outline" onClick={() => void removeIcon()} disabled={widgetIconBusy}><Trash2 />Remove</Button>}
+                  </div>
+                  <p className="text-xs text-slate-500">PNG, JPEG, or WebP. Maximum 2 MB. SVG is not supported.</p>
+                </div>
+                <div className="space-y-2">
+                  <Label>Icon style</Label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {WIDGET_ICON_STYLES.map((option) => (
+                      <button key={option.value} type="button"
+                        aria-pressed={widget.iconStyle === option.value}
+                        onClick={() => setWidget({ ...widget, iconStyle: option.value })}
+                        className={`flex items-center gap-3 rounded-md border p-3 text-left transition ${widget.iconStyle === option.value ? "border-indigo-500 bg-indigo-50 ring-1 ring-indigo-200" : "border-slate-200 bg-white hover:bg-slate-50"}`}>
+                        <span className={`${widgetIconStyleClass(option.value)} grid size-9 shrink-0 place-items-center rounded-full text-xs text-white`}
+                          style={widgetIconStyleVars(widget.primaryColor)} aria-hidden="true">?</span>
+                        <span className="min-w-0"><strong className="block text-sm text-slate-800">{option.label}</strong><span className="block text-xs text-slate-500">{option.description}</span></span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
                 <div className="space-y-1.5"><Label>Allowed origins</Label><textarea className="min-h-24 w-full rounded-md border border-slate-200 p-3 font-mono text-sm" value={origins} onChange={(event) => setOrigins(event.target.value)} placeholder="https://example.com" /><p className="text-xs text-amber-700">Leave empty to allow the widget on every website. Browser tokens can be inspected and consume your quota.</p></div>
                 <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={widget.active} onChange={(event) => setWidget({ ...widget, active: event.target.checked })} />Widget active</label>
                 <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={widget.hideCacanodeBranding}
@@ -389,12 +539,35 @@ function SettingsPageContent() {
                   onChange={(event) => setWidget({ ...widget, hideCacanodeBranding: event.target.checked })} />Hide CacaNode branding</label>
                 {!billingAccount?.features.customBranding && <p className="text-xs text-amber-700">Your preference is preserved, but Starter always displays CacaNode branding.</p>}
                 <Button onClick={() => void saveWidget()} disabled={saving}>{saving && <Loader2 className="animate-spin" />}Save widget</Button>
+                <section className="overflow-hidden rounded-xl border border-indigo-100 bg-gradient-to-br from-indigo-50 via-white to-violet-50 shadow-sm">
+                  <div className="flex items-start gap-3 p-4 pb-3">
+                    <span className="grid size-10 shrink-0 place-items-center rounded-lg bg-indigo-600 text-white shadow-sm shadow-indigo-200"><Code2 className="size-5" /></span>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2"><h3 className="font-semibold text-slate-900">Install your widget</h3>{managedWidgetEmbedCode && <Badge className="border-emerald-200 bg-emerald-50 text-emerald-700">Ready to use</Badge>}</div>
+                      <p className="mt-1 text-sm leading-5 text-slate-600">Copy this snippet and paste it before your website&apos;s closing <code className="rounded bg-white px-1 py-0.5 text-xs text-indigo-700 shadow-sm">&lt;/body&gt;</code> tag.</p>
+                    </div>
+                  </div>
+                  {managedWidgetEmbedCode ? <div className="mx-4 overflow-hidden rounded-lg border border-slate-800 bg-slate-950 shadow-lg shadow-slate-900/10">
+                    <div className="flex items-center justify-between border-b border-white/10 bg-white/[0.04] px-3 py-2">
+                      <div className="flex items-center gap-1.5" aria-hidden="true"><span className="size-2.5 rounded-full bg-red-400" /><span className="size-2.5 rounded-full bg-amber-400" /><span className="size-2.5 rounded-full bg-emerald-400" /></div>
+                      <span className="font-mono text-[10px] font-medium uppercase tracking-widest text-slate-400">HTML</span>
+                      <Button type="button" size="sm" variant="ghost" aria-label="Copy widget installation code"
+                        className="h-7 border border-white/10 bg-white/5 px-2 text-xs text-slate-200 hover:bg-white/10 hover:text-white"
+                        onClick={() => void copyText(managedWidgetEmbedCode)}>{copied ? <><Check className="text-emerald-400" />Copied</> : <><Copy />Copy</>}</Button>
+                    </div>
+                    <pre className="max-h-36 overflow-auto whitespace-pre-wrap break-all p-4 font-mono text-xs leading-6 text-sky-200 selection:bg-indigo-500/40">{managedWidgetEmbedCode}</pre>
+                  </div> : <div className="mx-4 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+                    <p>{widgetEmbedLoading ? "Loading your widget installation code..." : widgetEmbedError ?? "Widget installation code is temporarily unavailable."}</p>
+                    {!widgetEmbedLoading && <Button type="button" size="sm" variant="outline" className="mt-3 bg-white" onClick={() => void reloadWidgetEmbed()}><RefreshCw />Retry</Button>}
+                  </div>}
+                  {widgetEmbed && <div className="flex items-start gap-2.5 p-4 text-xs leading-5 text-slate-600">
+                    <ShieldCheck className="mt-0.5 size-4 shrink-0 text-emerald-600" />
+                    <p><span className="font-medium text-slate-700">Scoped browser token</span> · {widgetEmbed.tokenPrefix}... can only access widget chat. Visitors can inspect it, and their messages count toward your quota.</p>
+                  </div>}
+                </section>
               </CardContent>
             </Card>
-            <div className="relative min-h-80 overflow-hidden rounded-md border bg-slate-100">
-              <div className="p-5 text-sm text-slate-500">Customer website preview</div>
-              <button type="button" className={`absolute bottom-5 ${widget.position === "BOTTOM_LEFT" ? "left-5" : "right-5"} grid size-14 place-items-center rounded-full text-white shadow-lg`} style={{ backgroundColor: widget.primaryColor }}>?</button>
-            </div>
+            <InteractiveWidgetPreview widget={widget} embed={widgetEmbed} iconPreviewUrl={widgetIconPreview} />
           </div>}
         </TabsContent>
 
@@ -555,7 +728,7 @@ function SettingsPageContent() {
           {!billingAccount?.features.apiAccess && <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">Widget tokens remain available. Creating or using api:chat tokens requires Pro.</p>}
           {newSecret && <Card><CardHeader><CardTitle className="text-base">New token</CardTitle></CardHeader><CardContent className="space-y-3"><p className="text-sm text-amber-700">This value is shown once. Store it before closing this panel.</p><div className="flex gap-2"><code className="min-w-0 flex-1 overflow-x-auto rounded-md bg-slate-950 p-3 text-xs text-white">{newSecret}</code><Button variant="outline" size="icon" onClick={() => void copyText(newSecret)}>{copied ? <Check /> : <Copy />}</Button></div>{embedCode && <div className="space-y-2"><Label>Widget embed code</Label><pre className="overflow-x-auto rounded-md bg-slate-950 p-3 text-xs text-white">{embedCode}</pre><Button variant="outline" onClick={() => void copyText(embedCode)}><Copy />Copy embed code</Button></div>}</CardContent></Card>}
           <div className="divide-y rounded-md border bg-white">
-            {tokens.map((token) => <div key={token.id} className="flex flex-wrap items-center gap-3 p-4"><KeyRound className="size-4 text-slate-400" /><div className="min-w-44 flex-1"><p className="font-medium text-slate-800">{token.name}</p><p className="font-mono text-xs text-slate-500">{token.tokenPrefix}...</p></div><div className="flex gap-1">{token.scopes.map((scope) => <Badge key={scope} variant="outline">{scope}</Badge>)}</div><div className="text-right text-xs text-slate-500"><p>Expires: {formatDate(token.expiresAt)}</p><p>Last used: {formatDate(token.lastUsedAt)}</p></div>{token.revokedAt ? <Badge variant="outline">Revoked</Badge> : <><Button variant="ghost" size="icon" title="Rotate token" onClick={() => void rotateToken(token.id)}><RefreshCw /></Button><Button variant="ghost" size="icon" title="Revoke token" onClick={() => void revokeToken(token.id)}><Trash2 /></Button></>}</div>)}
+            {tokens.map((token) => <div key={token.id} className="flex flex-wrap items-center gap-3 p-4"><KeyRound className="size-4 text-slate-400" /><div className="min-w-44 flex-1"><p className="font-medium text-slate-800">{token.name}</p><p className="font-mono text-xs text-slate-500">{token.tokenPrefix}...</p></div><div className="flex gap-1">{token.scopes.map((scope) => <Badge key={scope} variant="outline">{scope}</Badge>)}{widgetEmbed?.tokenId === token.id && <Badge variant="outline">Managed widget token</Badge>}</div><div className="text-right text-xs text-slate-500"><p>Expires: {formatDate(token.expiresAt)}</p><p>Last used: {formatDate(token.lastUsedAt)}</p></div>{token.revokedAt ? <Badge variant="outline">Revoked</Badge> : widgetEmbed?.tokenId === token.id ? null : <><Button variant="ghost" size="icon" title="Rotate token" onClick={() => void rotateToken(token.id)}><RefreshCw /></Button><Button variant="ghost" size="icon" title="Revoke token" onClick={() => void revokeToken(token.id)}><Trash2 /></Button></>}</div>)}
             {tokens.length === 0 && <p className="p-8 text-center text-sm text-slate-500">No integration tokens</p>}
           </div>
         </TabsContent>

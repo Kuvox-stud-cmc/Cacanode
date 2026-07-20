@@ -1,8 +1,43 @@
 x-local-environment: &local-environment
   APP_ENV: ${APP_ENV:-development}
   LOG_LEVEL: ${LOG_LEVEL:-INFO}
-  POSTGRES_URL: postgresql://${POSTGRES_USER:-cacanode}:${POSTGRES_PASSWORD:-change-me}@postgres:5432/${POSTGRES_DB:-cacanode}
   REDIS_URL: redis://redis:6379/0
+  REDIS_CONNECT_TIMEOUT_SECONDS: ${REDIS_CONNECT_TIMEOUT_SECONDS:-1}
+  REDIS_OPERATION_TIMEOUT_SECONDS: ${REDIS_OPERATION_TIMEOUT_SECONDS:-1}
+  CACHE_ENABLED: ${CACHE_ENABLED:-false}
+  CACHE_KEY_PREFIX: "${CACHE_KEY_PREFIX:-ccn:v1}"
+  CACHE_TTL_JITTER_PERCENT: ${CACHE_TTL_JITTER_PERCENT:-10}
+  WIDGET_CONFIG_CACHE_ENABLED: ${WIDGET_CONFIG_CACHE_ENABLED:-false}
+  WIDGET_CONFIG_CACHE_TTL_SECONDS: ${WIDGET_CONFIG_CACHE_TTL_SECONDS:-120}
+  CUSTOMER_ANSWER_PROMPT_CACHE_ENABLED: ${CUSTOMER_ANSWER_PROMPT_CACHE_ENABLED:-false}
+  CUSTOMER_ANSWER_PROMPT_CACHE_TTL_SECONDS: ${CUSTOMER_ANSWER_PROMPT_CACHE_TTL_SECONDS:-120}
+  BILLING_ACCOUNT_CACHE_ENABLED: ${BILLING_ACCOUNT_CACHE_ENABLED:-false}
+  BILLING_ACCOUNT_CACHE_TTL_SECONDS: ${BILLING_ACCOUNT_CACHE_TTL_SECONDS:-30}
+  WORKSPACE_CACHE_ENABLED: ${WORKSPACE_CACHE_ENABLED:-false}
+  WORKSPACE_CACHE_TTL_SECONDS: ${WORKSPACE_CACHE_TTL_SECONDS:-300}
+  DASHBOARD_CACHE_ENABLED: ${DASHBOARD_CACHE_ENABLED:-false}
+  DASHBOARD_CACHE_TTL_SECONDS: ${DASHBOARD_CACHE_TTL_SECONDS:-20}
+  ANALYTICS_CACHE_ENABLED: ${ANALYTICS_CACHE_ENABLED:-false}
+  ANALYTICS_CACHE_TTL_SECONDS: ${ANALYTICS_CACHE_TTL_SECONDS:-60}
+  USER_DIRECTORY_CACHE_ENABLED: ${USER_DIRECTORY_CACHE_ENABLED:-false}
+  USER_DIRECTORY_CACHE_TTL_SECONDS: ${USER_DIRECTORY_CACHE_TTL_SECONDS:-30}
+  DOCUMENT_LIST_CACHE_ENABLED: ${DOCUMENT_LIST_CACHE_ENABLED:-false}
+  DOCUMENT_LIST_CACHE_TTL_SECONDS: ${DOCUMENT_LIST_CACHE_TTL_SECONDS:-15}
+  EMBEDDING_CACHE_ENABLED: ${EMBEDDING_CACHE_ENABLED:-false}
+  EMBEDDING_CACHE_TTL_SECONDS: ${EMBEDDING_CACHE_TTL_SECONDS:-86400}
+  RETRIEVAL_CACHE_ENABLED: ${RETRIEVAL_CACHE_ENABLED:-false}
+  RETRIEVAL_CACHE_TTL_SECONDS: ${RETRIEVAL_CACHE_TTL_SECONDS:-120}
+  SEMANTIC_ANSWER_CACHE_MODE: ${SEMANTIC_ANSWER_CACHE_MODE:-off}
+  SEMANTIC_ANSWER_CACHE_TTL_SECONDS: ${SEMANTIC_ANSWER_CACHE_TTL_SECONDS:-3600}
+  SEMANTIC_ANSWER_CACHE_SIMILARITY_THRESHOLD: ${SEMANTIC_ANSWER_CACHE_SIMILARITY_THRESHOLD:-0.97}
+  SEMANTIC_ANSWER_CACHE_COLLECTION: ${SEMANTIC_ANSWER_CACHE_COLLECTION:-semantic_answer_cache_v1}
+  SEMANTIC_ANSWER_CACHE_VECTOR_NAME: ${SEMANTIC_ANSWER_CACHE_VECTOR_NAME:-query_v1}
+  SEMANTIC_ANSWER_CACHE_CANDIDATE_LIMIT: ${SEMANTIC_ANSWER_CACHE_CANDIDATE_LIMIT:-5}
+  SEMANTIC_ANSWER_CACHE_CLEANUP_BATCH_SIZE: ${SEMANTIC_ANSWER_CACHE_CLEANUP_BATCH_SIZE:-1000}
+  GENERATION_RESULT_CACHE_TTL_SECONDS: ${GENERATION_RESULT_CACHE_TTL_SECONDS:-600}
+  GRPC_HOST: 0.0.0.0
+  GRPC_PORT: 50051
+  GRPC_PLAINTEXT: true
   RABBITMQ_URL: amqp://${RABBITMQ_DEFAULT_USER:-rag_user}:${RABBITMQ_DEFAULT_PASS:-rag_password}@rabbitmq:5672/
   QDRANT_URL: http://qdrant:6333
   QDRANT_COLLECTION: ${QDRANT_COLLECTION:-knowledge_units_v2}
@@ -11,7 +46,6 @@ x-local-environment: &local-environment
   KUZU_DATABASE_PATH: /data/kuzu/cacanode.kuzu
   GRAPH_SERVICE_URL: http://graph-service:8010
   GRAPH_INTERNAL_TOKEN: ${GRAPH_INTERNAL_TOKEN:-development-graph-token}
-  INGESTION_INTERNAL_TOKEN: ${INGESTION_INTERNAL_TOKEN:-development-ingestion-token}
   SEAWEEDFS_MASTER_URL: http://seaweedfs-master:9333
   SEAWEEDFS_FILER_URL: http://seaweedfs-filer:8888
   SEAWEEDFS_S3_ENDPOINT: http://seaweedfs-s3:8333
@@ -47,7 +81,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-cacanode}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - "${POSTGRES_PORT:-15432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -60,7 +94,7 @@ services:
     image: redis:7-alpine
     restart: unless-stopped
     ports:
-      - "${REDIS_PORT:-6379}:6379"
+      - "${REDIS_PORT:-16379}:6379"
     volumes:
       - redis_data:/data
     healthcheck:
@@ -76,8 +110,8 @@ services:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER:-rag_user}
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS:-rag_password}
     ports:
-      - "${RABBITMQ_PORT:-5672}:5672"
-      - "${RABBITMQ_MANAGEMENT_PORT:-15672}:15672"
+      - "${RABBITMQ_PORT:-15673}:5672"
+      - "${RABBITMQ_MANAGEMENT_PORT:-25672}:15672"
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
     healthcheck:
@@ -90,8 +124,8 @@ services:
     image: qdrant/qdrant:latest
     restart: unless-stopped
     ports:
-      - "${QDRANT_HTTP_PORT:-6333}:6333"
-      - "${QDRANT_GRPC_PORT:-6334}:6334"
+      - "${QDRANT_HTTP_PORT:-16333}:6333"
+      - "${QDRANT_GRPC_PORT:-16334}:6334"
     volumes:
       - qdrant_data:/qdrant/storage
 
@@ -138,8 +172,8 @@ services:
     restart: unless-stopped
     command: master -mdir=/data
     ports:
-      - "${SEAWEEDFS_MASTER_PORT:-9333}:9333"
-      - "${SEAWEEDFS_MASTER_GRPC_PORT:-19333}:19333"
+      - "${SEAWEEDFS_MASTER_PORT:-19334}:9333"
+      - "${SEAWEEDFS_MASTER_GRPC_PORT:-29333}:19333"
     volumes:
       - seaweedfs_master:/data
     healthcheck:
@@ -153,7 +187,7 @@ services:
     restart: unless-stopped
     command: volume -mserver=seaweedfs-master:9333 -dir=/data -port=8080
     ports:
-      - "${SEAWEEDFS_VOLUME_PORT:-8123}:8080"
+      - "${SEAWEEDFS_VOLUME_PORT:-18123}:8080"
     volumes:
       - seaweedfs_volume:/data
     depends_on:
@@ -170,7 +204,7 @@ services:
     restart: unless-stopped
     command: filer -master=seaweedfs-master:9333
     ports:
-      - "${SEAWEEDFS_FILER_PORT:-8888}:8888"
+      - "${SEAWEEDFS_FILER_PORT:-18888}:8888"
     volumes:
       - seaweedfs_filer:/data
     depends_on:
@@ -189,7 +223,7 @@ services:
     restart: unless-stopped
     command: s3 -filer=seaweedfs-filer:8888
     ports:
-      - "${SEAWEEDFS_S3_PORT:-8333}:8333"
+      - "${SEAWEEDFS_S3_PORT:-18333}:8333"
     depends_on:
       seaweedfs-filer:
         condition: service_healthy

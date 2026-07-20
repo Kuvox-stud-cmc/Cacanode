@@ -25,6 +25,14 @@ export type WidgetSettings = {
   allowedOrigins: string[];
   hideCacanodeBranding: boolean;
   showCacanodeBranding: boolean;
+  iconUrl: string | null;
+  iconStyle: "STANDARD" | "GLOW" | "PULSE" | "SOFT_SHADOW";
+};
+
+export type WidgetEmbed = {
+  tokenId: string;
+  tokenPrefix: string;
+  secret: string;
 };
 
 export type WebhookEndpoint = {
@@ -86,8 +94,38 @@ export async function updateWidgetSettings(
       active: payload.active,
       allowedOrigins: payload.allowedOrigins,
       hideCacanodeBranding: payload.hideCacanodeBranding,
+      iconStyle: payload.iconStyle,
     }),
   }));
+}
+
+export async function getWidgetEmbed(request: ApiRequest): Promise<WidgetEmbed> {
+  return readJsonOrThrow(await request(`${getApiBase()}/tenants/me/integrations/widget/embed`));
+}
+
+export async function uploadWidgetIcon(
+  request: ApiRequest,
+  file: File,
+): Promise<WidgetSettings> {
+  const form = new FormData();
+  form.append("file", file);
+  return readJsonOrThrow(await request(`${getApiBase()}/tenants/me/integrations/widget/icon`, {
+    method: "POST",
+    body: form,
+  }));
+}
+
+export async function downloadWidgetIcon(request: ApiRequest): Promise<Blob> {
+  const response = await request(`${getApiBase()}/tenants/me/integrations/widget/icon`);
+  if (!response.ok) throw await parseApiError(response);
+  return response.blob();
+}
+
+export async function deleteWidgetIcon(request: ApiRequest): Promise<void> {
+  const response = await request(`${getApiBase()}/tenants/me/integrations/widget/icon`, {
+    method: "DELETE",
+  });
+  if (!response.ok) throw await parseApiError(response);
 }
 
 export async function listWebhooks(request: ApiRequest): Promise<WebhookEndpoint[]> {

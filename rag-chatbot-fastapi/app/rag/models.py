@@ -20,6 +20,8 @@ class ChatSession:
     customer_email: str | None = None
     integration_token_id: str | None = None
     customer_answer_prompt: str = DEFAULT_CUSTOMER_ANSWER_PROMPT
+    tenant_name: str = ""
+    authoritative_revision: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,6 +65,13 @@ class AssistantMessage:
     content: str
     citations: list[Citation] = field(default_factory=list)
     action: dict[str, Any] | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ModelCompletion:
+    content: str
+    input_tokens: int | None = None
+    output_tokens: int | None = None
 
 
 @dataclass(frozen=True, slots=True)

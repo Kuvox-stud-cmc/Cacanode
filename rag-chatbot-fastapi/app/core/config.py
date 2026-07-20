@@ -1,14 +1,12 @@
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
-from urllib.parse import quote, unquote, urlsplit, urlunsplit
 
 from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 SERVICE_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_POSTGRES_PASSWORD = "change-me"
 
 
 class Settings(BaseSettings):
@@ -27,22 +25,38 @@ class Settings(BaseSettings):
     DEFAULT_LOCALE: str = "vi-VN"
     READINESS_REQUIRE_MODELS: bool = False
 
-    TOKEN_KEY: str = "development-only-secret"
-    BUSINESS_API_BASE_URL: str = "http://localhost:8080"
-    INTEGRATION_TOKEN_PEPPER: str = "development-integration-token-pepper"
+    REDIS_URL: str = "redis://localhost:16379/0"
+    REDIS_CONNECT_TIMEOUT_SECONDS: float = 1.0
+    REDIS_OPERATION_TIMEOUT_SECONDS: float = 1.0
+    RABBITMQ_URL: str = "amqp://rag_user:rag_password@localhost:15673/"
 
-    POSTGRES_HOST: str = "localhost"
-    POSTGRES_PORT: int = 5432
-    POSTGRES_DB: str = "cacanode"
-    POSTGRES_USER: str = "cacanode"
-    POSTGRES_PASSWORD: str = DEFAULT_POSTGRES_PASSWORD
-    POSTGRES_URL: str = f"postgresql://cacanode:{DEFAULT_POSTGRES_PASSWORD}@localhost:5432/cacanode"
-    REDIS_URL: str = "redis://localhost:6379/0"
-    RABBITMQ_URL: str = "amqp://rag_user:rag_password@localhost:5672/"
+    CACHE_ENABLED: bool = False
+    CACHE_KEY_PREFIX: str = "ccn:v1"
+    CACHE_TTL_JITTER_PERCENT: int = 10
+    EMBEDDING_CACHE_ENABLED: bool = False
+    EMBEDDING_CACHE_TTL_SECONDS: int = 86400
+    RETRIEVAL_CACHE_ENABLED: bool = False
+    RETRIEVAL_CACHE_TTL_SECONDS: int = 120
+    SEMANTIC_ANSWER_CACHE_MODE: Literal["off", "shadow", "serve"] = "off"
+    SEMANTIC_ANSWER_CACHE_TTL_SECONDS: int = 3600
+    SEMANTIC_ANSWER_CACHE_SIMILARITY_THRESHOLD: float = 0.97
+    SEMANTIC_ANSWER_CACHE_COLLECTION: str = "semantic_answer_cache_v1"
+    SEMANTIC_ANSWER_CACHE_VECTOR_NAME: str = "query_v1"
+    SEMANTIC_ANSWER_CACHE_CANDIDATE_LIMIT: int = 5
+    SEMANTIC_ANSWER_CACHE_CLEANUP_BATCH_SIZE: int = 1000
+    GENERATION_RESULT_CACHE_TTL_SECONDS: int = 600
 
-    SEAWEEDFS_MASTER_URL: str = "http://localhost:9333"
-    SEAWEEDFS_FILER_URL: str = "http://localhost:8888"
-    SEAWEEDFS_S3_ENDPOINT: str = "http://localhost:8333"
+    GRPC_HOST: str = "0.0.0.0"
+    GRPC_PORT: int = 50051
+    GRPC_PLAINTEXT: bool = True
+    GRPC_SERVER_CERTIFICATE: str = ""
+    GRPC_SERVER_KEY: str = ""
+    GRPC_CLIENT_CA_CERTIFICATE: str = ""
+    GRPC_MAX_MESSAGE_BYTES: int = 16 * 1024 * 1024
+
+    SEAWEEDFS_MASTER_URL: str = "http://localhost:19334"
+    SEAWEEDFS_FILER_URL: str = "http://localhost:18888"
+    SEAWEEDFS_S3_ENDPOINT: str = "http://localhost:18333"
     SEAWEEDFS_ACCESS_KEY: str = ""
     SEAWEEDFS_SECRET_KEY: str = ""
     SEAWEEDFS_BUCKET: str = "cacanode"
@@ -50,7 +64,7 @@ class Settings(BaseSettings):
     SEAWEEDFS_READ_TIMEOUT_SECONDS: float = 30.0
     SEAWEEDFS_MAX_ATTEMPTS: int = 3
 
-    QDRANT_URL: str = "http://localhost:6333"
+    QDRANT_URL: str = "http://localhost:16333"
     QDRANT_API_KEY: str = ""
     QDRANT_COLLECTION: str = "knowledge_units_v2"
     QDRANT_DENSE_VECTOR_NAME: str = "text_embeddinggemma_v1"
@@ -60,7 +74,6 @@ class Settings(BaseSettings):
     KUZU_DATABASE_PATH: str = "./data/kuzu/cacanode.kuzu"
     GRAPH_SERVICE_URL: str = "http://localhost:8010"
     GRAPH_INTERNAL_TOKEN: str = "development-graph-token"
-    INGESTION_INTERNAL_TOKEN: str = "development-ingestion-token"
     GRAPH_TIMEOUT_SECONDS: float = 30.0
     GRAPH_EXTRACTION_BATCH_SIZE: int = 4
     GRAPH_EXTRACTION_MAX_OUTPUT_TOKENS: int = 25_000
@@ -165,25 +178,7 @@ class Settings(BaseSettings):
         return bool(self.LLM_MODEL_ID and self.LLM_BASE_URL)
 
     @model_validator(mode="after")
-    def sync_postgres_url_password(self) -> "Settings":
-        parts = urlsplit(self.POSTGRES_URL)
-        if (
-            parts.scheme.startswith("postgres")
-            and parts.password == DEFAULT_POSTGRES_PASSWORD
-            and self.POSTGRES_PASSWORD
-            and self.POSTGRES_PASSWORD != DEFAULT_POSTGRES_PASSWORD
-        ):
-            username = quote(unquote(parts.username or self.POSTGRES_USER), safe="")
-            password = quote(self.POSTGRES_PASSWORD, safe="")
-            host = parts.hostname or self.POSTGRES_HOST
-            if ":" in host and not host.startswith("["):
-                host = f"[{host}]"
-            netloc = f"{username}:{password}@{host}"
-            if parts.port is not None:
-                netloc = f"{netloc}:{parts.port}"
-            self.POSTGRES_URL = urlunsplit(
-                (parts.scheme, netloc, parts.path, parts.query, parts.fragment)
-            )
+    def validate_settings(self) -> "Settings":
         retrieval_counts = (
             self.DENSE_CANDIDATE_COUNT,
             self.SPARSE_CANDIDATE_COUNT,
@@ -199,6 +194,39 @@ class Settings(BaseSettings):
             raise ValueError("PRIMARY_CONTEXT_TOP_K cannot exceed FINAL_CONTEXT_TOP_K")
         if self.RERANKER_TIMEOUT_SECONDS <= 0:
             raise ValueError("RERANKER_TIMEOUT_SECONDS must be positive")
+        if self.REDIS_CONNECT_TIMEOUT_SECONDS <= 0 or self.REDIS_OPERATION_TIMEOUT_SECONDS <= 0:
+            raise ValueError("Redis timeouts must be positive")
+        if not 0 <= self.CACHE_TTL_JITTER_PERCENT <= 100:
+            raise ValueError("CACHE_TTL_JITTER_PERCENT must be between 0 and 100")
+        if self.EMBEDDING_CACHE_TTL_SECONDS <= 0:
+            raise ValueError("EMBEDDING_CACHE_TTL_SECONDS must be positive")
+        if self.RETRIEVAL_CACHE_TTL_SECONDS <= 0:
+            raise ValueError("RETRIEVAL_CACHE_TTL_SECONDS must be positive")
+        if self.SEMANTIC_ANSWER_CACHE_TTL_SECONDS <= 0:
+            raise ValueError("SEMANTIC_ANSWER_CACHE_TTL_SECONDS must be positive")
+        if not 0 < self.SEMANTIC_ANSWER_CACHE_SIMILARITY_THRESHOLD <= 1:
+            raise ValueError("SEMANTIC_ANSWER_CACHE_SIMILARITY_THRESHOLD must be in (0, 1]")
+        if self.SEMANTIC_ANSWER_CACHE_CANDIDATE_LIMIT <= 0:
+            raise ValueError("SEMANTIC_ANSWER_CACHE_CANDIDATE_LIMIT must be positive")
+        if self.SEMANTIC_ANSWER_CACHE_CLEANUP_BATCH_SIZE <= 0:
+            raise ValueError("SEMANTIC_ANSWER_CACHE_CLEANUP_BATCH_SIZE must be positive")
+        if not self.SEMANTIC_ANSWER_CACHE_COLLECTION.strip():
+            raise ValueError("SEMANTIC_ANSWER_CACHE_COLLECTION must not be blank")
+        if not self.SEMANTIC_ANSWER_CACHE_VECTOR_NAME.strip():
+            raise ValueError("SEMANTIC_ANSWER_CACHE_VECTOR_NAME must not be blank")
+        if self.GENERATION_RESULT_CACHE_TTL_SECONDS <= 0:
+            raise ValueError("GENERATION_RESULT_CACHE_TTL_SECONDS must be positive")
+        if self.GRPC_PORT <= 0 or self.GRPC_MAX_MESSAGE_BYTES <= 0:
+            raise ValueError("gRPC port and message size must be positive")
+        if not self.GRPC_PLAINTEXT and not all(
+            value.strip()
+            for value in (
+                self.GRPC_SERVER_CERTIFICATE,
+                self.GRPC_SERVER_KEY,
+                self.GRPC_CLIENT_CA_CERTIFICATE,
+            )
+        ):
+            raise ValueError("Production gRPC mTLS material is incomplete")
         return self
 
 

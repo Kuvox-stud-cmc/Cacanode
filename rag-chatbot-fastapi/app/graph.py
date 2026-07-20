@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from collections.abc import Sequence
@@ -151,7 +152,7 @@ class KuzuGraphRepository:
                         "sheet_name: $sheet, cell_range: $range}) CREATE (s)-[:CONTAINS]->(u)",
                         {
                             "source": batch.source_id,
-                            "id": str(unit["unit_id"]),
+                            "id": _unit_node_id(batch.source_id, str(unit["unit_id"])),
                             "text": str(unit.get("text", "")),
                             "page": unit.get("page_number"),
                             "section": json.dumps(unit.get("section_path", [])),
@@ -162,9 +163,12 @@ class KuzuGraphRepository:
                 for entity in batch.entities:
                     self._connection.execute(
                         "MATCH (u:KnowledgeUnit {id: $unit}), (e:Entity {id: $entity}) "
-                        "CREATE (u)-[:MENTIONS {evidence_unit_id: $unit}]->(e)",
+                        "CREATE (u)-[:MENTIONS {evidence_unit_id: $evidence_unit}]->(e)",
                         {
-                            "unit": entity.evidence_unit_id,
+                            "unit": _unit_node_id(
+                                batch.source_id, entity.evidence_unit_id
+                            ),
+                            "evidence_unit": entity.evidence_unit_id,
                             "entity": entities[entity.normalized_name],
                         },
                     )
@@ -182,8 +186,14 @@ class KuzuGraphRepository:
                         },
                     )
                 self._connection.execute("COMMIT")
-            except Exception:
-                self._connection.execute("ROLLBACK")
+            except Exception as exc:
+                try:
+                    self._connection.execute("ROLLBACK")
+                except Exception as rollback_exc:
+                    # Kuzu can automatically end a failed transaction after a constraint error.
+                    # Preserve the original persistence failure instead of replacing it with
+                    # "No active transaction for ROLLBACK".
+                    exc.add_note(f"Graph rollback also failed: {rollback_exc}")
                 raise
 
     def delete_source(self, tenant_id: str, source_id: str) -> None:
@@ -208,9 +218,11 @@ class KuzuGraphRepository:
             return []
         with self._lock:
             result: Any = self._connection.execute(
-                "MATCH (s:Source)-[:CONTAINS]->(u:KnowledgeUnit)-[:MENTIONS]->(e:Entity) "
+                "MATCH (s:Source)-[:CONTAINS]->(u:KnowledgeUnit)"
+                "-[m:MENTIONS]->(e:Entity) "
                 "WHERE e.tenant_id=$tenant AND e.knowledge_base_id=$kb "
-                "RETURN e.normalized_name, e.aliases, u.id, u.source_id, s.name, u.text, "
+                "RETURN e.normalized_name, e.aliases, m.evidence_unit_id, u.source_id, "
+                "s.name, u.text, "
                 "u.page_number, u.section_path, u.sheet_name, u.cell_range",
                 {"tenant": request.tenant_id, "kb": request.knowledge_base_id},
             )
@@ -275,7 +287,9 @@ class GraphServiceClient:
         except httpx.HTTPStatusError as exc:
             if 400 <= exc.response.status_code < 500:
                 raise PermanentIngestionError("Graph service rejected grounded extraction") from exc
-            raise TransientIngestionError("Graph service is unavailable") from exc
+            raise TransientIngestionError(
+                f"Graph service request failed with HTTP {exc.response.status_code}"
+            ) from exc
         except httpx.HTTPError as exc:
             raise TransientIngestionError("Graph service is unavailable") from exc
 
@@ -347,9 +361,7 @@ class EntityRelationExtractor:
             raise TransientIngestionError("Graph extraction model request failed") from exc
         try:
             payload = json.loads(re.sub(r"^```(?:json)?\s*|\s*```$", "", raw.strip()))
-            entities = [
-                EntityMention.model_validate(item) for item in payload.get("entities", [])
-            ]
+            entities = [EntityMention.model_validate(item) for item in payload.get("entities", [])]
             relations = [
                 EvidenceRelation.model_validate(item) for item in payload.get("relations", [])
             ]
@@ -391,9 +403,7 @@ def _filter_grounded_extraction(
     relations: Sequence[EvidenceRelation],
 ) -> tuple[list[EntityMention], list[EvidenceRelation]]:
     unit_ids = {str(unit.get("unit_id")) for unit in units}
-    grounded_entities = [
-        entity for entity in entities if entity.evidence_unit_id in unit_ids
-    ]
+    grounded_entities = [entity for entity in entities if entity.evidence_unit_id in unit_ids]
     entity_names = {entity.normalized_name for entity in grounded_entities}
     grounded_relations = [
         relation
@@ -417,11 +427,15 @@ def _unit_payload(chunk: TextChunk) -> dict[str, Any]:
 
 
 def _entity_id(tenant_id: str, knowledge_base_id: str, normalized_name: str) -> str:
-    import hashlib
-
     return hashlib.sha256(
         f"{tenant_id}:{knowledge_base_id}:{normalized_name}".encode()
     ).hexdigest()[:32]
+
+
+def _unit_node_id(source_id: str, unit_id: str) -> str:
+    """Return the source-scoped identity used only for the internal Kuzu node key."""
+    identity = json.dumps([source_id, unit_id], ensure_ascii=False, separators=(",", ":"))
+    return hashlib.sha256(identity.encode("utf-8")).hexdigest()[:32]
 
 
 _EXTRACTION_PROMPT = """You extract only facts explicitly supported by the supplied knowledge units.

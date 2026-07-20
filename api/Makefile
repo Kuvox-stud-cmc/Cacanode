@@ -25,7 +25,7 @@ endif
 
 FLYWAY_PROPS = -Dflyway.url="$${POSTGRES_URL}" -Dflyway.user="$${POSTGRES_USER}" -Dflyway.password="$${POSTGRES_PASSWORD}" -Dflyway.locations=filesystem:src/main/resources/db/migration
 
-.PHONY: help deps run dev run-dev run-prod test verify package clean migrate migrate-info migrate-validate migrate-repair migrate-baseline db-reset db-seed db-reset-seed
+.PHONY: help deps run dev run-dev run-prod test verify package clean migrate migrate-info migrate-validate migrate-repair migrate-baseline db-reset db-seed db-reset-seed baseline-credentials
 
 help:
 	$(info Available targets:)
@@ -46,6 +46,7 @@ help:
 	$(info   make db-reset         Reset local Postgres volume, restart it, then migrate)
 	$(info   make db-seed          Seed local dev tenant and admin account)
 	$(info   make db-reset-seed    Reset local Postgres, migrate, then seed)
+	$(info   make baseline-credentials Print disposable baseline bearer-token exports for the seeded account)
 	$(info Optional variables: PROFILE=dev ENV_FILE=.env MAVEN_ARGS=...)
 
 deps:
@@ -98,3 +99,6 @@ db-seed:
 	$(ENV_RUN) docker compose --env-file $(ENV_FILE) -f $(ROOT_COMPOSE_FILE) exec -T postgres psql -v ON_ERROR_STOP=1 -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}" < $(DEV_SEED_FILE)
 
 db-reset-seed: db-reset db-seed
+
+baseline-credentials:
+	@$(PYTHON) scripts/dev_baseline_credentials.py

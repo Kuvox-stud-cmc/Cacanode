@@ -2,6 +2,7 @@ package com.cacanode.api.tenant.model;
 
 import com.cacanode.api.common.model.BaseEntity;
 import com.cacanode.api.tenant.enums.WidgetPosition;
+import com.cacanode.api.tenant.enums.WidgetIconStyle;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.Setter;
@@ -44,5 +45,19 @@ public class WidgetConfig extends BaseEntity {
 
     @Column(name = "hide_cacanode_branding", nullable = false)
     private boolean hideCacanodeBranding;
+
+    @Column(name = "icon_object_key", length = 512)
+    private String iconObjectKey;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "icon_style", nullable = false, length = 30)
+    private WidgetIconStyle iconStyle = WidgetIconStyle.STANDARD;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "managed_widget_token_id")
+    private IntegrationToken managedWidgetToken;
+
+    @Column(name = "encrypted_widget_token_secret", columnDefinition = "TEXT")
+    private String encryptedWidgetTokenSecret;
 
 }

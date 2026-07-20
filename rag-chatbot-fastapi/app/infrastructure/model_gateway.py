@@ -11,6 +11,7 @@ from pydantic import SecretStr
 from app.core.config import Settings
 from app.core.metrics import AI_CHAT_MODEL_SECONDS, AI_CHAT_MODEL_TIMEOUTS_TOTAL
 from app.rag.errors import ChatModelProviderError, ChatModelTimeoutError
+from app.rag.models import ModelCompletion
 
 
 def _messages(messages: Sequence[dict[str, Any]]) -> list[BaseMessage]:
@@ -29,11 +30,7 @@ MIN_REASONING_MODEL_OUTPUT_TOKENS = 1024
 
 def _is_reasoning_model(model: str) -> bool:
     normalized = model.lower()
-    return (
-        normalized.startswith("o1")
-        or normalized.startswith("o3")
-        or normalized.startswith("o4")
-    )
+    return normalized.startswith("o1") or normalized.startswith("o3") or normalized.startswith("o4")
 
 
 def _supports_temperature(model: str) -> bool:
@@ -69,6 +66,33 @@ def _finish_reason(response: Any) -> str:
     return "unknown"
 
 
+def _non_negative_token_count(value: Any) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return None
+    return value
+
+
+def _openai_usage(response: Any) -> tuple[int | None, int | None]:
+    usage = getattr(response, "usage_metadata", None)
+    if isinstance(usage, dict):
+        input_tokens = _non_negative_token_count(usage.get("input_tokens"))
+        output_tokens = _non_negative_token_count(usage.get("output_tokens"))
+        if input_tokens is not None or output_tokens is not None:
+            return input_tokens, output_tokens
+    metadata = getattr(response, "response_metadata", None)
+    token_usage = metadata.get("token_usage") if isinstance(metadata, dict) else None
+    if isinstance(token_usage, dict):
+        return (
+            _non_negative_token_count(
+                token_usage.get("prompt_tokens", token_usage.get("input_tokens"))
+            ),
+            _non_negative_token_count(
+                token_usage.get("completion_tokens", token_usage.get("output_tokens"))
+            ),
+        )
+    return None, None
+
+
 class OllamaChatModel:
     """Adapter for Ollama's native /api/chat endpoint."""
 
@@ -83,6 +107,9 @@ class OllamaChatModel:
         self._timeout_seconds = settings.LLM_TIMEOUT_SECONDS
 
     async def complete(self, messages: Sequence[dict[str, Any]]) -> str:
+        return (await self.complete_with_usage(messages)).content
+
+    async def complete_with_usage(self, messages: Sequence[dict[str, Any]]) -> ModelCompletion:
         started_at = time.perf_counter()
         outcome = "success"
         try:
@@ -114,7 +141,7 @@ class OllamaChatModel:
                 outcome=outcome,
             ).observe(time.perf_counter() - started_at)
 
-    async def _complete_ollama_native(self, messages: Sequence[dict[str, Any]]) -> str:
+    async def _complete_ollama_native(self, messages: Sequence[dict[str, Any]]) -> ModelCompletion:
         payload: dict[str, Any] = {
             "model": self.model,
             "messages": [
@@ -136,8 +163,16 @@ class OllamaChatModel:
             data = response.json()
         message = data.get("message")
         if isinstance(message, dict):
-            return str(message.get("content", ""))
-        return ""
+            return ModelCompletion(
+                content=str(message.get("content", "")),
+                input_tokens=_non_negative_token_count(data.get("prompt_eval_count")),
+                output_tokens=_non_negative_token_count(data.get("eval_count")),
+            )
+        return ModelCompletion(
+            content="",
+            input_tokens=_non_negative_token_count(data.get("prompt_eval_count")),
+            output_tokens=_non_negative_token_count(data.get("eval_count")),
+        )
 
     def _ollama_chat_url(self) -> str:
         base_url = self._base_url
@@ -177,6 +212,9 @@ class OpenAIChatModel:
         self._client = ChatOpenAI(**client_kwargs)
 
     async def complete(self, messages: Sequence[dict[str, Any]]) -> str:
+        return (await self.complete_with_usage(messages)).content
+
+    async def complete_with_usage(self, messages: Sequence[dict[str, Any]]) -> ModelCompletion:
         started_at = time.perf_counter()
         outcome = "success"
         try:
@@ -188,10 +226,14 @@ class OpenAIChatModel:
             if not content:
                 finish_reason = _finish_reason(response)
                 raise ChatModelProviderError(
-                    "Model provider returned an empty response "
-                    f"(finish_reason={finish_reason})"
+                    f"Model provider returned an empty response (finish_reason={finish_reason})"
                 )
-            return content
+            input_tokens, output_tokens = _openai_usage(response)
+            return ModelCompletion(
+                content=content,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+            )
         except TimeoutError as exc:
             outcome = "timeout"
             AI_CHAT_MODEL_TIMEOUTS_TOTAL.labels(

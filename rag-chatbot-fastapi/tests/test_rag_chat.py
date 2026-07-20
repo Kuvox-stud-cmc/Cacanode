@@ -17,7 +17,7 @@ from app.rag.errors import (
     ChatSessionStoreUnavailableError,
 )
 from app.rag.models import ChatSession, RetrievedChunk
-from app.rag.prompts import DEFAULT_CUSTOMER_ANSWER_PROMPT
+from app.rag.prompts import default_customer_answer_prompt
 from app.rag.retrieval import QdrantVectorRetriever
 from app.rag.sessions import InMemoryChatSessionStore
 
@@ -135,12 +135,16 @@ async def test_qdrant_retriever_can_filter_to_allowed_document_ids() -> None:
     retriever = QdrantVectorRetriever(Settings(), client=client)  # type: ignore[arg-type]
 
     await retriever.retrieve(
-        tenant_id="tenant-1", knowledge_base_id="kb-1", query_vector=[0.1],
-        limit=5, document_ids=["doc-1", "doc-2"],
+        tenant_id="tenant-1",
+        knowledge_base_id="kb-1",
+        query_vector=[0.1],
+        limit=5,
+        document_ids=["doc-1", "doc-2"],
     )
 
     document_condition = next(
-        condition for condition in client.kwargs["query_filter"].must
+        condition
+        for condition in client.kwargs["query_filter"].must
         if condition.key == "document_id"
     )
     assert document_condition.match.any == ["doc-1", "doc-2"]
@@ -239,6 +243,116 @@ def make_service(
     return service, service._sessions, retriever, model
 
 
+def test_default_customer_prompt_is_polite_conversational_and_tenant_specific() -> None:
+    acme = default_customer_answer_prompt("  Acme   Corporation  ")
+    globex = default_customer_answer_prompt("Globex")
+
+    assert "Acme Corporation" in acme
+    assert "Respond to every customer message politely" in acme
+    assert "greetings, thanks, farewells" in acme
+    assert "without requiring a citation" in acme
+    assert "instead of guessing" in acme
+    assert acme != globex
+
+
+@pytest.mark.parametrize(
+    ("query", "expected"),
+    [
+        ("Who are you?", "customer support assistant for Acme Corporation"),
+        ("Bạn là ai?", "trợ lý hỗ trợ khách hàng của Acme Corporation"),
+        ("Hello!", "Hello!"),
+        ("Xin chào!", "Xin chào!"),
+        ("How are you?", "I'm doing well"),
+        ("Bạn khỏe không?", "Cảm ơn bạn"),
+        ("What can you do?", "I can answer questions"),
+        ("Bạn có thể làm gì?", "Tôi có thể trả lời câu hỏi"),
+        ("Thank you!", "You're welcome!"),
+        ("Cảm ơn!", "Rất vui được hỗ trợ bạn!"),
+        ("Goodbye!", "Goodbye!"),
+        ("Tạm biệt!", "Tạm biệt!"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_conversational_edge_cases_bypass_retrieval_and_have_no_citations(
+    query: str, expected: str
+) -> None:
+    service, store, retriever, model = make_service(chunks=[])
+    store.set_tenant_name("tenant-1", "Acme Corporation")
+    session = service.create_session(
+        tenant_id="tenant-1",
+        user_id=None,
+        chatbot_id="bot-1",
+        knowledge_base_id="kb-1",
+        locale="vi-VN",
+        channel="WIDGET",
+        integration_token_id="token-1",
+    )
+
+    message = await service.submit_message(
+        tenant_id="tenant-1",
+        session_id=session.id,
+        content=query,
+        integration_token_id="token-1",
+    )
+
+    assert expected in message.content
+    assert message.citations == []
+    assert message.action is None
+    assert retriever.calls == []
+    assert model.calls == []
+    assert not hasattr(service._embedder, "text")
+    history = store.list_messages(session_id=session.id, tenant_id="tenant-1")
+    assert [item.role for item in history] == ["user", "assistant"]
+
+
+class UnexpectedSemanticCache:
+    mode = "serve"
+
+    def accepts_query(self, query: str) -> bool:
+        raise AssertionError(f"Conversational query reached semantic cache: {query}")
+
+
+@pytest.mark.asyncio
+async def test_identity_question_bypasses_semantic_answer_cache() -> None:
+    store = InMemoryChatSessionStore()
+    store.set_tenant_name("tenant-1", "Acme Corporation")
+    retriever = FakeRetriever([])
+    model = FakeChatModel()
+    service = RagChatService(
+        settings=Settings(
+            CACHE_ENABLED=True,
+            SEMANTIC_ANSWER_CACHE_MODE="serve",
+            FINAL_CONTEXT_TOP_K=5,
+        ),
+        sessions=store,
+        embedder=FakeEmbedder(),
+        retriever=retriever,
+        chat_model=model,
+        semantic_answer_cache=UnexpectedSemanticCache(),  # type: ignore[arg-type]
+    )
+    session = service.create_session(
+        tenant_id="tenant-1",
+        user_id=None,
+        chatbot_id="bot-1",
+        knowledge_base_id="kb-1",
+        locale="en",
+        channel="CUSTOM_API",
+        integration_token_id="token-1",
+    )
+
+    message = await service.submit_message(
+        tenant_id="tenant-1",
+        session_id=session.id,
+        content="Who are you?",
+        integration_token_id="token-1",
+    )
+
+    assert message.content.startswith("I'm the customer support assistant for Acme Corporation")
+    assert message.citations == []
+    assert retriever.calls == []
+    assert model.calls == []
+
+
 @pytest.mark.asyncio
 async def test_chat_service_returns_no_information_without_evidence() -> None:
     service, store, retriever, model = make_service(chunks=[])
@@ -301,6 +415,7 @@ async def test_external_chat_can_return_editable_ticket_draft_without_evidence()
 async def test_customer_channels_receive_tenant_prompt_below_platform_rules(channel: str) -> None:
     model = ExternalAnswerChatModel()
     service, store, _, _ = make_service(chunks=[], model=model)
+    store.set_tenant_name("tenant-1", "Acme Corporation")
     store.set_customer_answer_prompt(
         "tenant-1", "Use Acme terminology and a warm professional tone."
     )
@@ -317,12 +432,15 @@ async def test_customer_channels_receive_tenant_prompt_below_platform_rules(chan
     await service.submit_message(
         tenant_id="tenant-1",
         session_id=session.id,
-        content="How can you help?",
+        content="Explain the return policy.",
         integration_token_id="token-1",
     )
 
     system_prompt = str(model.calls[0][0]["content"])
     assert "Use Acme terminology and a warm professional tone." in system_prompt
+    assert 'Tenant display name: "Acme Corporation".' in system_prompt
+    assert "Politely respond to every customer message" in system_prompt
+    assert "Greetings, thanks, farewells" in system_prompt
     assert "--- BEGIN TENANT INSTRUCTIONS ---" in system_prompt
     assert "--- END TENANT INSTRUCTIONS ---" in system_prompt
     assert "Never infer, reveal, or mix data from another tenant." in system_prompt
@@ -414,6 +532,7 @@ async def test_prompt_change_applies_to_next_message_in_existing_session() -> No
 async def test_blank_stored_customer_prompt_uses_platform_default() -> None:
     model = ExternalAnswerChatModel()
     service, store, _, _ = make_service(chunks=[], model=model)
+    store.set_tenant_name("tenant-1", "Acme Corporation")
     store.set_customer_answer_prompt("tenant-1", " \n\t ")
     session = service.create_session(
         tenant_id="tenant-1",
@@ -432,7 +551,10 @@ async def test_blank_stored_customer_prompt_uses_platform_default() -> None:
         integration_token_id="token-1",
     )
 
-    assert DEFAULT_CUSTOMER_ANSWER_PROMPT in str(model.calls[0][0]["content"])
+    system_prompt = str(model.calls[0][0]["content"])
+    assert default_customer_answer_prompt("Acme Corporation") in system_prompt
+    assert "Acme Corporation" in system_prompt
+    assert "greetings, thanks, farewells" in system_prompt
 
 
 @pytest.mark.asyncio
@@ -482,8 +604,12 @@ async def test_external_chat_rejects_another_integration_token() -> None:
 def test_external_conversation_can_be_closed_by_its_integration_token() -> None:
     service, store, _, _ = make_service(chunks=[])
     session = service.create_session(
-        tenant_id="tenant-1", user_id=None, chatbot_id="bot-1",
-        knowledge_base_id="kb-1", locale="en", channel="WIDGET",
+        tenant_id="tenant-1",
+        user_id=None,
+        chatbot_id="bot-1",
+        knowledge_base_id="kb-1",
+        locale="en",
+        channel="WIDGET",
         integration_token_id="token-1",
     )
 
@@ -497,14 +623,16 @@ def test_external_conversation_can_be_closed_by_its_integration_token() -> None:
 def test_external_conversation_can_be_closed_by_authenticated_tenant_member() -> None:
     service, store, _, _ = make_service(chunks=[])
     session = service.create_session(
-        tenant_id="tenant-1", user_id=None, chatbot_id="bot-1",
-        knowledge_base_id="kb-1", locale="en", channel="CUSTOM_API",
+        tenant_id="tenant-1",
+        user_id=None,
+        chatbot_id="bot-1",
+        knowledge_base_id="kb-1",
+        locale="en",
+        channel="CUSTOM_API",
         integration_token_id="token-1",
     )
 
-    service.close_session(
-        tenant_id="tenant-1", session_id=session.id, user_id="employee-1"
-    )
+    service.close_session(tenant_id="tenant-1", session_id=session.id, user_id="employee-1")
 
     assert store.get_for_tenant(session.id, "tenant-1") is None
 
@@ -512,22 +640,25 @@ def test_external_conversation_can_be_closed_by_authenticated_tenant_member() ->
 def test_authenticated_member_cannot_close_another_tenant_or_employees_playground() -> None:
     service, store, _, _ = make_service(chunks=[])
     external = service.create_session(
-        tenant_id="tenant-1", user_id=None, chatbot_id="bot-1",
-        knowledge_base_id="kb-1", locale="en", channel="WIDGET",
+        tenant_id="tenant-1",
+        user_id=None,
+        chatbot_id="bot-1",
+        knowledge_base_id="kb-1",
+        locale="en",
+        channel="WIDGET",
     )
     playground = service.create_session(
-        tenant_id="tenant-1", user_id="employee-1", chatbot_id="bot-1",
-        knowledge_base_id="kb-1", locale="en",
+        tenant_id="tenant-1",
+        user_id="employee-1",
+        chatbot_id="bot-1",
+        knowledge_base_id="kb-1",
+        locale="en",
     )
 
     with pytest.raises(ChatSessionNotFoundError):
-        service.close_session(
-            tenant_id="tenant-2", session_id=external.id, user_id="employee-2"
-        )
+        service.close_session(tenant_id="tenant-2", session_id=external.id, user_id="employee-2")
     with pytest.raises(ChatSessionNotFoundError):
-        service.close_session(
-            tenant_id="tenant-1", session_id=playground.id, user_id="employee-2"
-        )
+        service.close_session(tenant_id="tenant-1", session_id=playground.id, user_id="employee-2")
 
     assert store.get_for_tenant(external.id, "tenant-1") is not None
     assert store.get_for_tenant(playground.id, "tenant-1") is not None
@@ -687,57 +818,74 @@ async def test_chat_service_enforces_session_tenant_isolation() -> None:
 async def test_employee_cannot_read_or_continue_another_employees_session() -> None:
     service, _, _, _ = make_service(chunks=[])
     session = service.create_session(
-        tenant_id="tenant-1", user_id="user-1", chatbot_id="bot-1",
-        knowledge_base_id="kb-1", locale="en",
+        tenant_id="tenant-1",
+        user_id="user-1",
+        chatbot_id="bot-1",
+        knowledge_base_id="kb-1",
+        locale="en",
     )
 
     with pytest.raises(ChatSessionNotFoundError):
-        service.list_messages(
-            tenant_id="tenant-1", session_id=session.id, user_id="user-2"
-        )
+        service.list_messages(tenant_id="tenant-1", session_id=session.id, user_id="user-2")
     with pytest.raises(ChatSessionNotFoundError):
         await service.submit_message(
-            tenant_id="tenant-1", session_id=session.id,
-            content="Not my chat", user_id="user-2",
+            tenant_id="tenant-1",
+            session_id=session.id,
+            content="Not my chat",
+            user_id="user-2",
         )
 
 
 def test_hiding_employee_session_preserves_messages_but_prevents_reopening() -> None:
     service, store, _, _ = make_service(chunks=[])
     session = service.create_session(
-        tenant_id="tenant-1", user_id="user-1", chatbot_id="bot-1",
-        knowledge_base_id="kb-1", locale="en",
+        tenant_id="tenant-1",
+        user_id="user-1",
+        chatbot_id="bot-1",
+        knowledge_base_id="kb-1",
+        locale="en",
     )
     store.add_user_message(session.id, "Keep this for analytics")
 
-    service.hide_playground_session(
-        tenant_id="tenant-1", user_id="user-1", session_id=session.id
-    )
+    service.hide_playground_session(tenant_id="tenant-1", user_id="user-1", session_id=session.id)
 
     assert len(store._sessions[session.id].messages) == 1
     assert store.get_for_tenant(session.id, "tenant-1") is None
-    assert service.list_playground_sessions(
-        tenant_id="tenant-1", user_id="user-1", limit=50, offset=0
-    ) == []
+    assert (
+        service.list_playground_sessions(tenant_id="tenant-1", user_id="user-1", limit=50, offset=0)
+        == []
+    )
 
 
 @pytest.mark.asyncio
 async def test_external_retrieval_filters_to_customer_visible_documents() -> None:
     service, store, retriever, _ = make_service(
-        chunks=[RetrievedChunk(
-            document_id="shared-doc", source_name="shared.txt", page_number=None,
-            chunk_index=0, text="Shared answer", score=0.9,
-        )]
+        chunks=[
+            RetrievedChunk(
+                document_id="shared-doc",
+                source_name="shared.txt",
+                page_number=None,
+                chunk_index=0,
+                text="Shared answer",
+                score=0.9,
+            )
+        ]
     )
     store.customer_document_ids = ["shared-doc"]
     session = service.create_session(
-        tenant_id="tenant-1", user_id=None, chatbot_id="bot-1",
-        knowledge_base_id="kb-1", locale="en", channel="WIDGET",
+        tenant_id="tenant-1",
+        user_id=None,
+        chatbot_id="bot-1",
+        knowledge_base_id="kb-1",
+        locale="en",
+        channel="WIDGET",
         integration_token_id="token-1",
     )
 
     await service.submit_message(
-        tenant_id="tenant-1", session_id=session.id, content="Question",
+        tenant_id="tenant-1",
+        session_id=session.id,
+        content="Question",
         integration_token_id="token-1",
     )
 
@@ -748,13 +896,19 @@ async def test_external_retrieval_filters_to_customer_visible_documents() -> Non
 async def test_external_retrieval_skips_qdrant_when_no_documents_are_shared() -> None:
     service, _, retriever, model = make_service(chunks=[])
     session = service.create_session(
-        tenant_id="tenant-1", user_id=None, chatbot_id="bot-1",
-        knowledge_base_id="kb-1", locale="en", channel="CUSTOM_API",
+        tenant_id="tenant-1",
+        user_id=None,
+        chatbot_id="bot-1",
+        knowledge_base_id="kb-1",
+        locale="en",
+        channel="CUSTOM_API",
         integration_token_id="token-1",
     )
 
     await service.submit_message(
-        tenant_id="tenant-1", session_id=session.id, content="Question",
+        tenant_id="tenant-1",
+        session_id=session.id,
+        content="Question",
         integration_token_id="token-1",
     )
 

@@ -10,4 +10,5 @@ public interface WidgetConfigRepository extends JpaRepository<WidgetConfig, UUID
     boolean existsByChatbot_Id(UUID chatbotId);
     Optional<WidgetConfig> findByChatbot_IdAndTenant_Id(UUID chatbotId, UUID tenantId);
     Optional<WidgetConfig> findFirstByTenant_IdOrderByCreatedAtAsc(UUID tenantId);
+    boolean existsByManagedWidgetToken_IdAndTenant_Id(UUID tokenId, UUID tenantId);
 }
