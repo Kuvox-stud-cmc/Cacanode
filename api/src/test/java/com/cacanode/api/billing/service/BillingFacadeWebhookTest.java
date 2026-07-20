@@ -22,6 +22,7 @@ import org.springframework.context.ApplicationEventPublisher;
 import java.time.LocalDateTime;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -69,6 +70,10 @@ class BillingFacadeWebhookTest {
         assertEquals(originalPaidThrough.plusMonths(1), subscription.getPaidThroughAt());
         assertEquals(BillingStatus.ACTIVE, subscription.getStatus());
         verify(tenants).applyEntitlements(any());
+        verify(payments).cancelOtherOpenOrders(
+                eq(tenantId), eq(order.getId()),
+                eq(Set.of(PaymentOrderStatus.PENDING, PaymentOrderStatus.PROCESSING)),
+                eq(PaymentOrderStatus.CANCELLED), eq("Superseded by a successful payment"), any());
 
         facade.processPayOsWebhook(Map.of("delivery", 2));
         assertEquals(originalPaidThrough.plusMonths(1), subscription.getPaidThroughAt());
@@ -113,9 +118,55 @@ class BillingFacadeWebhookTest {
         verifyNoInteractions(tenants);
     }
 
+    @Test
+    void paymentPollReconcilesPaidProviderOrderImmediately() {
+        UUID tenantId = UUID.randomUUID();
+        UUID paymentId = UUID.randomUUID();
+        BillingPaymentOrder order = order(tenantId);
+        order.setId(paymentId);
+        BillingSubscription subscription = subscription(tenantId);
+        subscription.setPlanCode(BillingPlanCode.STARTER);
+        subscription.setStatus(BillingStatus.STARTER);
+        subscription.setBillingInterval(null);
+        subscription.setPaidThroughAt(null);
+        subscription.setGraceEndsAt(null);
+
+        when(payments.findByIdAndTenantIdForUpdate(paymentId, tenantId)).thenReturn(Optional.of(order));
+        when(gateway.getPayment(order.getOrderCode())).thenReturn(new PaymentGateway.ProviderPayment(
+                order.getOrderCode(), order.getPaymentLinkId(), order.getAmountVnd(), order.getAmountVnd(),
+                PaymentOrderStatus.PAID, "ref-poll"));
+        when(subscriptions.findByTenantIdForUpdate(tenantId)).thenReturn(Optional.of(subscription));
+
+        var response = facade.payment(tenantId, paymentId);
+
+        assertEquals(PaymentOrderStatus.PAID, response.status());
+        assertEquals(BillingPlanCode.PRO, subscription.getPlanCode());
+        assertEquals(BillingStatus.ACTIVE, subscription.getStatus());
+        verify(tenants).applyEntitlements(any());
+    }
+
+    @Test
+    void paidProviderAmountMismatchMovesOrderToReview() {
+        UUID tenantId = UUID.randomUUID();
+        UUID paymentId = UUID.randomUUID();
+        BillingPaymentOrder order = order(tenantId);
+        order.setId(paymentId);
+        when(payments.findByIdAndTenantIdForUpdate(paymentId, tenantId)).thenReturn(Optional.of(order));
+        when(gateway.getPayment(order.getOrderCode())).thenReturn(new PaymentGateway.ProviderPayment(
+                order.getOrderCode(), order.getPaymentLinkId(), order.getAmountVnd(), order.getAmountVnd() - 1,
+                PaymentOrderStatus.PAID, "ref-underpaid"));
+
+        var response = facade.payment(tenantId, paymentId);
+
+        assertEquals(PaymentOrderStatus.REVIEW, response.status());
+        verifyNoInteractions(tenants);
+    }
+
     private BillingPaymentOrder order(UUID tenantId) {
         BillingPaymentOrder order = new BillingPaymentOrder();
+        order.setId(UUID.randomUUID());
         order.setTenantId(tenantId);
+        order.setUserId(UUID.randomUUID());
         order.setOrderCode(123456L);
         order.setRequestedPlan(BillingPlanCode.PRO);
         order.setBillingInterval(BillingInterval.MONTHLY);

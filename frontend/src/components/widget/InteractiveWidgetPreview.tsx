@@ -4,11 +4,11 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import { MessageSquare } from "lucide-react";
 import { publicConfig } from "@/lib/public-config";
-import type { WidgetEmbed, WidgetSettings } from "@/lib/integrations-api";
+import type { WidgetSettings } from "@/lib/integrations-api";
 
 type Props = {
   widget: WidgetSettings;
-  embed: WidgetEmbed | null;
+  token: string | null;
   iconPreviewUrl: string | null;
 };
 
@@ -18,7 +18,7 @@ function widgetFrameUrl(): string | null {
   return new URL("/widget/widget.html", configured).toString();
 }
 
-export default function InteractiveWidgetPreview({ widget, embed, iconPreviewUrl }: Props) {
+export default function InteractiveWidgetPreview({ widget, token, iconPreviewUrl }: Props) {
   const frameRef = useRef<HTMLIFrameElement>(null);
   const readyRef = useRef(false);
   const previewConfigRef = useRef<object>({});
@@ -55,7 +55,7 @@ export default function InteractiveWidgetPreview({ widget, embed, iconPreviewUrl
   }, [iconPreviewUrl]);
 
   useEffect(() => {
-    if (!frameOrigin || !embed) return;
+    if (!frameOrigin || !token) return;
     const receive = (event: MessageEvent) => {
       if (event.source !== frameRef.current?.contentWindow || event.origin !== frameOrigin) return;
       if (!event.data || event.data.source !== "cacanode-widget") return;
@@ -64,7 +64,7 @@ export default function InteractiveWidgetPreview({ widget, embed, iconPreviewUrl
         frameRef.current?.contentWindow?.postMessage({
           source: "cacanode-host",
           type: "init",
-          token: embed.secret,
+          token,
           previewConfig: previewConfigRef.current,
         }, frameOrigin);
       }
@@ -75,7 +75,7 @@ export default function InteractiveWidgetPreview({ widget, embed, iconPreviewUrl
       readyRef.current = false;
       window.removeEventListener("message", receive);
     };
-  }, [embed, frameOrigin]);
+  }, [frameOrigin, token]);
 
   useEffect(() => {
     if (!readyRef.current || !frameOrigin) return;
@@ -86,7 +86,7 @@ export default function InteractiveWidgetPreview({ widget, embed, iconPreviewUrl
     }, frameOrigin);
   }, [frameOrigin, previewConfig]);
 
-  if (!frameUrl || !embed) {
+  if (!frameUrl || !token) {
     const launcherStyle = {
       backgroundColor: widget.primaryColor,
       "--widget-launcher-color": widget.primaryColor,
@@ -94,7 +94,7 @@ export default function InteractiveWidgetPreview({ widget, embed, iconPreviewUrl
     const launcherClass = `widget-launcher-style widget-launcher-style--${(widget.iconStyle ?? "STANDARD").toLowerCase().replace("_", "-")}`;
     return (
       <div className="relative min-h-[640px] overflow-hidden rounded-lg border border-slate-200 bg-[radial-gradient(circle_at_top_left,_rgba(99,102,241,0.10),_transparent_38%),linear-gradient(to_bottom_right,_#f8fafc,_#eef2ff)]">
-        <div className="space-y-1 p-5"><p className="text-sm font-medium text-slate-700">Customer website preview</p><p className="text-xs text-slate-500">Style changes remain visible while the interactive chat connection loads.</p></div>
+        <div className="space-y-1 p-5"><p className="text-sm font-medium text-slate-700">Customer website preview</p><p className="text-xs text-slate-500">Generate a widget token to enable live chat for this browser session.</p></div>
         <div className="mx-5 space-y-3 opacity-60" aria-hidden="true"><div className="h-3 w-2/5 rounded-full bg-slate-300" /><div className="h-2.5 rounded-full bg-slate-200" /><div className="h-2.5 w-4/5 rounded-full bg-slate-200" /><div className="grid grid-cols-2 gap-3 pt-3"><div className="h-20 rounded-lg border border-white bg-white/70" /><div className="h-20 rounded-lg border border-white bg-white/70" /></div></div>
         <button type="button" aria-label="Widget launcher preview"
           className={`${launcherClass} absolute bottom-5 ${widget.position === "BOTTOM_LEFT" ? "left-5" : "right-5"} grid size-14 place-items-center overflow-hidden rounded-full text-white`}

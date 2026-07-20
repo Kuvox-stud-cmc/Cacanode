@@ -45,6 +45,7 @@ app:
       client-id: ${PAYOS_CLIENT_ID:}
       api-key: ${PAYOS_API_KEY:}
       checksum-key: ${PAYOS_CHECKSUM_KEY:}
+      webhook-url: ${PAYOS_WEBHOOK_URL:}
 
 spring:
   config:
@@ -81,7 +82,6 @@ spring:
   sendgrid:
     api-key: ${SENDGRID_API_KEY}
     from-email: ${FROM_EMAIL}
-    template-id: ${TEMPLATE_ID}
     verification-link: ${VERIFICATION_LINK}
     login-2fa-link: ${LOGIN_2FA_LINK:https://cacanode.com/verify-login}
     support-email: ${SUPPORT_EMAIL:support@cacanode.com}

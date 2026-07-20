@@ -6,6 +6,7 @@ import static org.mockito.Mockito.when;
 
 import java.sql.Timestamp;
 import java.time.LocalDateTime;
+import java.time.LocalDate;
 import java.util.UUID;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -99,6 +100,27 @@ class DocumentPagingIntegrationTest {
         assertEquals(UUID.fromString("30000000-0000-0000-0000-000000000003"), firstPage.get(0).id());
         assertEquals(UUID.fromString("30000000-0000-0000-0000-000000000002"), firstPage.get(1).id());
         assertEquals(UUID.fromString("30000000-0000-0000-0000-000000000001"), secondPage.getFirst().id());
+    }
+
+    @Test
+    void returnsAccurateTotalsAcrossMoreThanOneHundredRecordsAndInclusiveDates() {
+        for (int index = 0; index < 105; index++) {
+            insert(UUID.randomUUID().toString(), TENANT_ID, KNOWLEDGE_BASE_ID,
+                    index == 7 ? "literal 100%_ guide.pdf" : "Guide " + index + ".pdf",
+                    "PDF", "COMPLETED", "EMPLOYEE_ONLY",
+                    index < 50 ? "2026-07-14T23:59:59" : "2026-07-15T00:00:00");
+        }
+
+        var day = documentService.listResult(TENANT_ID, KNOWLEDGE_BASE_ID, 0, 20,
+                null, null, null, null, LocalDate.parse("2026-07-14"),
+                LocalDate.parse("2026-07-14"), "uploaded", "desc");
+        var literal = documentService.listResult(TENANT_ID, KNOWLEDGE_BASE_ID, 0, 20,
+                "100%_", null, null, null, null, null, "uploaded", "desc");
+
+        assertEquals(50, day.totalCount());
+        assertEquals(20, day.documents().size());
+        assertEquals(1, literal.totalCount());
+        assertEquals("literal 100%_ guide.pdf", literal.documents().getFirst().fileName());
     }
 
     private void insert(

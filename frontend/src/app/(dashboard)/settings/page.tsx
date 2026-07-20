@@ -19,6 +19,7 @@ import {
   deleteWidgetIcon,
   deleteWebhook,
   downloadWidgetIcon,
+  generateWidgetEmbed,
   getWidgetEmbed,
   getWidgetSettings,
   listIntegrationTokens,
@@ -115,8 +116,10 @@ function SettingsPageContent() {
   const [widgetEmbed, setWidgetEmbed] = useState<WidgetEmbed | null>(null);
   const [widgetEmbedLoading, setWidgetEmbedLoading] = useState(true);
   const [widgetEmbedError, setWidgetEmbedError] = useState<string | null>(null);
+  const [managedWidgetSecret, setManagedWidgetSecret] = useState<string | null>(null);
   const [origins, setOrigins] = useState("");
   const [tokens, setTokens] = useState<IntegrationToken[]>([]);
+  const [showDeletedTokens, setShowDeletedTokens] = useState(false);
   const [webhooks, setWebhooks] = useState<WebhookEndpoint[]>([]);
   const [tokenDialog, setTokenDialog] = useState(false);
   const [tokenName, setTokenName] = useState("");
@@ -160,7 +163,17 @@ function SettingsPageContent() {
       })(),
       listWebhooks(request),
       getCustomerAnswerPrompt(request),
-      getBillingAccount(request),
+      (async () => {
+        const account = await getBillingAccount(request);
+        const pending = account.pendingPayment;
+        if (!pending || !["PENDING", "PROCESSING"].includes(pending.status)) return account;
+        try {
+          await getBillingPayment(request, pending.paymentId);
+          return await getBillingAccount(request);
+        } catch {
+          return account;
+        }
+      })(),
       getPublicBillingPlans(),
     ])
       .then(([widgetResult, integrationResult, webhookResult, promptResult, accountResult, plansResult]) => {
@@ -206,13 +219,17 @@ function SettingsPageContent() {
     if (widgetIconPreview) URL.revokeObjectURL(widgetIconPreview);
   }, [widgetIconPreview]);
 
+  const returnedFromPayOs = searchParams.get("payment") === "return"
+    || searchParams.get("status") === "PAID";
+  const returnedPaymentId = searchParams.get("paymentId")
+    ?? (returnedFromPayOs ? billingAccount?.pendingPayment?.paymentId ?? null : null);
+
   useEffect(() => {
-    const paymentId = searchParams.get("paymentId");
-    if (!paymentId || !user) return;
+    if (!returnedPaymentId || !user) return;
     let cancelled = false;
     void (async () => {
-      for (let attempt = 0; attempt < 15 && !cancelled; attempt += 1) {
-        const payment = await getBillingPayment(request, paymentId);
+      for (let attempt = 0; attempt < 10 && !cancelled; attempt += 1) {
+        const payment = await getBillingPayment(request, returnedPaymentId);
         if (payment.status === "PAID") {
           const account = await getBillingAccount(request);
           if (cancelled) return;
@@ -227,12 +244,12 @@ function SettingsPageContent() {
           router.replace("/settings?tab=quota");
           return;
         }
-        await new Promise((resolve) => window.setTimeout(resolve, 2000));
+        await new Promise((resolve) => window.setTimeout(resolve, 3000));
       }
       if (!cancelled) toast("Payment is still pending. Use Refresh payment status to check again.");
     })().catch((error) => toast.error(error instanceof Error ? error.message : "Unable to verify payment"));
     return () => { cancelled = true; };
-  }, [request, router, searchParams, setPlan, user]);
+  }, [request, returnedPaymentId, router, setPlan, user]);
 
   const promptDirty = promptSettings !== null && promptDraft !== promptSettings.prompt;
   const promptLength = Array.from(promptDraft).length;
@@ -244,19 +261,18 @@ function SettingsPageContent() {
   );
 
   const embedCode = useMemo(() => {
-    if (!newSecret || !newSecretScopes.includes("widget:chat")) return null;
+    if (!newSecretScopes.includes("widget:chat")) return null;
     const widgetUrl = publicConfig.widgetUrl ?? "/widget/v1/cacanode-chat.js";
-    return `<script async src="${widgetUrl}" data-token="${newSecret}"></script>`;
-  }, [newSecret, newSecretScopes]);
+    return `<script async src="${widgetUrl}" data-token="\${CACANODE_WIDGET_TOKEN}"></script>`;
+  }, [newSecretScopes]);
 
   const managedWidgetEmbedCode = useMemo(() => {
-    if (!widgetEmbed) return null;
     const configuredUrl = publicConfig.widgetUrl;
     const fallbackUrl = publicConfig.apiBaseUrl
       ? new URL("/widget/v1/cacanode-chat.js", publicConfig.apiBaseUrl).toString()
       : "/widget/v1/cacanode-chat.js";
-    return `<script async src="${configuredUrl ?? fallbackUrl}" data-token="${widgetEmbed.secret}"></script>`;
-  }, [widgetEmbed]);
+    return `<script async src="${configuredUrl ?? fallbackUrl}" data-token="\${CACANODE_WIDGET_TOKEN}"></script>`;
+  }, []);
 
   async function saveWidget() {
     if (!widget) return;
@@ -276,16 +292,34 @@ function SettingsPageContent() {
     }
   }
 
-  async function reloadWidgetEmbed() {
+  async function generateManagedWidgetToken() {
     setWidgetEmbedLoading(true);
     setWidgetEmbedError(null);
     try {
-      setWidgetEmbed(await getWidgetEmbed(request));
+      const generated = await generateWidgetEmbed(request);
+      setWidgetEmbed({
+        tokenId: generated.tokenId,
+        tokenPrefix: generated.tokenPrefix,
+        configured: true,
+        previewToken: generated.previewToken,
+      });
+      setManagedWidgetSecret(generated.secret);
+      setWidget((current) => current ? { ...current, active: true } : current);
+      setTokens(await listIntegrationTokens(request, showDeletedTokens));
+      toast.success("Widget token generated");
     } catch (error) {
-      setWidgetEmbed(null);
-      setWidgetEmbedError(error instanceof Error ? error.message : "Unable to load widget installation code");
+      setWidgetEmbedError(error instanceof Error ? error.message : "Unable to generate widget token");
     } finally {
       setWidgetEmbedLoading(false);
+    }
+  }
+
+  async function changeDeletedTokenVisibility(checked: boolean) {
+    setShowDeletedTokens(checked);
+    try {
+      setTokens(await listIntegrationTokens(request, checked));
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to load integration tokens");
     }
   }
 
@@ -381,11 +415,19 @@ function SettingsPageContent() {
 
   async function revokeToken(id: string) {
     try {
+      const managed = widgetEmbed?.tokenId === id;
       await revokeIntegrationToken(request, id);
-      setTokens((current) => current.map((token) => (
-        token.id === id ? { ...token, revokedAt: new Date().toISOString() } : token
-      )));
-      toast.success("Token revoked");
+      setTokens((current) => showDeletedTokens
+        ? current.map((token) => token.id === id
+          ? { ...token, revokedAt: new Date().toISOString() }
+          : token)
+        : current.filter((token) => token.id !== id));
+      if (managed) {
+        setWidgetEmbed({ tokenId: null, tokenPrefix: null, configured: false, previewToken: null });
+        setManagedWidgetSecret(null);
+        setWidget((current) => current ? { ...current, active: false } : current);
+      }
+      toast.success("Token deleted");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Unable to revoke token");
     }
@@ -463,6 +505,10 @@ function SettingsPageContent() {
   async function refreshBilling() {
     setBillingBusy(true);
     try {
+      const pending = billingAccount?.pendingPayment;
+      if (pending && ["PENDING", "PROCESSING"].includes(pending.status)) {
+        await getBillingPayment(request, pending.paymentId);
+      }
       const account = await getBillingAccount(request);
       setBillingAccount(account);
       setPlan(account.planCode);
@@ -543,11 +589,27 @@ function SettingsPageContent() {
                   <div className="flex items-start gap-3 p-4 pb-3">
                     <span className="grid size-10 shrink-0 place-items-center rounded-lg bg-indigo-600 text-white shadow-sm shadow-indigo-200"><Code2 className="size-5" /></span>
                     <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-2"><h3 className="font-semibold text-slate-900">Install your widget</h3>{managedWidgetEmbedCode && <Badge className="border-emerald-200 bg-emerald-50 text-emerald-700">Ready to use</Badge>}</div>
-                      <p className="mt-1 text-sm leading-5 text-slate-600">Copy this snippet and paste it before your website&apos;s closing <code className="rounded bg-white px-1 py-0.5 text-xs text-indigo-700 shadow-sm">&lt;/body&gt;</code> tag.</p>
+                      <div className="flex flex-wrap items-center gap-2"><h3 className="font-semibold text-slate-900">Install your widget</h3><Badge className={widgetEmbed?.configured ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-amber-200 bg-amber-50 text-amber-700"}>{widgetEmbed?.configured ? "Token configured" : "Token required"}</Badge></div>
+                      <p className="mt-1 text-sm leading-5 text-slate-600">Generate the widget token, store it in your deployment environment, then paste the placeholder snippet before your website&apos;s closing <code className="rounded bg-white px-1 py-0.5 text-xs text-indigo-700 shadow-sm">&lt;/body&gt;</code> tag.</p>
                     </div>
                   </div>
-                  {managedWidgetEmbedCode ? <div className="mx-4 overflow-hidden rounded-lg border border-slate-800 bg-slate-950 shadow-lg shadow-slate-900/10">
+                  {managedWidgetSecret && <div className="mx-4 mb-3 rounded-lg border border-amber-200 bg-amber-50 p-4">
+                    <p className="text-sm font-medium text-amber-900">Widget token — shown once</p>
+                    <p className="mt-1 text-xs leading-5 text-amber-800">Copy this value now. CacaNode will not reveal it again.</p>
+                    <div className="mt-3 flex gap-2"><code className="min-w-0 flex-1 overflow-x-auto rounded-md bg-slate-950 p-3 text-xs text-white">{managedWidgetSecret}</code><Button type="button" variant="outline" size="icon" onClick={() => void copyText(managedWidgetSecret)}>{copied ? <Check /> : <Copy />}</Button></div>
+                  </div>}
+                  <div className="mx-4 mb-3 rounded-lg border border-slate-200 bg-white p-4">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div><p className="text-sm font-medium text-slate-800">{widgetEmbed?.configured ? "Replace widget token" : "Generate widget token"}</p><p className="mt-1 text-xs text-slate-500">Replacing revokes the previous token immediately and enables the widget.</p></div>
+                      <Button type="button" variant={widgetEmbed?.configured ? "outline" : "default"} disabled={widgetEmbedLoading} onClick={() => void generateManagedWidgetToken()}>{widgetEmbedLoading && <Loader2 className="animate-spin" />}{widgetEmbed?.configured ? "Regenerate" : "Generate"}</Button>
+                    </div>
+                    {widgetEmbedError && <p className="mt-3 text-xs text-red-700">{widgetEmbedError}</p>}
+                  </div>
+                  <div className="mx-4 mb-3 overflow-hidden rounded-lg border border-slate-200 bg-white">
+                    <div className="border-b border-slate-200 px-3 py-2 text-[10px] font-medium uppercase tracking-widest text-slate-500">Environment</div>
+                    <pre className="overflow-auto p-4 font-mono text-xs leading-6 text-slate-700">CACANODE_WIDGET_TOKEN=ccn_it_...</pre>
+                  </div>
+                  <div className="mx-4 overflow-hidden rounded-lg border border-slate-800 bg-slate-950 shadow-lg shadow-slate-900/10">
                     <div className="flex items-center justify-between border-b border-white/10 bg-white/[0.04] px-3 py-2">
                       <div className="flex items-center gap-1.5" aria-hidden="true"><span className="size-2.5 rounded-full bg-red-400" /><span className="size-2.5 rounded-full bg-amber-400" /><span className="size-2.5 rounded-full bg-emerald-400" /></div>
                       <span className="font-mono text-[10px] font-medium uppercase tracking-widest text-slate-400">HTML</span>
@@ -556,18 +618,15 @@ function SettingsPageContent() {
                         onClick={() => void copyText(managedWidgetEmbedCode)}>{copied ? <><Check className="text-emerald-400" />Copied</> : <><Copy />Copy</>}</Button>
                     </div>
                     <pre className="max-h-36 overflow-auto whitespace-pre-wrap break-all p-4 font-mono text-xs leading-6 text-sky-200 selection:bg-indigo-500/40">{managedWidgetEmbedCode}</pre>
-                  </div> : <div className="mx-4 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-                    <p>{widgetEmbedLoading ? "Loading your widget installation code..." : widgetEmbedError ?? "Widget installation code is temporarily unavailable."}</p>
-                    {!widgetEmbedLoading && <Button type="button" size="sm" variant="outline" className="mt-3 bg-white" onClick={() => void reloadWidgetEmbed()}><RefreshCw />Retry</Button>}
-                  </div>}
-                  {widgetEmbed && <div className="flex items-start gap-2.5 p-4 text-xs leading-5 text-slate-600">
+                  </div>
+                  <div className="flex items-start gap-2.5 p-4 text-xs leading-5 text-slate-600">
                     <ShieldCheck className="mt-0.5 size-4 shrink-0 text-emerald-600" />
-                    <p><span className="font-medium text-slate-700">Scoped browser token</span> · {widgetEmbed.tokenPrefix}... can only access widget chat. Visitors can inspect it, and their messages count toward your quota.</p>
-                  </div>}
+                    <p><span className="font-medium text-slate-700">Browser token notice</span> · Environment variables prevent accidental source-control leaks, but visitors can still inspect browser-delivered tokens. Restrict allowed origins and revoke a token if it is abused.{widgetEmbed?.tokenPrefix ? ` Current prefix: ${widgetEmbed.tokenPrefix}...` : ""}</p>
+                  </div>
                 </section>
               </CardContent>
             </Card>
-            <InteractiveWidgetPreview widget={widget} embed={widgetEmbed} iconPreviewUrl={widgetIconPreview} />
+            <InteractiveWidgetPreview widget={widget} token={managedWidgetSecret ?? widgetEmbed?.previewToken ?? null} iconPreviewUrl={widgetIconPreview} />
           </div>}
         </TabsContent>
 
@@ -724,11 +783,11 @@ function SettingsPageContent() {
         </TabsContent>
 
         <TabsContent value="tokens" className="space-y-4">
-          <div className="flex items-center justify-between"><p className="text-sm text-slate-500">Create separate scoped tokens for hosted widgets and server-side Chat API integrations.</p><Button onClick={() => setTokenDialog(true)}><Plus />Create token</Button></div>
+          <div className="flex flex-wrap items-center justify-between gap-3"><p className="text-sm text-slate-500">Create separate scoped tokens for hosted widgets and server-side Chat API integrations.</p><div className="flex items-center gap-3"><label className="flex items-center gap-2 text-sm text-slate-600"><input type="checkbox" checked={showDeletedTokens} onChange={(event) => void changeDeletedTokenVisibility(event.target.checked)} />Show deleted tokens</label><Button onClick={() => setTokenDialog(true)}><Plus />Create token</Button></div></div>
           {!billingAccount?.features.apiAccess && <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">Widget tokens remain available. Creating or using api:chat tokens requires Pro.</p>}
-          {newSecret && <Card><CardHeader><CardTitle className="text-base">New token</CardTitle></CardHeader><CardContent className="space-y-3"><p className="text-sm text-amber-700">This value is shown once. Store it before closing this panel.</p><div className="flex gap-2"><code className="min-w-0 flex-1 overflow-x-auto rounded-md bg-slate-950 p-3 text-xs text-white">{newSecret}</code><Button variant="outline" size="icon" onClick={() => void copyText(newSecret)}>{copied ? <Check /> : <Copy />}</Button></div>{embedCode && <div className="space-y-2"><Label>Widget embed code</Label><pre className="overflow-x-auto rounded-md bg-slate-950 p-3 text-xs text-white">{embedCode}</pre><Button variant="outline" onClick={() => void copyText(embedCode)}><Copy />Copy embed code</Button></div>}</CardContent></Card>}
+          {newSecret && <Card><CardHeader><CardTitle className="text-base">New token</CardTitle></CardHeader><CardContent className="space-y-3"><p className="text-sm text-amber-700">This value is shown once. Store it in your deployment environment before closing this panel.</p><div className="flex gap-2"><code className="min-w-0 flex-1 overflow-x-auto rounded-md bg-slate-950 p-3 text-xs text-white">{newSecret}</code><Button variant="outline" size="icon" onClick={() => void copyText(newSecret)}>{copied ? <Check /> : <Copy />}</Button></div>{embedCode && <div className="space-y-2"><Label>Environment variable</Label><pre className="overflow-x-auto rounded-md bg-slate-950 p-3 text-xs text-white">CACANODE_WIDGET_TOKEN=ccn_it_...</pre><Label>Widget embed template</Label><pre className="overflow-x-auto rounded-md bg-slate-950 p-3 text-xs text-white">{embedCode}</pre><Button variant="outline" onClick={() => void copyText(embedCode)}><Copy />Copy template</Button><p className="text-xs text-slate-500">Environment variables reduce accidental source-control leaks. Browser widget tokens remain inspectable by visitors.</p></div>}</CardContent></Card>}
           <div className="divide-y rounded-md border bg-white">
-            {tokens.map((token) => <div key={token.id} className="flex flex-wrap items-center gap-3 p-4"><KeyRound className="size-4 text-slate-400" /><div className="min-w-44 flex-1"><p className="font-medium text-slate-800">{token.name}</p><p className="font-mono text-xs text-slate-500">{token.tokenPrefix}...</p></div><div className="flex gap-1">{token.scopes.map((scope) => <Badge key={scope} variant="outline">{scope}</Badge>)}{widgetEmbed?.tokenId === token.id && <Badge variant="outline">Managed widget token</Badge>}</div><div className="text-right text-xs text-slate-500"><p>Expires: {formatDate(token.expiresAt)}</p><p>Last used: {formatDate(token.lastUsedAt)}</p></div>{token.revokedAt ? <Badge variant="outline">Revoked</Badge> : widgetEmbed?.tokenId === token.id ? null : <><Button variant="ghost" size="icon" title="Rotate token" onClick={() => void rotateToken(token.id)}><RefreshCw /></Button><Button variant="ghost" size="icon" title="Revoke token" onClick={() => void revokeToken(token.id)}><Trash2 /></Button></>}</div>)}
+            {tokens.map((token) => <div key={token.id} className="flex flex-wrap items-center gap-3 p-4"><KeyRound className="size-4 text-slate-400" /><div className="min-w-44 flex-1"><p className="font-medium text-slate-800">{token.name}</p><p className="font-mono text-xs text-slate-500">{token.tokenPrefix}...</p></div><div className="flex gap-1">{token.scopes.map((scope) => <Badge key={scope} variant="outline">{scope}</Badge>)}{widgetEmbed?.tokenId === token.id && <Badge variant="outline">Managed widget token</Badge>}</div><div className="text-right text-xs text-slate-500"><p>Expires: {formatDate(token.expiresAt)}</p><p>Last used: {formatDate(token.lastUsedAt)}</p></div>{token.revokedAt ? <Badge variant="outline">Deleted</Badge> : <>{widgetEmbed?.tokenId !== token.id && <Button variant="ghost" size="icon" title="Rotate token" onClick={() => void rotateToken(token.id)}><RefreshCw /></Button>}<Button variant="ghost" size="icon" title="Delete token" onClick={() => void revokeToken(token.id)}><Trash2 /></Button></>}</div>)}
             {tokens.length === 0 && <p className="p-8 text-center text-sm text-slate-500">No integration tokens</p>}
           </div>
         </TabsContent>

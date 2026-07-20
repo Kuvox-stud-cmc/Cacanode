@@ -79,15 +79,18 @@ At minimum, review these groups:
   `PUBLIC_WIDGET_URL`, and `CORS_ORIGINS`.
 - Storage and queue credentials: PostgreSQL, RabbitMQ, Qdrant when enabled, and SeaweedFS S3 when
   credentials are configured.
-- Application secrets: `TOKEN_KEY`, `INTEGRATION_TOKEN_PEPPER`,
-  `WEBHOOK_ENCRYPTION_KEY`, and `GRAPH_INTERNAL_TOKEN`.
+- Application secrets: `TOKEN_KEY`, `PUBLIC_EVIDENCE_SIGNING_KEY`,
+  `WIDGET_PREVIEW_SIGNING_KEY`, `INTEGRATION_TOKEN_PEPPER`,
+  `INTEGRATION_SECRET_ENCRYPTION_KEY`, `WEBHOOK_ENCRYPTION_KEY`, and
+  `GRAPH_INTERNAL_TOKEN`.
 - gRPC certificates: set `GRPC_CERT_DIR` to a root-readable directory containing `ca.crt`,
   `spring-client.crt`, `spring-client.key`, `ai-server.crt`, and `ai-server.key`.
 - Hosted model settings: `OPENAI_API_KEY`, `OPENAI_MODEL`, and graph-extraction limits.
 - Email and authentication links. `LOGIN_2FA_BYPASS_EMAILS` is acceptable only for a controlled,
   temporary demonstration account and should normally be empty.
-- PayOS credentials and public return/cancel URLs. Keep `PAYOS_ENABLED=false` until the public
-  webhook and a low-value live verification are complete.
+- PayOS credentials, `PAYOS_WEBHOOK_URL`, and public return/cancel URLs. Keep
+  `PAYOS_ENABLED=false` until the public webhook endpoint is reachable and a low-value live
+  verification is complete.
 - Worker mode. Use `WORKER_MODE=embedded` with `WORKER_KINDS=document` for the reference profile.
 - Cache flags. They are safe-off by default; follow [CACHING.md](CACHING.md) before enabling one.
 
@@ -114,8 +117,8 @@ bash -n deploy/bootstrap-ubuntu.sh deploy/deploy.sh deploy/smoke-test.sh
 ```
 
 The deployment script rejects an unreadable or broadly readable environment file, missing required
-values, unchanged example values, unsupported embedding model characters, and a non-HTTPS
-`ADMIN_WEB_URL`.
+values, unchanged example values, unsupported embedding model characters, invalid public URLs,
+missing email-provider credentials, and incomplete PayOS credentials when PayOS is enabled.
 
 ## 3. Configure GitHub Actions
 

@@ -3,6 +3,7 @@ package com.cacanode.api.tenant.service;
 import com.cacanode.api.common.exception.custom.BadRequestException;
 import com.cacanode.api.common.exception.custom.ResourceNotFoundException;
 import com.cacanode.api.common.exception.custom.UnauthorizedException;
+import com.cacanode.api.common.cache.BusinessCacheInvalidationPublisher;
 import com.cacanode.api.tenant.api.TenantModuleApi;
 import com.cacanode.api.tenant.cache.IntegrationTokenCacheInvalidationPublisher;
 import com.cacanode.api.tenant.dto.IntegrationTokenDtos;
@@ -43,6 +44,10 @@ public class IntegrationTokenService {
     private final IntegrationTokenCacheInvalidationPublisher cacheInvalidationPublisher;
     @Autowired(required = false)
     private WidgetConfigRepository widgetConfigRepository;
+    @Autowired(required = false)
+    private BusinessCacheInvalidationPublisher businessInvalidationPublisher;
+    @Autowired(required = false)
+    private WidgetPreviewTokenService widgetPreviewTokenService;
 
     @Autowired
     public IntegrationTokenService(
@@ -68,8 +73,11 @@ public class IntegrationTokenService {
     private String legacyPepper;
 
     @Transactional(readOnly = true)
-    public List<IntegrationTokenDtos.Item> list(UUID tenantId) {
-        return repository.findByTenant_IdOrderByCreatedAtDesc(tenantId).stream().map(this::toItem).toList();
+    public List<IntegrationTokenDtos.Item> list(UUID tenantId, boolean includeDeleted) {
+        List<IntegrationToken> tokens = includeDeleted
+                ? repository.findByTenant_IdOrderByCreatedAtDesc(tenantId)
+                : repository.findByTenant_IdAndRevokedAtIsNullOrderByCreatedAtDesc(tenantId);
+        return tokens.stream().map(this::toItem).toList();
     }
 
     @Transactional
@@ -105,10 +113,25 @@ public class IntegrationTokenService {
 
     @Transactional
     public void revoke(UUID tenantId, UUID tokenId) {
-        rejectManagedWidgetToken(tenantId, tokenId);
         IntegrationToken token = repository.findByIdAndTenant_Id(tokenId, tenantId)
                 .orElseThrow(() -> new ResourceNotFoundException("Integration token was not found"));
-        token.setRevokedAt(LocalDateTime.now());
+        if (token.getRevokedAt() == null) {
+            token.setRevokedAt(LocalDateTime.now());
+        }
+        if (widgetConfigRepository != null) {
+            widgetConfigRepository.findFirstByTenant_IdOrderByCreatedAtAsc(tenantId)
+                    .filter(config -> config.getManagedWidgetToken() != null
+                            && tokenId.equals(config.getManagedWidgetToken().getId()))
+                    .ifPresent(config -> {
+                        config.setManagedWidgetToken(null);
+                        config.setEncryptedWidgetTokenSecret(null);
+                        config.setActive(false);
+                        widgetConfigRepository.save(config);
+                        if (businessInvalidationPublisher != null) {
+                            businessInvalidationPublisher.widget(tenantId);
+                        }
+                    });
+        }
         publishTokenInvalidation(token.getTokenHash());
     }
 
@@ -134,6 +157,9 @@ public class IntegrationTokenService {
 
     @Transactional
     public Principal authenticate(String authorization, String requiredScope, String parentOrigin) {
+        if (WIDGET_SCOPE.equals(requiredScope) && isWidgetPreviewAuthorization(authorization)) {
+            return widgetPreviewTokenService.authenticate(authorization.substring("Bearer ".length()));
+        }
         String secret = bearerSecret(authorization);
         IntegrationToken token = findBySecret(secret);
         LocalDateTime now = LocalDateTime.now();
@@ -179,6 +205,9 @@ public class IntegrationTokenService {
 
     @Transactional
     public Principal authenticateForAnyChatScope(String authorization) {
+        if (isWidgetPreviewAuthorization(authorization)) {
+            return widgetPreviewTokenService.authenticate(authorization.substring("Bearer ".length()));
+        }
         String secret = bearerSecret(authorization);
         IntegrationToken token = findBySecret(secret);
         LocalDateTime now = LocalDateTime.now();
@@ -245,6 +274,11 @@ public class IntegrationTokenService {
             throw new UnauthorizedException("Integration token is required");
         }
         return authorization.substring("Bearer ".length());
+    }
+
+    private boolean isWidgetPreviewAuthorization(String authorization) {
+        return widgetPreviewTokenService != null && authorization != null
+                && authorization.startsWith("Bearer " + WidgetPreviewTokenService.PREFIX);
     }
 
     private byte[] randomBytes(int length) {

@@ -60,6 +60,7 @@ import java.util.UUID;
 @Service
 @RequiredArgsConstructor
 public class BillingFacade implements BillingModuleApi {
+    private static final String SUPERSEDED_PAYMENT_REASON = "Superseded by a successful payment";
     private static final Set<PaymentOrderStatus> OPEN_PAYMENT_STATUSES =
             Set.of(PaymentOrderStatus.PENDING, PaymentOrderStatus.PROCESSING);
     private static final Set<PaymentOrderStatus> ACCOUNT_PAYMENT_STATUSES =
@@ -252,11 +253,12 @@ public class BillingFacade implements BillingModuleApi {
     }
 
     @Override
-    @Transactional(readOnly = true)
+    @Transactional
     public BillingDtos.PaymentResponse payment(UUID tenantId, UUID paymentId) {
-        return paymentRepository.findByIdAndTenantId(paymentId, tenantId)
-                .map(this::paymentResponse)
+        BillingPaymentOrder order = paymentRepository.findByIdAndTenantIdForUpdate(paymentId, tenantId)
                 .orElseThrow(() -> new ResourceNotFoundException("Payment was not found"));
+        reconcileOpenOrder(order);
+        return paymentResponse(order);
     }
 
     @Override
@@ -330,15 +332,15 @@ public class BillingFacade implements BillingModuleApi {
 
     @Transactional
     public void reconcile(UUID paymentId) {
-        BillingPaymentOrder order = paymentRepository.findById(paymentId).orElse(null);
+        BillingPaymentOrder order = paymentRepository.findByIdForUpdate(paymentId).orElse(null);
+        reconcileOpenOrder(order);
+    }
+
+    private void reconcileOpenOrder(BillingPaymentOrder order) {
         if (order == null || !OPEN_PAYMENT_STATUSES.contains(order.getStatus())) {
             return;
         }
         invalidateBilling(order.getTenantId());
-        if (!order.getExpiresAt().isAfter(utcNow())) {
-            order.setStatus(PaymentOrderStatus.EXPIRED);
-            return;
-        }
         PaymentGateway.ProviderPayment provider = paymentGateway.getPayment(order.getOrderCode());
         if (provider.orderCode() != order.getOrderCode()
                 || provider.amount() != order.getAmountVnd()
@@ -348,11 +350,18 @@ public class BillingFacade implements BillingModuleApi {
             order.setFailureReason("Reconciliation identity or amount mismatch");
             return;
         }
-        if (provider.status() == PaymentOrderStatus.PAID && provider.amountPaid() == order.getAmountVnd()) {
+        if (provider.status() == PaymentOrderStatus.PAID) {
+            if (provider.amountPaid() != order.getAmountVnd()) {
+                order.setStatus(PaymentOrderStatus.REVIEW);
+                order.setFailureReason("Paid amount did not match the payment order");
+                return;
+            }
             activatePaidOrder(order, provider.providerReference(), utcNow());
-        } else {
-            order.setStatus(provider.status());
+            return;
         }
+        order.setStatus(provider.status());
+        order.setProviderReference(provider.providerReference());
+        order.setFailureReason(null);
     }
 
     private void activatePaidOrder(BillingPaymentOrder order, String providerReference, LocalDateTime paidAt) {
@@ -387,6 +396,9 @@ public class BillingFacade implements BillingModuleApi {
         order.setProviderReference(providerReference);
         order.setPaidAt(paidAt);
         order.setFailureReason(null);
+        paymentRepository.cancelOtherOpenOrders(
+                order.getTenantId(), order.getId(), OPEN_PAYMENT_STATUSES,
+                PaymentOrderStatus.CANCELLED, SUPERSEDED_PAYMENT_REASON, paidAt);
         applyProjection(subscription);
         eventPublisher.publishEvent(AuditLogEvent.builder(this)
                 .tenantId(order.getTenantId()).userId(order.getUserId())

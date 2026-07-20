@@ -140,10 +140,76 @@
     }
   }
 
-  function addMessage(role, content) {
+  function safePublicUrl(value) {
+    return typeof value === "string" && /^https?:\/\//i.test(value) ? value : null;
+  }
+
+  function appendMessageContent(item, content, citations) {
+    var byId = new Map();
+    (citations || []).forEach(function (citation) {
+      byId.set(String(citation.id || "").toUpperCase(), citation);
+    });
+    var pattern = /\[S\d+\]/gi;
+    var cursor = 0;
+    var match;
+    while ((match = pattern.exec(content)) !== null) {
+      if (match.index > cursor) item.appendChild(document.createTextNode(content.slice(cursor, match.index)));
+      var id = match[0].slice(1, -1).toUpperCase();
+      var citation = byId.get(id);
+      var publicUrl = citation && safePublicUrl(citation.public_url || citation.publicUrl);
+      if (citation && publicUrl) {
+        var link = document.createElement("a");
+        link.className = "citation-link";
+        link.href = publicUrl;
+        link.target = "_blank";
+        link.rel = "noopener noreferrer";
+        link.textContent = citation.id;
+        link.title = "Open source: " + citation.source_name;
+        item.appendChild(link);
+      } else {
+        item.appendChild(document.createTextNode(match[0]));
+      }
+      cursor = pattern.lastIndex;
+    }
+    if (cursor < content.length) item.appendChild(document.createTextNode(content.slice(cursor)));
+  }
+
+  function appendSourceCards(item, citations) {
+    var sources = new Map();
+    (citations || []).forEach(function (citation) {
+      var publicUrl = safePublicUrl(citation.public_url || citation.publicUrl);
+      if (!publicUrl || sources.has(citation.document_id)) return;
+      sources.set(citation.document_id, {url: publicUrl, name: citation.source_name || "Source document"});
+    });
+    if (sources.size === 0) return;
+    var container = document.createElement("div");
+    container.className = "message-sources";
+    var label = document.createElement("div");
+    label.className = "message-sources-label";
+    label.textContent = "Sources";
+    container.appendChild(label);
+    sources.forEach(function (source) {
+      var link = document.createElement("a");
+      link.className = "source-card";
+      link.href = source.url;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      var name = document.createElement("span");
+      name.textContent = source.name;
+      var arrow = document.createElement("span");
+      arrow.textContent = "↗";
+      link.appendChild(name);
+      link.appendChild(arrow);
+      container.appendChild(link);
+    });
+    item.appendChild(container);
+  }
+
+  function addMessage(role, content, citations) {
     var item = document.createElement("div");
     item.className = "message " + role;
-    item.textContent = content;
+    appendMessageContent(item, content, citations || []);
+    if (role === "assistant") appendSourceCards(item, citations || []);
     messages.appendChild(item);
     messages.scrollTop = messages.scrollHeight;
   }
@@ -216,9 +282,11 @@
         method: "POST",
         body: JSON.stringify({content: content})
       });
-      addMessage("assistant", response.content);
+      addMessage("assistant", response.content, response.citations || []);
       if (response.action && response.action.type === "ticket_draft") {
         currentDraft = response.action;
+        var draftEmail = response.action.customer_email || response.action.customerEmail || "";
+        if (draftEmail) document.getElementById("ticket-email").value = draftEmail;
         document.getElementById("ticket-title").value = response.action.title;
         document.getElementById("ticket-description").value = response.action.description;
         dialog.showModal();

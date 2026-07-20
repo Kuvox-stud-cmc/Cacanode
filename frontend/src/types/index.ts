@@ -180,6 +180,7 @@ export interface ChatCitation {
   sheet_name?: string | null;
   cell_range?: string | null;
   table_id?: string | null;
+  public_url?: string | null;
 }
 
 export interface AssistantMessageResponse {

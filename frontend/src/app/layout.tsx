@@ -15,7 +15,7 @@ export default function RootLayout({
   const [queryClient] = useState(() => new QueryClient());
 
   return (
-    <html lang="vi">
+    <html lang="en">
       <body className="font-sans" suppressHydrationWarning>
         <PageTitle />
         <QueryClientProvider client={queryClient}>

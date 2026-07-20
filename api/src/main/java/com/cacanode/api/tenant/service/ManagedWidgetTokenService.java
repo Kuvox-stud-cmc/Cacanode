@@ -1,7 +1,7 @@
 package com.cacanode.api.tenant.service;
 
-import com.cacanode.api.common.event.TenantCreatedEvent;
 import com.cacanode.api.common.exception.custom.ResourceNotFoundException;
+import com.cacanode.api.common.cache.BusinessCacheInvalidationPublisher;
 import com.cacanode.api.tenant.dto.IntegrationTokenDtos;
 import com.cacanode.api.tenant.dto.WidgetEmbedDtos;
 import com.cacanode.api.tenant.model.IntegrationToken;
@@ -10,11 +10,10 @@ import com.cacanode.api.tenant.repository.IntegrationTokenRepository;
 import com.cacanode.api.tenant.repository.WidgetConfigRepository;
 import com.cacanode.api.tenant.repository.TenantRepository;
 import lombok.RequiredArgsConstructor;
-import org.springframework.context.event.EventListener;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
 
@@ -26,56 +25,47 @@ public class ManagedWidgetTokenService {
     private final WidgetConfigRepository widgetConfigRepository;
     private final IntegrationTokenRepository tokenRepository;
     private final IntegrationTokenService tokenService;
-    private final IntegrationSecretCryptoService cryptoService;
     private final TenantRepository tenantRepository;
+    private final WidgetPreviewTokenService previewTokenService;
+    @Autowired(required = false)
+    private BusinessCacheInvalidationPublisher businessInvalidationPublisher;
 
-    @EventListener
-    @Transactional
-    public void provisionAfterTenantCreation(TenantCreatedEvent event) {
-        ensure(event.tenantId());
-    }
-
-    @Transactional
-    public WidgetEmbedDtos.Response getOrCreate(UUID tenantId) {
-        WidgetConfig config = ensure(tenantId);
+    @Transactional(readOnly = true)
+    public WidgetEmbedDtos.Response get(UUID tenantId) {
+        WidgetConfig config = widgetConfigRepository.findFirstByTenant_IdOrderByCreatedAtAsc(tenantId)
+                .orElseThrow(() -> new ResourceNotFoundException("Widget configuration was not found"));
         IntegrationToken token = config.getManagedWidgetToken();
-        IntegrationSecretCryptoService.DecryptedSecret secret =
-                cryptoService.decryptForMigration(config.getEncryptedWidgetTokenSecret());
-        if (secret.requiresReencryption()) {
-            config.setEncryptedWidgetTokenSecret(cryptoService.encrypt(secret.value()));
-            widgetConfigRepository.save(config);
-        }
-        tokenService.migrateHashIfRequired(token, secret.value());
+        boolean configured = token != null && token.getRevokedAt() == null
+                && token.getScopes().contains(IntegrationTokenService.WIDGET_SCOPE);
         return new WidgetEmbedDtos.Response(
-                token.getId(), token.getTokenPrefix(),
-                secret.value()
+                configured ? token.getId() : null,
+                configured ? token.getTokenPrefix() : null,
+                configured,
+                configured ? previewTokenService.issue(tenantId, token.getId()) : null
         );
     }
 
-    private WidgetConfig ensure(UUID tenantId) {
+    @Transactional
+    public WidgetEmbedDtos.Generated generate(UUID tenantId) {
         tenantRepository.findByIdForUpdate(tenantId)
                 .orElseThrow(() -> new ResourceNotFoundException("Tenant was not found"));
         WidgetConfig config = widgetConfigRepository.findFirstByTenant_IdOrderByCreatedAtAsc(tenantId)
                 .orElseThrow(() -> new ResourceNotFoundException("Widget configuration was not found"));
-        if (isUsable(config)) {
-            return config;
+        if (config.getManagedWidgetToken() != null) {
+            tokenService.revoke(tenantId, config.getManagedWidgetToken().getId());
         }
 
         IntegrationTokenDtos.Created created = tokenService.create(tenantId, new IntegrationTokenDtos.CreateRequest(
                 TOKEN_NAME, List.of(IntegrationTokenService.WIDGET_SCOPE), null));
         config.setManagedWidgetToken(tokenRepository.getReferenceById(created.token().id()));
-        config.setEncryptedWidgetTokenSecret(cryptoService.encrypt(created.secret()));
-        return widgetConfigRepository.save(config);
-    }
-
-    private boolean isUsable(WidgetConfig config) {
-        IntegrationToken token = config.getManagedWidgetToken();
-        if (token == null || config.getEncryptedWidgetTokenSecret() == null) {
-            return false;
+        config.setEncryptedWidgetTokenSecret(null);
+        config.setActive(true);
+        widgetConfigRepository.save(config);
+        if (businessInvalidationPublisher != null) {
+            businessInvalidationPublisher.widget(tenantId);
         }
-        LocalDateTime now = LocalDateTime.now();
-        return token.getRevokedAt() == null
-                && (token.getExpiresAt() == null || token.getExpiresAt().isAfter(now))
-                && token.getScopes().contains(IntegrationTokenService.WIDGET_SCOPE);
+        return new WidgetEmbedDtos.Generated(
+                created.token().id(), created.token().tokenPrefix(), created.secret(),
+                previewTokenService.issue(tenantId, created.token().id()));
     }
 }

@@ -7,6 +7,8 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -20,6 +22,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
 import java.util.UUID;
+import java.time.LocalDate;
 
 @RestController
 @RequestMapping("/api/v1/chat")
@@ -62,12 +65,32 @@ public class ChatController extends BaseController {
         chatService.close(getTenantId(request), getUserId(request), null, sessionId);
     }
 
-    @GetMapping("/playground/sessions")
     public List<ChatDtos.PlaygroundSessionResponse> playground(
             @RequestParam(defaultValue = "50") int limit,
             @RequestParam(defaultValue = "0") int offset,
             HttpServletRequest request) {
         return chatService.playground(getTenantId(request), getUserId(request), limit, offset);
+    }
+
+    @GetMapping("/playground/sessions")
+    public ResponseEntity<List<ChatDtos.PlaygroundSessionResponse>> playgroundResponse(
+            @RequestParam(defaultValue = "30") int limit,
+            @RequestParam(defaultValue = "0") int offset,
+            @RequestParam(required = false) String cursor,
+            @RequestParam(value = "q", required = false) String query,
+            @RequestParam(required = false) String status,
+            @RequestParam(value = "activity_from", required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate activityFrom,
+            @RequestParam(value = "activity_to", required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate activityTo,
+            @RequestParam(required = false) String sort,
+            @RequestParam(required = false) String direction,
+            HttpServletRequest request) {
+        var result = chatService.playgroundPage(getTenantId(request), getUserId(request), limit,
+                offset, cursor, query, status, activityFrom, activityTo, sort, direction);
+        ResponseEntity.BodyBuilder response = ResponseEntity.ok();
+        if (result.nextCursor() != null) response.header("X-Next-Cursor", result.nextCursor());
+        return response.body(result.sessions());
     }
 
     @DeleteMapping("/playground/sessions/{sessionId}")
@@ -76,7 +99,6 @@ public class ChatController extends BaseController {
         chatService.hidePlayground(getTenantId(request), getUserId(request), sessionId);
     }
 
-    @GetMapping("/conversations")
     public List<ChatDtos.ConversationListItemResponse> conversations(
             @RequestParam(value = "conversation_status", required = false) String status,
             @RequestParam(required = false) String channel,
@@ -86,9 +108,35 @@ public class ChatController extends BaseController {
         return chatService.conversations(getTenantId(request), status, channel, limit, offset);
     }
 
+    @GetMapping("/conversations")
+    public ResponseEntity<List<ChatDtos.ConversationListItemResponse>> conversationsResponse(
+            @RequestParam(value = "conversation_status", required = false) String status,
+            @RequestParam(required = false) String channel,
+            @RequestParam(defaultValue = "20") int limit,
+            @RequestParam(defaultValue = "0") int offset,
+            @RequestParam(value = "q", required = false) String query,
+            @RequestParam(value = "started_from", required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startedFrom,
+            @RequestParam(value = "started_to", required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startedTo,
+            @RequestParam(required = false) String sort,
+            @RequestParam(required = false) String direction,
+            HttpServletRequest request) {
+        var result = chatService.conversationPage(getTenantId(request), status, channel, limit,
+                offset, query, startedFrom, startedTo, sort, direction);
+        return ResponseEntity.ok().header("X-Total-Count", Long.toString(result.totalCount()))
+                .body(result.conversations());
+    }
+
     @GetMapping("/conversations/{sessionId}")
     public ChatDtos.ConversationDetailResponse conversation(
             @PathVariable UUID sessionId, HttpServletRequest request) {
         return chatService.conversation(getTenantId(request), sessionId);
+    }
+
+    @DeleteMapping("/conversations/{sessionId}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void closeConversation(@PathVariable UUID sessionId, HttpServletRequest request) {
+        chatService.closeConversation(getTenantId(request), sessionId);
     }
 }

@@ -28,9 +28,11 @@ public class PayOsPaymentGateway implements PaymentGateway {
     private final PayOS payOS;
     private final BillingProperties properties;
     private final MeterRegistry meterRegistry;
+    private final PayOsWebhookRegistration webhookRegistration;
 
     @Override
     public CreatedPayment createPayment(CreatePayment request) {
+        webhookRegistration.confirmIfNeeded();
         CreatePaymentLinkRequest providerRequest = CreatePaymentLinkRequest.builder()
                 .orderCode(request.orderCode())
                 .amount(request.amountVnd())

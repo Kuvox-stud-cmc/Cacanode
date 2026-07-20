@@ -7,6 +7,7 @@ import com.cacanode.api.document.enums.DocumentVisibility;
 import org.junit.jupiter.api.Test;
 
 import java.util.UUID;
+import java.time.LocalDate;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -47,5 +48,17 @@ class DocumentListCacheKeyFactoryTest {
         assertNotEquals(base, factory.key(tenant, kb, 1, filters));
         assertNotEquals(base, factory.key(tenant, kb, 0,
                 factory.paged(1, 20, null, null, null, null)));
+    }
+
+    @Test
+    void datesSortingAndDirectionAreIsolatedDimensions() {
+        var base = factory.paged(0, 20, "policy", null, null, null,
+                LocalDate.parse("2026-07-01"), LocalDate.parse("2026-07-20"), "uploaded", "desc");
+        assertNotEquals(base.sha256(), factory.paged(0, 20, "policy", null, null, null,
+                LocalDate.parse("2026-07-02"), LocalDate.parse("2026-07-20"), "uploaded", "desc").sha256());
+        assertNotEquals(base.sha256(), factory.paged(0, 20, "policy", null, null, null,
+                LocalDate.parse("2026-07-01"), LocalDate.parse("2026-07-20"), "filename", "desc").sha256());
+        assertNotEquals(base.sha256(), factory.paged(0, 20, "policy", null, null, null,
+                LocalDate.parse("2026-07-01"), LocalDate.parse("2026-07-20"), "uploaded", "asc").sha256());
     }
 }

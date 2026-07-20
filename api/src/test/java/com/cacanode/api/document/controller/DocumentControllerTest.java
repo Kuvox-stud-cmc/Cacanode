@@ -9,6 +9,7 @@ import static org.mockito.Mockito.when;
 
 import java.util.List;
 import java.util.UUID;
+import java.time.LocalDate;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpHeaders;
@@ -58,6 +59,27 @@ class DocumentControllerTest {
         verify(service).list(
                 tenantId, knowledgeBaseId, 2, 20, " policy ", DocumentStatus.COMPLETED,
                 DocumentType.PDF, DocumentVisibility.EMPLOYEE_ONLY);
+    }
+
+    @Test
+    void httpPagedListKeepsArrayBodyAndAddsTotalHeader() {
+        DocumentService service = mock(DocumentService.class);
+        HttpServletRequest request = mock(HttpServletRequest.class);
+        UUID tenantId = UUID.randomUUID();
+        UUID knowledgeBaseId = UUID.randomUUID();
+        when(request.getAttribute("tenantId")).thenReturn(tenantId.toString());
+        when(service.listResult(tenantId, knowledgeBaseId, 0, 20, "policy", null,
+                null, null, LocalDate.parse("2026-07-01"), LocalDate.parse("2026-07-20"),
+                "uploaded", "desc"))
+                .thenReturn(new DocumentService.DocumentListResult(List.of(), 125));
+
+        var response = new DocumentController(service).listResponse(
+                knowledgeBaseId, 0, 20, "policy", null, null, null,
+                LocalDate.parse("2026-07-01"), LocalDate.parse("2026-07-20"),
+                "uploaded", "desc", request);
+
+        assertEquals("125", response.getHeaders().getFirst("X-Total-Count"));
+        assertTrue(response.getBody().isEmpty());
     }
 
     @Test

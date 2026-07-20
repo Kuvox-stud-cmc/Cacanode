@@ -36,6 +36,11 @@ logger = logging.getLogger(__name__)
 NO_INFORMATION_RESPONSE = (
     "Mình không tìm thấy thông tin phù hợp trong tài liệu đã tải lên để trả lời câu hỏi này."
 )
+_CUSTOMER_EMAIL = re.compile(
+    r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,63}\b",
+    re.IGNORECASE,
+)
+_CITATION_MARKER = re.compile(r"\s*\[S\d+\]", re.IGNORECASE)
 
 
 class QueryEmbedder(Protocol):
@@ -381,6 +386,16 @@ class RagChatService:
                 return message
 
             citations = self._citations(selected)
+            external_history = (
+                self._external_prompt_history(
+                    tenant_id=tenant_id,
+                    session_id=session.id,
+                    content=content,
+                    prior_history=prior_history,
+                )
+                if is_external
+                else []
+            )
             llm_started_at = time.perf_counter()
             llm_outcome = "success"
             try:
@@ -390,12 +405,7 @@ class RagChatService:
                         locale=session.locale,
                         chunks=selected,
                         citations=citations,
-                        history=self._external_prompt_history(
-                            tenant_id=tenant_id,
-                            session_id=session.id,
-                            content=content,
-                            prior_history=prior_history,
-                        ),
+                        history=external_history,
                         tenant_prompt=session.customer_answer_prompt,
                         tenant_name=session.tenant_name,
                         calculation_context=calculation_text,
@@ -427,8 +437,16 @@ class RagChatService:
                 ).observe(llm_seconds)
 
             answer, action = (
-                self._parse_external_answer(raw_answer) if is_external else (raw_answer, None)
+                self._parse_external_answer(
+                    raw_answer,
+                    customer_email=self._latest_customer_email(content, external_history),
+                )
+                if is_external
+                else (raw_answer, None)
             )
+            if action is not None:
+                answer = self._without_citation_markers(answer)
+                citations = []
             message = AssistantMessage(
                 role="assistant", content=answer, citations=citations, action=action
             )
@@ -599,6 +617,8 @@ class RagChatService:
                     "or submit a support ticket. For an explicit request, ticketDraft must contain "
                     "a concise title and a useful description generated from the conversation. "
                     "Do not say the ticket has been created; say a draft is ready for review. "
+                    "When ticketDraft is present, the answer must not contain citation markers, "
+                    "source names, snippets, or evidence. "
                     "For knowledge questions, answer only from supplied sources and cite claims "
                     "with "
                     "[S1], [S2], etc. If sources are insufficient, say so. "
@@ -626,7 +646,9 @@ class RagChatService:
             },
         ]
 
-    def _parse_external_answer(self, raw_answer: str) -> tuple[str, dict[str, Any] | None]:
+    def _parse_external_answer(
+        self, raw_answer: str, *, customer_email: str | None = None
+    ) -> tuple[str, dict[str, Any] | None]:
         cleaned = raw_answer.strip()
         if cleaned.startswith("```"):
             cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", cleaned, flags=re.IGNORECASE)
@@ -638,15 +660,33 @@ class RagChatService:
                 title = str(draft.get("title", "Support request")).strip() or "Support request"
                 description = str(draft.get("description", "")).strip()
                 if description:
-                    return answer or "A support ticket draft is ready for review.", {
+                    action: dict[str, Any] = {
                         "type": "ticket_draft",
                         "title": title[:255],
                         "description": description[:10000],
                     }
+                    if customer_email:
+                        action["customer_email"] = customer_email
+                    return answer or "A support ticket draft is ready for review.", action
             return answer or NO_INFORMATION_RESPONSE, None
         except (json.JSONDecodeError, TypeError, ValueError):
             logger.warning("external_chat_structured_response_invalid")
             return raw_answer or NO_INFORMATION_RESPONSE, None
+
+    def _latest_customer_email(
+        self, question: str, history: Sequence[ChatMessage]
+    ) -> str | None:
+        customer_messages = [
+            message.content for message in reversed(history) if message.role == "user"
+        ]
+        for content in [question, *customer_messages]:
+            match = _CUSTOMER_EMAIL.search(content)
+            if match:
+                return match.group(0)
+        return None
+
+    def _without_citation_markers(self, content: str) -> str:
+        return re.sub(r"[ \t]{2,}", " ", _CITATION_MARKER.sub("", content)).strip()
 
     def _citations(self, chunks: list[RetrievedChunk]) -> list[Citation]:
         return [

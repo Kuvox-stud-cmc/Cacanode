@@ -207,7 +207,7 @@ class TicketDraftChatModel(FakeChatModel):
     async def complete(self, messages: Sequence[dict[str, object]]) -> str:
         self.calls.append(messages)
         return (
-            '{"answer":"I prepared a ticket draft for review.",'
+            '{"answer":"I prepared a ticket draft for review. [S1]",'
             '"ticketDraft":{"title":"Refund request",'
             '"description":"Customer requested help with a refund."}}'
         )
@@ -380,7 +380,19 @@ async def test_chat_service_returns_no_information_without_evidence() -> None:
 
 @pytest.mark.asyncio
 async def test_external_chat_can_return_editable_ticket_draft_without_evidence() -> None:
-    service, store, _, model = make_service(chunks=[], model=TicketDraftChatModel())
+    service, store, _, model = make_service(
+        chunks=[
+            RetrievedChunk(
+                document_id="doc-1",
+                source_name="policy.txt",
+                page_number=1,
+                chunk_index=0,
+                text="Refund policy source text.",
+                score=0.9,
+            )
+        ],
+        model=TicketDraftChatModel(),
+    )
     session = service.create_session(
         tenant_id="tenant-1",
         user_id=None,
@@ -395,7 +407,7 @@ async def test_external_chat_can_return_editable_ticket_draft_without_evidence()
     message = await service.submit_message(
         tenant_id="tenant-1",
         session_id=session.id,
-        content="Please create a support ticket for my refund.",
+        content="Please create a support ticket for my refund. Email customer@example.com.",
         integration_token_id="token-1",
     )
 
@@ -404,7 +416,9 @@ async def test_external_chat_can_return_editable_ticket_draft_without_evidence()
         "type": "ticket_draft",
         "title": "Refund request",
         "description": "Customer requested help with a refund.",
+        "customer_email": "customer@example.com",
     }
+    assert message.citations == []
     assert len(model.calls) == 1
     history = store.list_messages(session_id=session.id, tenant_id="tenant-1")
     assert history[-1].action == message.action

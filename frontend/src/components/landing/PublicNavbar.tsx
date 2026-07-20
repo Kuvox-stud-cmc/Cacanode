@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 
 const navigation = [
   { href: "/", label: "Chat Playground" },
+  { href: "/documentation", label: "Documentation" },
   { href: "/pricing", label: "Pricing" },
 ];
 

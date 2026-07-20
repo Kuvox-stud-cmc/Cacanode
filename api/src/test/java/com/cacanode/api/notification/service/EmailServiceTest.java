@@ -13,6 +13,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import java.util.UUID;
+
 class EmailServiceTest {
 
     private EmailProvider sendGridProvider;
@@ -86,5 +88,23 @@ class EmailServiceTest {
                 EmailDeliveryException.class,
                 () -> emailService.sendWelcomeEmail("user@example.com", "Ada Lovelace", "Example Co", "verify-token")
         );
+    }
+
+    @Test
+    void ticketConfirmationIncludesReferenceAndEscapesCustomerContent() {
+        UUID ticketId = UUID.fromString("12345678-1234-1234-1234-123456789012");
+
+        emailService.sendTicketCreatedEmail(
+                "customer@example.com", "Nguyễn An", "Acme Support", ticketId,
+                "Thanh toán <script>", "Bị tính phí hai lần & cần hỗ trợ", "vi-VN");
+
+        ArgumentCaptor<EmailMessage> messageCaptor = ArgumentCaptor.forClass(EmailMessage.class);
+        verify(sendGridProvider).send(messageCaptor.capture());
+        EmailMessage message = messageCaptor.getValue();
+        assertEquals("Đã nhận yêu cầu hỗ trợ #12345678 - Acme Support", message.subject());
+        org.junit.jupiter.api.Assertions.assertTrue(message.htmlContent().contains("#12345678"));
+        org.junit.jupiter.api.Assertions.assertTrue(
+                message.htmlContent().contains("Thanh toán &lt;script&gt;"));
+        org.junit.jupiter.api.Assertions.assertFalse(message.htmlContent().contains("<script>"));
     }
 }

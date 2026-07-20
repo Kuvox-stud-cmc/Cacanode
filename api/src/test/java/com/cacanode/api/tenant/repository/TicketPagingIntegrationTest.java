@@ -25,7 +25,11 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
 import org.springframework.boot.jdbc.test.autoconfigure.AutoConfigureTestDatabase;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.jdbc.core.JdbcTemplate;
 
+import java.sql.Timestamp;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -47,6 +51,8 @@ class TicketPagingIntegrationTest {
     private ChatbotRepository chatbotRepository;
     @Autowired
     private UserRepository userRepository;
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
 
     private TicketService service;
     private Tenant tenant;
@@ -65,7 +71,8 @@ class TicketPagingIntegrationTest {
                 mock(IntegrationTokenRepository.class),
                 userRepository,
                 mock(org.springframework.jdbc.core.JdbcTemplate.class),
-                mock(WebhookService.class)
+                mock(WebhookService.class),
+                mock(org.springframework.context.ApplicationEventPublisher.class)
         );
         tenant = tenant("tickets-main");
         otherTenant = tenant("tickets-other");
@@ -95,6 +102,39 @@ class TicketPagingIntegrationTest {
         assertEquals("Matching", assigned.getContent().getFirst().title());
         assertEquals(1, unassigned.getTotalElements());
         assertEquals("Unassigned", unassigned.getContent().getFirst().title());
+    }
+
+    @Test
+    void searchesLiteralTextAndReturnsAccurateTotalsAcrossMoreThanOneHundredRecords() {
+        java.util.List<Ticket> createdTickets = new java.util.ArrayList<>();
+        for (int index = 0; index < 105; index++) {
+            Ticket value = ticket(tenant, chatbot, null, TicketStatus.OPEN,
+                    index == 4 ? TicketPriority.URGENT : TicketPriority.NORMAL,
+                    TicketSource.WIDGET, index == 7 ? "Literal 100%_ issue" : "Issue " + index);
+            createdTickets.add(value);
+        }
+        ticketRepository.flush();
+        for (int index = 0; index < createdTickets.size(); index++) {
+            Ticket value = createdTickets.get(index);
+            LocalDateTime created = index < 55
+                    ? LocalDateTime.parse("2026-07-14T23:59:59")
+                    : LocalDateTime.parse("2026-07-15T00:00:00");
+            jdbcTemplate.update("UPDATE tickets SET created_at = ?, updated_at = ? WHERE id = ?",
+                    Timestamp.valueOf(created), Timestamp.valueOf(created), value.getId());
+        }
+
+        var day = service.list(tenant.getId(), null, null, null, null, false,
+                0, 20, null, LocalDate.parse("2026-07-14"), LocalDate.parse("2026-07-14"),
+                "created", "desc");
+        var literal = service.list(tenant.getId(), null, null, null, null, false,
+                0, 20, "100%_", null, null, "created", "desc");
+        var priorities = service.list(tenant.getId(), null, null, null, null, false,
+                0, 20, null, null, null, "priority", "desc");
+
+        assertEquals(55, day.getTotalElements());
+        assertEquals(1, literal.getTotalElements());
+        assertEquals("Literal 100%_ issue", literal.getContent().getFirst().title());
+        assertEquals(TicketPriority.URGENT, priorities.getContent().getFirst().priority());
     }
 
     private Tenant tenant(String slug) {
@@ -149,7 +189,7 @@ class TicketPagingIntegrationTest {
         return userRepository.save(value);
     }
 
-    private void ticket(
+    private Ticket ticket(
             Tenant owner,
             Chatbot ownerChatbot,
             User assignedTo,
@@ -170,6 +210,6 @@ class TicketPagingIntegrationTest {
         value.setPriority(priority);
         value.setSource(source);
         value.setAssignedTo(assignedTo);
-        ticketRepository.save(value);
+        return ticketRepository.save(value);
     }
 }

@@ -54,6 +54,13 @@ app:
   rate-limit:
     enabled: ${PUBLIC_RATE_LIMIT_ENABLED:true}
     public-requests-per-minute: ${PUBLIC_RATE_LIMIT_PER_MINUTE:120}
+  public-evidence:
+    signing-key: ${PUBLIC_EVIDENCE_SIGNING_KEY:${TOKEN_KEY:development-public-evidence-signing-key}}
+    web-base-url: ${ADMIN_WEB_URL:http://localhost:3000}
+    ttl-seconds: ${PUBLIC_EVIDENCE_TTL_SECONDS:3600}
+  widget-preview:
+    signing-key: ${WIDGET_PREVIEW_SIGNING_KEY:${TOKEN_KEY:development-widget-preview-signing-key}}
+    ttl-seconds: ${WIDGET_PREVIEW_TTL_SECONDS:900}
   billing:
     catalog-version: ${BILLING_CATALOG_VERSION:2026-07-15}
     trial-days: 14

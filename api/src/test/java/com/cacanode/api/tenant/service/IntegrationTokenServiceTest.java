@@ -8,6 +8,7 @@ import com.cacanode.api.tenant.model.Chatbot;
 import com.cacanode.api.tenant.model.IntegrationToken;
 import com.cacanode.api.tenant.model.KnowledgeBase;
 import com.cacanode.api.tenant.model.Tenant;
+import com.cacanode.api.tenant.model.WidgetConfig;
 import com.cacanode.api.tenant.repository.ChatbotRepository;
 import com.cacanode.api.tenant.repository.IntegrationTokenRepository;
 import com.cacanode.api.tenant.repository.WidgetConfigRepository;
@@ -23,6 +24,7 @@ import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -130,14 +132,33 @@ class IntegrationTokenServiceTest {
     }
 
     @Test
-    void managedWidgetTokenCannotBeRevokedOrRotatedFromGenericTokenApi() {
+    void managedWidgetTokenCanBeDeletedAndIsDetachedFromWidgetConfiguration() {
         WidgetConfigRepository widgetConfigRepository = mock(WidgetConfigRepository.class);
         ReflectionTestUtils.setField(service, "widgetConfigRepository", widgetConfigRepository);
         UUID tokenId = UUID.randomUUID();
+        IntegrationToken token = new IntegrationToken();
+        token.setId(tokenId);
+        token.setTokenHash("managed-token-hash");
+        token.setTenant(chatbot.getTenant());
+        token.setChatbot(chatbot);
+        token.setScopes(List.of(IntegrationTokenService.WIDGET_SCOPE));
+        WidgetConfig config = new WidgetConfig();
+        config.setManagedWidgetToken(token);
+        config.setEncryptedWidgetTokenSecret("legacy-encrypted-secret");
+        config.setActive(true);
+        when(repository.findByIdAndTenant_Id(tokenId, tenantId)).thenReturn(Optional.of(token));
+        when(widgetConfigRepository.findFirstByTenant_IdOrderByCreatedAtAsc(tenantId))
+                .thenReturn(Optional.of(config));
         when(widgetConfigRepository.existsByManagedWidgetToken_IdAndTenant_Id(tokenId, tenantId))
                 .thenReturn(true);
 
-        assertThrows(BadRequestException.class, () -> service.revoke(tenantId, tokenId));
+        service.revoke(tenantId, tokenId);
+
+        assertTrue(token.getRevokedAt() != null);
+        assertNull(config.getManagedWidgetToken());
+        assertNull(config.getEncryptedWidgetTokenSecret());
+        assertFalse(config.isActive());
+        verify(widgetConfigRepository).save(config);
         assertThrows(BadRequestException.class, () -> service.rotate(tenantId, tokenId));
     }
 
@@ -163,5 +184,21 @@ class IntegrationTokenServiceTest {
         assertTrue(principal.tokenId().equals(token.getId()));
         assertTrue(token.getTokenHash().equals(service.hash(secret)));
         verify(repository).save(token);
+    }
+
+    @Test
+    void shortLivedAdminPreviewUsesWidgetPrincipalWithoutRevealingManagedSecret() {
+        WidgetPreviewTokenService previewTokenService = mock(WidgetPreviewTokenService.class);
+        ReflectionTestUtils.setField(service, "widgetPreviewTokenService", previewTokenService);
+        var expected = new IntegrationTokenService.Principal(
+                UUID.randomUUID(), tenantId, chatbot.getId(),
+                chatbot.getKnowledgeBase().getId(), List.of(IntegrationTokenService.WIDGET_SCOPE));
+        when(previewTokenService.authenticate("ccn_wp_signed-preview")).thenReturn(expected);
+
+        var principal = service.authenticate(
+                "Bearer ccn_wp_signed-preview", IntegrationTokenService.WIDGET_SCOPE,
+                "https://admin.example");
+
+        assertTrue(expected.equals(principal));
     }
 }

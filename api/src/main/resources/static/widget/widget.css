@@ -22,6 +22,13 @@ button, textarea, input { font: inherit; }
 .message.assistant { align-self: flex-start; background: #fff; border: 1px solid #e2e8f0; color: #1e293b; }
 .message.user { align-self: flex-end; background: var(--primary); color: #fff; }
 .message.error { align-self: center; max-width: 100%; color: #b91c1c; background: #fef2f2; border: 1px solid #fecaca; }
+.citation-link { display: inline-flex; align-items: center; margin: 0 2px; padding: 1px 5px; border-radius: 5px; background: #eef2ff; color: #4338ca; font-size: 11px; font-weight: 700; text-decoration: none; }
+.citation-link:hover { background: #e0e7ff; }
+.message-sources { display: grid; gap: 6px; margin-top: 10px; padding-top: 9px; border-top: 1px solid #e2e8f0; }
+.message-sources-label { color: #64748b; font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.source-card { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 7px 8px; border: 1px solid #e2e8f0; border-radius: 6px; background: #f8fafc; color: #334155; font-size: 12px; font-weight: 600; text-decoration: none; }
+.source-card:hover { border-color: #c7d2fe; background: #eef2ff; color: #4338ca; }
+.source-card span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .composer { display: grid; grid-template-columns: 1fr 42px; align-items: end; gap: 8px; padding: 12px; border-top: 1px solid #e2e8f0; background: #fff; }
 .composer textarea { width: 100%; max-height: 112px; resize: none; border: 1px solid #cbd5e1; border-radius: 6px; padding: 10px; outline: none; }
 .composer textarea:focus { border-color: var(--primary); box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 18%, transparent); }

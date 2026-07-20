@@ -9,5 +9,6 @@ public enum NotificationType {
     QUOTA_WARNING,
     QUOTA_EXCEEDED,
     BILLING_RENEWAL,
-    BILLING_GRACE
+    BILLING_GRACE,
+    TICKET_CREATED
 }

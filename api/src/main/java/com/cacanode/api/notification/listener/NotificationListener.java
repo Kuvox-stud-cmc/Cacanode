@@ -3,6 +3,7 @@ package com.cacanode.api.notification.listener;
 import com.cacanode.api.common.event.Login2FARequestedEvent;
 import com.cacanode.api.common.event.UserRegisteredEvent;
 import com.cacanode.api.common.event.UserInvitedEvent;
+import com.cacanode.api.common.event.TicketCreatedEvent;
 import com.cacanode.api.notification.service.NotificationService;
 
 import lombok.RequiredArgsConstructor;
@@ -66,6 +67,22 @@ public class NotificationListener {
                     event.getToken(), event.getExpiresAt());
         } catch (Exception e) {
             log.error("Failed to send invitation email to {}: {}", event.getEmail(), e.getMessage());
+        }
+    }
+
+    @Async
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT, fallbackExecution = true)
+    public void handleTicketCreated(TicketCreatedEvent event) {
+        log.info("Sending ticket confirmation email ticket={} to={}",
+                event.getTicketId(), event.getCustomerEmail());
+        try {
+            notificationService.sendAndRecordTicketCreatedEmail(
+                    event.getTenantId(), event.getTicketId(), event.getCustomerEmail(),
+                    event.getCustomerName(), event.getTenantName(), event.getTitle(),
+                    event.getDescription(), event.getLocale());
+        } catch (Exception e) {
+            log.error("Failed to send ticket confirmation email ticket={} to={}: {}",
+                    event.getTicketId(), event.getCustomerEmail(), e.getMessage());
         }
     }
 

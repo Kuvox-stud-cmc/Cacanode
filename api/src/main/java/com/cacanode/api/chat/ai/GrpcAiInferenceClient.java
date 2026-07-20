@@ -109,15 +109,7 @@ public class GrpcAiInferenceClient implements AiInferenceClient {
             throw new ChatApiException(HttpStatus.BAD_GATEWAY, "INVALID_AI_RESPONSE",
                     "The inference service returned mismatched generation context.");
         }
-        Map<String, Object> action = null;
-        if (response.hasTicketDraft()) {
-            action = new HashMap<>();
-            action.put("type", "CREATE_TICKET_DRAFT");
-            action.put("title", response.getTicketDraft().getTitle());
-            action.put("description", response.getTicketDraft().getDescription());
-            action.put("customer_email", response.getTicketDraft().getCustomerEmail());
-            action.put("metadata", response.getTicketDraft().getMetadataMap());
-        }
+        Map<String, Object> action = ticketDraftAction(response);
         return new GeneratedAnswer(
                 UUID.fromString(response.getGenerationId()),
                 response.getAuthoritativeRevision(),
@@ -129,6 +121,19 @@ public class GrpcAiInferenceClient implements AiInferenceClient {
                 response.getCacheTier(),
                 response.hasAvoidedInputTokens() ? response.getAvoidedInputTokens() : null,
                 response.hasAvoidedOutputTokens() ? response.getAvoidedOutputTokens() : null);
+    }
+
+    static Map<String, Object> ticketDraftAction(GenerateAnswerResponse response) {
+        if (!response.hasTicketDraft()) {
+            return null;
+        }
+        Map<String, Object> action = new HashMap<>();
+        action.put("type", "ticket_draft");
+        action.put("title", response.getTicketDraft().getTitle());
+        action.put("description", response.getTicketDraft().getDescription());
+        action.put("customer_email", response.getTicketDraft().getCustomerEmail());
+        action.put("metadata", response.getTicketDraft().getMetadataMap());
+        return action;
     }
 
     @Override
@@ -201,7 +206,8 @@ public class GrpcAiInferenceClient implements AiInferenceClient {
                 citation.hasBlockType() ? citation.getBlockType() : null,
                 citation.hasSheetName() ? citation.getSheetName() : null,
                 citation.hasCellRange() ? citation.getCellRange() : null,
-                citation.hasTableId() ? citation.getTableId() : null);
+                citation.hasTableId() ? citation.getTableId() : null,
+                null);
     }
 
     private ChatDtos.DocumentUnitResponse documentUnit(DocumentUnit unit) {

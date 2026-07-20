@@ -24,6 +24,8 @@ import {
   AlertCircle,
   ChevronLeft,
   ChevronRight,
+  RotateCw,
+  Search,
 } from "lucide-react"
 import { AppShell } from "@/components/app/AppShell"
 import { AssistantResponse } from "@/components/chat/AssistantResponse"
@@ -59,6 +61,7 @@ import {
 } from "@/lib/chat-api"
 import { getTenantWorkspaceApi } from "@/lib/workspace-api"
 import type { ChatCitation, Document, DocumentStatus, DocumentVisibility, PlaygroundSession, TenantWorkspace } from "@/types"
+import { useDebouncedValue } from "@/hooks/useDebouncedValue"
 
 type SourceStatus = DocumentStatus | "UPLOADING"
 
@@ -162,6 +165,13 @@ function Playground({ authenticated }: { authenticated: boolean }) {
   const suppressRestoredComposerFocus = useRef(false)
   const canPersistStateRef = useRef(false)
   const activeChatAbortRef = useRef<AbortController | null>(null)
+  const historyAbortRef = useRef<AbortController | null>(null)
+  const searchAbortRef = useRef<AbortController | null>(null)
+  const historyRequestRef = useRef(0)
+  const historyNextCursorRef = useRef<string | null>(null)
+  const historyLoadingMoreRef = useRef(false)
+  const desktopSentinelRef = useRef<HTMLDivElement>(null)
+  const mobileSentinelRef = useRef<HTMLDivElement>(null)
   const uploadVisibilityRef = useRef<DocumentVisibility>("EMPLOYEE_ONLY")
   const [workspace, setWorkspace] = useState<TenantWorkspace | null>(null)
   const [message, setMessage] = useState("")
@@ -174,6 +184,14 @@ function Playground({ authenticated }: { authenticated: boolean }) {
   const [history, setHistory] = useState<PlaygroundSession[]>([])
   const [historyLoading, setHistoryLoading] = useState(false)
   const [historyError, setHistoryError] = useState<string | null>(null)
+  const [historyLoadingMore, setHistoryLoadingMore] = useState(false)
+  const [historyNextCursor, setHistoryNextCursor] = useState<string | null>(null)
+  const [searchDialogOpen, setSearchDialogOpen] = useState(false)
+  const [chatSearch, setChatSearch] = useState("")
+  const debouncedChatSearch = useDebouncedValue(chatSearch, 300)
+  const [searchResults, setSearchResults] = useState<PlaygroundSession[]>([])
+  const [searchLoading, setSearchLoading] = useState(false)
+  const [searchError, setSearchError] = useState<string | null>(null)
   const [historyCollapsed, setHistoryCollapsed] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<PlaygroundSession | null>(null)
   const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null)
@@ -192,23 +210,45 @@ function Playground({ authenticated }: { authenticated: boolean }) {
       source.status === "PROCESSING",
   )
 
-  const loadHistory = useCallback(async (preferredSessionId?: string | null) => {
+  const loadHistory = useCallback(async (preferredSessionId?: string | null, append = false) => {
     if (!authenticated) return
-    setHistoryLoading(true)
+    if (append && (!historyNextCursorRef.current || historyLoadingMoreRef.current)) return
+    const requestId = ++historyRequestRef.current
+    if (!append) {
+      historyAbortRef.current?.abort()
+      historyNextCursorRef.current = null
+      setHistoryNextCursor(null)
+    }
+    const controller = new AbortController()
+    historyAbortRef.current = controller
+    if (append) {
+      historyLoadingMoreRef.current = true
+      setHistoryLoadingMore(true)
+    }
+    else setHistoryLoading(true)
     setHistoryError(null)
     try {
-      const items = await listPlaygroundSessionsApi(request)
-      setHistory(items)
-      setSessionId((current) => {
-        const candidate = preferredSessionId ?? current
-        return candidate && items.some((item) => item.id === candidate)
-          ? candidate
-          : items[0]?.id ?? null
+      const result = await listPlaygroundSessionsApi(request, {
+        limit: 30,
+        cursor: append ? historyNextCursorRef.current : null,
+        signal: controller.signal,
       })
+      if (requestId !== historyRequestRef.current || controller.signal.aborted) return
+      setHistory((current) => {
+        const combined = append ? [...current, ...result.items] : result.items
+        return Array.from(new Map(combined.map((item) => [item.id, item])).values())
+      })
+      setHistoryNextCursor(result.nextCursor)
+      historyNextCursorRef.current = result.nextCursor
+      if (!append) setSessionId((current) => preferredSessionId ?? current ?? result.items[0]?.id ?? null)
     } catch (error) {
-      setHistoryError(error instanceof Error ? error.message : "Unable to load conversations")
+      if (!(error instanceof DOMException && error.name === "AbortError")) setHistoryError(error instanceof Error ? error.message : "Unable to load conversations")
     } finally {
-      setHistoryLoading(false)
+      if (requestId === historyRequestRef.current) {
+        setHistoryLoading(false)
+        setHistoryLoadingMore(false)
+        historyLoadingMoreRef.current = false
+      }
     }
   }, [authenticated, request])
 
@@ -224,7 +264,6 @@ function Playground({ authenticated }: { authenticated: boolean }) {
         setWorkspace(tenantWorkspace)
         setSessionId(restored.sessionId)
         canPersistStateRef.current = true
-        void loadHistory(restored.sessionId)
       })
       .catch((error) => {
         if (!cancelled) {
@@ -235,7 +274,55 @@ function Playground({ authenticated }: { authenticated: boolean }) {
     return () => {
       cancelled = true
     }
-  }, [authenticated, loadHistory, request])
+  }, [authenticated, request])
+
+  useEffect(() => {
+    if (!authenticated || !workspace) return
+    historyNextCursorRef.current = null
+    const timer = window.setTimeout(() => void loadHistory(undefined, false), 0)
+    return () => {
+      window.clearTimeout(timer)
+      historyAbortRef.current?.abort()
+    }
+  }, [authenticated, workspace, loadHistory])
+
+  useEffect(() => {
+    if (!historyNextCursor || historyLoading || historyLoadingMore) return
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) void loadHistory(undefined, true)
+    }, { rootMargin: "160px" })
+    if (desktopSentinelRef.current) observer.observe(desktopSentinelRef.current)
+    if (mobileSentinelRef.current) observer.observe(mobileSentinelRef.current)
+    return () => observer.disconnect()
+  }, [historyLoading, historyLoadingMore, historyNextCursor, loadHistory])
+
+  useEffect(() => {
+    if (!searchDialogOpen) return
+    searchAbortRef.current?.abort()
+    const controller = new AbortController()
+    searchAbortRef.current = controller
+    const timer = window.setTimeout(() => {
+      setSearchLoading(true)
+      setSearchError(null)
+      void listPlaygroundSessionsApi(request, {
+        limit: 30,
+        q: debouncedChatSearch.trim() || undefined,
+        signal: controller.signal,
+      }).then((result) => {
+        if (!controller.signal.aborted) setSearchResults(result.items)
+      }).catch((error) => {
+        if (!controller.signal.aborted && !(error instanceof DOMException && error.name === "AbortError")) {
+          setSearchError(error instanceof Error ? error.message : "Unable to search conversations")
+        }
+      }).finally(() => {
+        if (!controller.signal.aborted) setSearchLoading(false)
+      })
+    }, 0)
+    return () => {
+      window.clearTimeout(timer)
+      controller.abort()
+    }
+  }, [debouncedChatSearch, request, searchDialogOpen])
 
   useEffect(() => {
     if (!authenticated || !workspace) return
@@ -430,6 +517,7 @@ function Playground({ authenticated }: { authenticated: boolean }) {
       await hidePlaygroundSessionApi(request, item.id)
       const remaining = history.filter((candidate) => candidate.id !== item.id)
       setHistory(remaining)
+      setSearchResults((current) => current.filter((candidate) => candidate.id !== item.id))
       setDeleteTarget(null)
       if (sessionId === item.id) {
         setMessages([])
@@ -630,17 +718,20 @@ function Playground({ authenticated }: { authenticated: boolean }) {
 
   const historyPanel = (
     <div className="flex h-full flex-col bg-slate-50">
-      <div className="border-b border-slate-200 p-3">
+      <div className="space-y-2 border-b border-slate-200 p-3">
         <Button className="w-full justify-start gap-2" variant="outline" disabled={sending} onClick={startNewChat}>
           <Plus className="size-4" /> New Chat
         </Button>
+        <Button className="w-full justify-start gap-2 text-slate-600" variant="ghost" disabled={sending} onClick={() => setSearchDialogOpen(true)}>
+          <Search className="size-4" /> Search chats
+        </Button>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto p-2">
-        {historyLoading ? Array.from({ length: 5 }).map((_, index) => <div key={index} className="mb-2 h-14 animate-pulse rounded-lg bg-slate-200" />) : historyError ? (
+        {historyLoading ? Array.from({ length: 5 }).map((_, index) => <div key={index} className="mb-2 h-14 animate-pulse rounded-lg bg-slate-200" />) : historyError && history.length === 0 ? (
           <div className="p-3 text-sm text-red-700"><AlertCircle className="mb-2 size-5" /><p>{historyError}</p><Button className="mt-3" size="sm" variant="outline" onClick={() => void loadHistory()}>Retry</Button></div>
         ) : history.length === 0 ? (
           <p className="p-4 text-center text-sm text-slate-500">Your conversations will appear here.</p>
-        ) : history.map((item) => (
+        ) : <>{history.map((item) => (
           <div key={item.id} className={cn("group mb-1 flex items-start rounded-lg", sessionId === item.id ? "bg-indigo-100 text-indigo-950" : "hover:bg-slate-200")}>
             <button type="button" disabled={sending} onClick={() => switchSession(item.id)} className="min-w-0 flex-1 px-3 py-2 text-left disabled:cursor-not-allowed">
               <p className="truncate text-sm font-medium">{item.title}</p>
@@ -648,7 +739,7 @@ function Playground({ authenticated }: { authenticated: boolean }) {
             </button>
             <button type="button" disabled={sending || Boolean(deletingSessionId)} onClick={() => requestDeleteSession(item)} className="m-1 rounded-md p-2 text-slate-400 opacity-0 hover:bg-white hover:text-red-600 group-hover:opacity-100 focus:opacity-100" aria-label={`Hide ${item.title}`}><Trash2 className="size-4" /></button>
           </div>
-        ))}
+        ))}<div ref={desktopSentinelRef} className="h-1" />{historyLoadingMore && <Loader2 className="mx-auto my-3 size-4 animate-spin text-indigo-600" />}{historyError && <button type="button" className="mx-auto my-3 flex items-center gap-1 text-xs text-red-600" onClick={() => void loadHistory(undefined, true)}><RotateCw className="size-3" /> Retry loading older chats</button>}{!historyNextCursor && !historyError && <p className="py-3 text-center text-xs text-slate-400">End of history</p>}</>}
       </div>
     </div>
   )
@@ -669,12 +760,20 @@ function Playground({ authenticated }: { authenticated: boolean }) {
           <Plus className="size-4" />
         </button>
       </div>
+      <button
+        type="button"
+        disabled={sending}
+        onClick={() => setSearchDialogOpen(true)}
+        className="mx-1 mb-2 flex w-[calc(100%-0.5rem)] items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-slate-300 transition-colors hover:bg-slate-800 hover:text-white disabled:opacity-50"
+      >
+        <Search className="size-4" /> Search chats
+      </button>
       <div className="max-h-[min(48dvh,28rem)] overflow-y-auto">
         {historyLoading ? (
           Array.from({ length: 4 }).map((_, index) => (
             <div key={index} className="mx-1 mb-2 h-12 animate-pulse rounded-md bg-slate-800" />
           ))
-        ) : historyError ? (
+        ) : historyError && history.length === 0 ? (
           <div className="px-2 py-3 text-sm text-red-300">
             <p>{historyError}</p>
             <button
@@ -688,7 +787,7 @@ function Playground({ authenticated }: { authenticated: boolean }) {
         ) : history.length === 0 ? (
           <p className="px-2 py-3 text-sm text-slate-400">No conversations yet.</p>
         ) : (
-          history.map((item) => (
+          <>{history.map((item) => (
             <div
               key={item.id}
               className={cn(
@@ -714,7 +813,7 @@ function Playground({ authenticated }: { authenticated: boolean }) {
                 <Trash2 className="size-3.5" />
               </button>
             </div>
-          ))
+          ))}<div ref={mobileSentinelRef} className="h-1" />{historyLoadingMore && <Loader2 className="mx-auto my-3 size-4 animate-spin text-indigo-300" />}{historyError && <button type="button" className="mx-auto my-3 flex items-center gap-1 text-xs text-red-300" onClick={() => void loadHistory(undefined, true)}><RotateCw className="size-3" /> Retry</button>}{!historyNextCursor && !historyError && <p className="py-3 text-center text-xs text-slate-500">End of history</p>}</>
         )}
       </div>
     </div>
@@ -940,6 +1039,68 @@ function Playground({ authenticated }: { authenticated: boolean }) {
       </div>
         </div>
       </div>
+
+      <Dialog
+        open={searchDialogOpen}
+        onOpenChange={(open) => {
+          setSearchDialogOpen(open)
+          if (!open) {
+            searchAbortRef.current?.abort()
+            setChatSearch("")
+            setSearchError(null)
+          }
+        }}
+      >
+        <DialogContent className="max-w-xl gap-0 overflow-hidden p-0">
+          <DialogHeader className="sr-only">
+            <DialogTitle>Search chats</DialogTitle>
+            <DialogDescription>Search conversation titles and message transcripts.</DialogDescription>
+          </DialogHeader>
+          <div className="relative border-b border-slate-200">
+            <Search className="pointer-events-none absolute left-4 top-1/2 size-5 -translate-y-1/2 text-slate-400" />
+            <input
+              autoFocus
+              aria-label="Search chats"
+              value={chatSearch}
+              maxLength={200}
+              onChange={(event) => setChatSearch(event.target.value)}
+              placeholder="Search chats"
+              className="h-14 w-full bg-white pl-12 pr-12 text-base text-slate-900 outline-none placeholder:text-slate-400"
+            />
+            {searchLoading && <Loader2 className="absolute right-4 top-1/2 size-4 -translate-y-1/2 animate-spin text-slate-400" />}
+          </div>
+          <div className="max-h-[min(65dvh,32rem)] min-h-52 overflow-y-auto p-2">
+            {searchError ? (
+              <div className="grid min-h-48 place-items-center px-5 text-center">
+                <div><AlertCircle className="mx-auto mb-2 size-5 text-red-500" /><p className="text-sm text-red-700">{searchError}</p></div>
+              </div>
+            ) : !searchLoading && searchResults.length === 0 ? (
+              <div className="grid min-h-48 place-items-center px-5 text-center">
+                <div><Search className="mx-auto mb-3 size-7 text-slate-300" /><p className="text-sm font-medium text-slate-600">{chatSearch.trim() ? "No chats found" : "No conversations yet"}</p>{chatSearch.trim() && <p className="mt-1 text-xs text-slate-400">Try a different word or phrase.</p>}</div>
+              </div>
+            ) : (
+              <div className="space-y-1">
+                {!chatSearch.trim() && <p className="px-3 py-2 text-xs font-semibold uppercase tracking-wider text-slate-400">Recent</p>}
+                {searchResults.map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => {
+                      switchSession(item.id)
+                      setSearchDialogOpen(false)
+                      setChatSearch("")
+                    }}
+                    className="flex w-full items-center gap-3 rounded-lg px-3 py-3 text-left transition-colors hover:bg-slate-100 focus-visible:bg-slate-100 focus-visible:outline-none"
+                  >
+                    <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-slate-100 text-slate-500"><Search className="size-4" /></span>
+                    <span className="min-w-0 flex-1"><span className="block truncate text-sm font-medium text-slate-800">{item.title}</span><span className="mt-0.5 block text-xs text-slate-400">{new Date(item.last_activity_at).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })} · {item.message_count} messages</span></span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={authDialogOpen} onOpenChange={handleAuthDialogOpenChange}>
         <DialogContent>

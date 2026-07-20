@@ -42,6 +42,8 @@ export function AppShell({ children, contentClassName, mobileNavContent }: AppSh
   const visibleNavigation = appNavigation.filter(
     (item) => !item.tenantAdminOnly || user?.role === "TENANT_ADMIN",
   )
+  const primaryNavigation = visibleNavigation.filter((item) => item.placement !== "footer")
+  const footerNavigation = visibleNavigation.filter((item) => item.placement === "footer")
   const pageTitle =
     appNavigation.find(
       (item) => item.href === pathname || pathname.startsWith(`${item.href}/`),
@@ -98,7 +100,7 @@ export function AppShell({ children, contentClassName, mobileNavContent }: AppSh
         </div>
 
         <nav className="flex-1 space-y-1 overflow-y-auto p-3">
-          {visibleNavigation.map(({ href, label, icon: Icon }) => {
+          {primaryNavigation.map(({ href, label, icon: Icon }) => {
             const isActive = pathname === href
             return (
               <Link
@@ -129,6 +131,24 @@ export function AppShell({ children, contentClassName, mobileNavContent }: AppSh
             </div>
           )}
         </nav>
+
+        {footerNavigation.map(({ href, label, icon: Icon }) => (
+          <div key={href} className="border-t border-slate-700 px-3 py-3">
+            <Link
+              href={href}
+              onClick={() => setSidebarOpen(false)}
+              className="group flex items-center gap-3 rounded-lg border border-slate-700 bg-slate-800/70 px-3 py-2.5 transition-colors hover:border-indigo-500/70 hover:bg-slate-800"
+            >
+              <span className="grid size-8 shrink-0 place-items-center rounded-md bg-indigo-500/15 text-indigo-300 transition-colors group-hover:bg-indigo-500/25 group-hover:text-indigo-200">
+                <Icon className="size-4" />
+              </span>
+              <span className="min-w-0">
+                <span className="block text-sm font-medium text-slate-100">{label}</span>
+                <span className="block text-[11px] text-slate-400">Guides, API, and setup</span>
+              </span>
+            </Link>
+          </div>
+        ))}
 
         <div className="border-t border-slate-700 p-3">
           <div className="mb-1 flex items-center gap-3 px-3 py-2">

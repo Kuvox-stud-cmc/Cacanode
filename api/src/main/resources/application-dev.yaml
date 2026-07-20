@@ -80,7 +80,6 @@ spring:
   sendgrid:
     api-key: ${SENDGRID_API_KEY}
     from-email: ${FROM_EMAIL}
-    template-id: ${TEMPLATE_ID}
     verification-link: ${VERIFICATION_LINK:http://localhost:3000/verify-email}
     login-2fa-link: ${LOGIN_2FA_LINK:http://localhost:3000/verify-login}
     support-email: ${SUPPORT_EMAIL:support@cacanode.com}

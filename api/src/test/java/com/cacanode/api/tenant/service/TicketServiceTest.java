@@ -8,6 +8,7 @@ import com.cacanode.api.tenant.enums.TicketPriority;
 import com.cacanode.api.tenant.enums.TicketSource;
 import com.cacanode.api.tenant.enums.TicketStatus;
 import com.cacanode.api.tenant.model.Chatbot;
+import com.cacanode.api.tenant.model.IntegrationToken;
 import com.cacanode.api.tenant.model.Tenant;
 import com.cacanode.api.tenant.model.Ticket;
 import com.cacanode.api.tenant.model.TicketNote;
@@ -25,6 +26,12 @@ import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.RowMapper;
+import org.springframework.context.ApplicationEventPublisher;
+
+import com.cacanode.api.common.event.TicketCreatedEvent;
+
+import java.sql.ResultSet;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -63,7 +70,8 @@ class TicketServiceTest {
                 mock(IntegrationTokenRepository.class),
                 userRepository,
                 mock(JdbcTemplate.class),
-                mock(WebhookService.class)
+                mock(WebhookService.class),
+                mock(org.springframework.context.ApplicationEventPublisher.class)
         );
     }
 
@@ -178,6 +186,85 @@ class TicketServiceTest {
         verify(noteRepository).save(note.capture());
         assertEquals(ticket.getTenant(), note.getValue().getTenant());
         assertEquals(ticket, note.getValue().getTicket());
+    }
+
+    @SuppressWarnings("unchecked")
+    @Test
+    void publicTicketPublishesOneCustomerEmailEventForNewTicket() throws Exception {
+        TicketRepository tickets = mock(TicketRepository.class);
+        TenantRepository tenants = mock(TenantRepository.class);
+        ChatbotRepository chatbots = mock(ChatbotRepository.class);
+        IntegrationTokenRepository tokens = mock(IntegrationTokenRepository.class);
+        JdbcTemplate jdbc = mock(JdbcTemplate.class);
+        WebhookService webhooks = mock(WebhookService.class);
+        ApplicationEventPublisher events = mock(ApplicationEventPublisher.class);
+        TicketService ticketService = new TicketService(
+                tickets, mock(TicketNoteRepository.class), tenants, chatbots, tokens,
+                mock(UserRepository.class), jdbc, webhooks, events);
+        UUID chatbotId = UUID.randomUUID();
+        UUID tokenId = UUID.randomUUID();
+        UUID sessionId = UUID.randomUUID();
+        Tenant tenant = new Tenant();
+        tenant.setId(tenantId);
+        tenant.setName("Acme Support");
+        Chatbot chatbot = new Chatbot();
+        chatbot.setId(chatbotId);
+        IntegrationToken integrationToken = new IntegrationToken();
+        integrationToken.setId(tokenId);
+        when(tenants.findById(tenantId)).thenReturn(Optional.of(tenant));
+        when(chatbots.getReferenceById(chatbotId)).thenReturn(chatbot);
+        when(tokens.getReferenceById(tokenId)).thenReturn(integrationToken);
+        when(jdbc.queryForObject(
+                any(String.class), any(RowMapper.class), any(), any(), any(), any()))
+                .thenAnswer(invocation -> {
+                    RowMapper<?> mapper = invocation.getArgument(1);
+                    ResultSet resultSet = mock(ResultSet.class);
+                    when(resultSet.getString("external_user_id")).thenReturn("visitor-1");
+                    when(resultSet.getString("channel")).thenReturn("WIDGET");
+                    when(resultSet.getString("locale")).thenReturn("vi-VN");
+                    return mapper.mapRow(resultSet, 0);
+                });
+        when(tickets.save(any(Ticket.class))).thenAnswer(invocation -> {
+            Ticket saved = invocation.getArgument(0);
+            saved.setId(ticketId);
+            return saved;
+        });
+        var principal = new IntegrationTokenService.Principal(
+                tokenId, tenantId, chatbotId, UUID.randomUUID(),
+                List.of(IntegrationTokenService.WIDGET_SCOPE));
+
+        ticketService.createPublic(principal, new TicketDtos.CreatePublicRequest(
+                sessionId, "Customer@Example.com", "Ada", "Refund request",
+                "Charged twice"), "ticket-key");
+
+        ArgumentCaptor<TicketCreatedEvent> event = ArgumentCaptor.forClass(TicketCreatedEvent.class);
+        verify(events).publishEvent(event.capture());
+        TicketCreatedEvent created = event.getValue();
+        assertEquals(ticketId, created.getTicketId());
+        assertEquals("customer@example.com", created.getCustomerEmail());
+        assertEquals("vi-VN", created.getLocale());
+    }
+
+    @Test
+    void idempotentTicketReplayDoesNotSendAnotherCustomerEmail() {
+        TicketRepository tickets = mock(TicketRepository.class);
+        ApplicationEventPublisher events = mock(ApplicationEventPublisher.class);
+        Ticket existing = ticket();
+        when(tickets.findByTenant_IdAndIdempotencyKey(tenantId, "ticket-key"))
+                .thenReturn(Optional.of(existing));
+        TicketService ticketService = new TicketService(
+                tickets, mock(TicketNoteRepository.class), mock(TenantRepository.class),
+                mock(ChatbotRepository.class), mock(IntegrationTokenRepository.class),
+                mock(UserRepository.class), mock(JdbcTemplate.class), mock(WebhookService.class), events);
+        var principal = new IntegrationTokenService.Principal(
+                UUID.randomUUID(), tenantId, existing.getChatbot().getId(), UUID.randomUUID(),
+                List.of(IntegrationTokenService.WIDGET_SCOPE));
+
+        ticketService.createPublic(principal, new TicketDtos.CreatePublicRequest(
+                existing.getChatSessionId(), existing.getCustomerEmail(), null,
+                existing.getTitle(), existing.getDescription()), "ticket-key");
+
+        verify(events, never()).publishEvent(any());
     }
 
     private Ticket ticket() {

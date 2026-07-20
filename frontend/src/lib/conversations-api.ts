@@ -22,11 +22,23 @@ export type CustomerConversationDetail = CustomerConversation & {
 
 export async function listCustomerConversations(
   request: ApiRequest,
-  status?: "OPEN" | "CLOSED",
-): Promise<CustomerConversation[]> {
-  const params = new URLSearchParams({ limit: "100" });
-  if (status) params.set("conversation_status", status);
-  return readJsonOrThrow(await request(`${getApiBase()}/chat/conversations?${params}`));
+  query: {
+    status?: "OPEN" | "CLOSED"; channel?: string; q?: string; startedFrom?: string;
+    startedTo?: string; sort?: string; direction?: "asc" | "desc";
+    offset?: number; limit?: number; signal?: AbortSignal;
+  } = {},
+): Promise<{ items: CustomerConversation[]; total: number }> {
+  const params = new URLSearchParams({ limit: String(query.limit ?? 20), offset: String(query.offset ?? 0) });
+  if (query.status) params.set("conversation_status", query.status);
+  if (query.channel) params.set("channel", query.channel);
+  if (query.q) params.set("q", query.q.slice(0, 200));
+  if (query.startedFrom) params.set("started_from", query.startedFrom);
+  if (query.startedTo) params.set("started_to", query.startedTo);
+  if (query.sort) params.set("sort", query.sort);
+  if (query.direction) params.set("direction", query.direction);
+  const response = await request(`${getApiBase()}/chat/conversations?${params}`, { signal: query.signal });
+  const items = await readJsonOrThrow<CustomerConversation[]>(response);
+  return { items, total: Number(response.headers.get("X-Total-Count") ?? items.length) };
 }
 
 export async function getCustomerConversation(
@@ -37,6 +49,6 @@ export async function getCustomerConversation(
 }
 
 export async function closeCustomerConversation(request: ApiRequest, id: string): Promise<void> {
-  const response = await request(`${getApiBase()}/chat/sessions/${id}`, { method: "DELETE" });
+  const response = await request(`${getApiBase()}/chat/conversations/${id}`, { method: "DELETE" });
   if (!response.ok) throw await parseApiError(response);
 }

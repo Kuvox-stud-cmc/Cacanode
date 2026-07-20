@@ -35,13 +35,26 @@ export type TicketNote = {
 
 export type Assignee = { id: string; fullName: string; email: string };
 
-export async function listTickets(request: ApiRequest, status?: TicketStatus): Promise<Ticket[]> {
-  const params = new URLSearchParams({ size: "100", sort: "createdAt,desc" });
-  if (status) params.set("status", status);
-  const page = await readJsonOrThrow<{ content: Ticket[] }>(
-    await request(`${getApiBase()}/tenants/me/tickets?${params}`),
+export async function listTickets(request: ApiRequest, query: {
+  status?: TicketStatus; priority?: TicketPriority; source?: string; assignedTo?: string;
+  unassigned?: boolean; q?: string; createdFrom?: string; createdTo?: string;
+  sort?: string; direction?: "asc" | "desc"; page?: number; size?: number; signal?: AbortSignal;
+} = {}): Promise<{ items: Ticket[]; total: number }> {
+  const params = new URLSearchParams({ page: String(query.page ?? 0), size: String(query.size ?? 20) });
+  if (query.status) params.set("status", query.status);
+  if (query.priority) params.set("priority", query.priority);
+  if (query.source) params.set("source", query.source);
+  if (query.assignedTo) params.set("assignedTo", query.assignedTo);
+  if (query.unassigned) params.set("unassigned", "true");
+  if (query.q) params.set("q", query.q.slice(0, 200));
+  if (query.createdFrom) params.set("created_from", query.createdFrom);
+  if (query.createdTo) params.set("created_to", query.createdTo);
+  if (query.sort) params.set("sort", query.sort);
+  if (query.direction) params.set("direction", query.direction);
+  const page = await readJsonOrThrow<{ content: Ticket[]; totalElements: number }>(
+    await request(`${getApiBase()}/tenants/me/tickets?${params}`, { signal: query.signal }),
   );
-  return page.content;
+  return { items: page.content, total: page.totalElements };
 }
 
 export async function getTicket(request: ApiRequest, id: string): Promise<Ticket> {

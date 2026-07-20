@@ -1,12 +1,15 @@
 package com.cacanode.api.document.service;
 
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
 import java.util.OptionalLong;
 
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
@@ -320,6 +323,25 @@ public class DocumentService {
             DocumentType type,
             DocumentVisibility visibility
     ) {
+        return listResult(tenantId, knowledgeBaseId, page, size, searchText, status, type,
+                visibility, null, null, null, null).documents();
+    }
+
+    @Transactional(readOnly = true)
+    public DocumentListResult listResult(
+            UUID tenantId,
+            UUID knowledgeBaseId,
+            Integer page,
+            Integer size,
+            String searchText,
+            DocumentStatus status,
+            DocumentType type,
+            DocumentVisibility visibility,
+            LocalDate uploadedFrom,
+            LocalDate uploadedTo,
+            String sort,
+            String direction
+    ) {
         int requestedPage = page == null ? 0 : page;
         int requestedSize = size == null ? DEFAULT_PAGE_SIZE : size;
         if (requestedPage < 0) {
@@ -333,29 +355,42 @@ public class DocumentService {
         if (query != null && query.length() > MAX_SEARCH_LENGTH) {
             throw new BadRequestException("Search text must be 200 characters or fewer");
         }
+        if (uploadedFrom != null && uploadedTo != null && uploadedFrom.isAfter(uploadedTo)) {
+            throw new BadRequestException("Upload start date must not be after end date");
+        }
+        String requestedSort = normalizeDocumentSort(sort);
+        String requestedDirection = normalizeDirection(direction);
 
         if (!documentCachingAvailable()) {
             return loadPagedList(tenantId, knowledgeBaseId, requestedPage, requestedSize, query,
-                    status, type, visibility);
+                    status, type, visibility, uploadedFrom, uploadedTo, requestedSort,
+                    requestedDirection);
         }
         var filters = documentCacheKeyFactory.paged(
-                requestedPage, requestedSize, query, status, type, visibility);
+                requestedPage, requestedSize, query, status, type, visibility, uploadedFrom,
+                uploadedTo, requestedSort, requestedDirection);
         OptionalLong generation = generationStore.current(tenantId, knowledgeBaseId);
         if (generation.isEmpty()) {
             return businessCache.bypassAndLoad(BusinessCache.DOCUMENT_LIST,
                     () -> loadPagedList(tenantId, knowledgeBaseId, requestedPage, requestedSize,
-                            filters.searchText(), status, type, visibility));
+                            filters.searchText(), status, type, visibility, uploadedFrom, uploadedTo,
+                            requestedSort, requestedDirection));
         }
-        return businessCache.getOrLoad(
+        DocumentListCacheValue cached = businessCache.getOrLoad(
                 BusinessCache.DOCUMENT_LIST,
                 documentCacheKeyFactory.key(tenantId, knowledgeBaseId, generation.getAsLong(), filters),
                 DocumentListCacheValue.class,
-                () -> new DocumentListCacheValue(loadPagedList(tenantId, knowledgeBaseId,
-                        requestedPage, requestedSize, filters.searchText(), status, type, visibility))
-        ).documents();
+                () -> {
+                    DocumentListResult loaded = loadPagedList(tenantId, knowledgeBaseId,
+                            requestedPage, requestedSize, filters.searchText(), status, type,
+                            visibility, uploadedFrom, uploadedTo, requestedSort, requestedDirection);
+                    return new DocumentListCacheValue(loaded.documents(), loaded.totalCount());
+                }
+        );
+        return new DocumentListResult(cached.documents(), cached.totalCount());
     }
 
-    private List<DocumentListItemResponse> loadPagedList(
+    private DocumentListResult loadPagedList(
             UUID tenantId,
             UUID knowledgeBaseId,
             int requestedPage,
@@ -363,7 +398,11 @@ public class DocumentService {
             String query,
             DocumentStatus status,
             DocumentType type,
-            DocumentVisibility visibility
+            DocumentVisibility visibility,
+            LocalDate uploadedFrom,
+            LocalDate uploadedTo,
+            String sort,
+            String direction
     ) {
         requireActiveKnowledgeBase(tenantId, knowledgeBaseId);
 
@@ -388,17 +427,54 @@ public class DocumentService {
             specification = specification.and((root, criteriaQuery, builder) ->
                     builder.equal(root.get("visibility"), visibility));
         }
+        if (uploadedFrom != null) {
+            LocalDateTime from = uploadedFrom.atStartOfDay();
+            specification = specification.and((root, criteriaQuery, builder) ->
+                    builder.greaterThanOrEqualTo(root.get("createdAt"), from));
+        }
+        if (uploadedTo != null) {
+            LocalDateTime until = uploadedTo.plusDays(1).atStartOfDay();
+            specification = specification.and((root, criteriaQuery, builder) ->
+                    builder.lessThan(root.get("createdAt"), until));
+        }
 
+        String property = switch (sort) {
+            case "filename" -> "fileName";
+            case "size" -> "fileSizeBytes";
+            default -> "createdAt";
+        };
+        Sort.Direction sortDirection = "asc".equals(direction)
+                ? Sort.Direction.ASC : Sort.Direction.DESC;
         var pageable = PageRequest.of(
                 requestedPage,
                 requestedSize,
-                Sort.by(Sort.Order.desc("createdAt"), Sort.Order.desc("id"))
+                Sort.by(new Sort.Order(sortDirection, property), new Sort.Order(sortDirection, "id"))
         );
-        return documentRepository.findAll(specification, pageable)
-                .getContent()
-                .stream()
+        Page<Document> result = documentRepository.findAll(specification, pageable);
+        List<DocumentListItemResponse> documents = result.getContent().stream()
                 .map(this::toListItemResponse)
                 .toList();
+        return new DocumentListResult(documents, result.getTotalElements());
+    }
+
+    private String normalizeDocumentSort(String value) {
+        if (value == null || value.isBlank() || "uploaded".equalsIgnoreCase(value)
+                || "createdAt".equalsIgnoreCase(value)) return "uploaded";
+        if ("filename".equalsIgnoreCase(value) || "fileName".equalsIgnoreCase(value)) return "filename";
+        if ("size".equalsIgnoreCase(value) || "fileSizeBytes".equalsIgnoreCase(value)) return "size";
+        throw new BadRequestException("Sort must be uploaded, filename, or size");
+    }
+
+    private String normalizeDirection(String value) {
+        if (value == null || value.isBlank() || "desc".equalsIgnoreCase(value)) return "desc";
+        if ("asc".equalsIgnoreCase(value)) return "asc";
+        throw new BadRequestException("Direction must be asc or desc");
+    }
+
+    public record DocumentListResult(List<DocumentListItemResponse> documents, long totalCount) {
+        public DocumentListResult {
+            documents = List.copyOf(documents);
+        }
     }
 
     @Transactional

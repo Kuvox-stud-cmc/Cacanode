@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import { usePathname } from "next/navigation";
+import { documentationPage } from "@/lib/documentation";
 
 const PAGE_TITLES: Record<string, string> = {
   "/": "Chat",
@@ -27,6 +28,8 @@ export function titleForPath(pathname: string): string {
   const normalizedPath = pathname !== "/" ? pathname.replace(/\/$/, "") : pathname;
   const pageTitle = normalizedPath.startsWith("/documents/")
     ? "Document Details"
+    : normalizedPath === "/documentation" || normalizedPath.startsWith("/documentation/")
+    ? documentationPage(normalizedPath).title
     : PAGE_TITLES[normalizedPath];
 
   return pageTitle ? `${pageTitle} | CacaNode` : "CacaNode";

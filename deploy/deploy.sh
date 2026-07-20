@@ -29,6 +29,11 @@ env_value() {
   sed -n "s/^${name}=//p" "${ENV_FILE}" | tail -n 1
 }
 
+is_unconfigured() {
+  local value="$1"
+  [[ -z "${value}" || "${value}" == *replace-with* || "${value}" == *example.com* ]]
+}
+
 embedding_model="$(env_value TEXT_EMBEDDING_MODEL_ID)"
 public_url="$(env_value ADMIN_WEB_URL)"
 reranker_enabled="$(env_value RERANKER_ENABLED)"
@@ -36,16 +41,41 @@ embedding_model="${embedding_model:-embeddinggemma}"
 reranker_enabled="${reranker_enabled:-true}"
 
 for required_name in \
-  DEPLOY_DOMAIN CADDY_ACME_EMAIL ADMIN_WEB_URL CORS_ORIGINS \
+  DEPLOY_DOMAIN CADDY_ACME_EMAIL ADMIN_WEB_URL PUBLIC_API_BASE_URL \
+  PUBLIC_WIDGET_URL CORS_ORIGINS \
   POSTGRES_PASSWORD RABBITMQ_PASSWORD TOKEN_KEY INTEGRATION_TOKEN_PEPPER \
-  WEBHOOK_ENCRYPTION_KEY GRAPH_INTERNAL_TOKEN GRPC_CERT_DIR \
+  PUBLIC_EVIDENCE_SIGNING_KEY WIDGET_PREVIEW_SIGNING_KEY \
+  INTEGRATION_SECRET_ENCRYPTION_KEY WEBHOOK_ENCRYPTION_KEY GRAPH_INTERNAL_TOKEN GRPC_CERT_DIR \
   OPENAI_API_KEY FROM_EMAIL VERIFICATION_LINK LOGIN_2FA_LINK INVITATION_LINK; do
   required_value="$(env_value "${required_name}")"
-  if [[ -z "${required_value}" || "${required_value}" == *replace-with* || "${required_value}" == *example.com* ]]; then
+  if is_unconfigured "${required_value}"; then
     echo "${required_name} is missing or still contains an example value" >&2
     exit 1
   fi
 done
+
+sendgrid_api_key="$(env_value SENDGRID_API_KEY)"
+brevo_api_key="$(env_value BREVO_API_KEY)"
+if is_unconfigured "${sendgrid_api_key}" && is_unconfigured "${brevo_api_key}"; then
+  echo "Configure at least one email provider: SENDGRID_API_KEY or BREVO_API_KEY" >&2
+  exit 1
+fi
+
+payos_enabled="$(env_value PAYOS_ENABLED)"
+if [[ "${payos_enabled,,}" == "true" ]]; then
+  for payos_name in PAYOS_CLIENT_ID PAYOS_API_KEY PAYOS_CHECKSUM_KEY PAYOS_WEBHOOK_URL; do
+    payos_value="$(env_value "${payos_name}")"
+    if is_unconfigured "${payos_value}"; then
+      echo "${payos_name} is required when PAYOS_ENABLED=true" >&2
+      exit 1
+    fi
+  done
+  payos_webhook_url="$(env_value PAYOS_WEBHOOK_URL)"
+  if [[ ! "${payos_webhook_url}" =~ ^https://.+/api/v1/public/billing/payos/webhook/?$ ]]; then
+    echo "PAYOS_WEBHOOK_URL must be the public HTTPS CacaNode PayOS webhook endpoint" >&2
+    exit 1
+  fi
+fi
 
 grpc_cert_dir="$(env_value GRPC_CERT_DIR)"
 for certificate_file in ca.crt spring-client.crt spring-client.key ai-server.crt ai-server.key; do
@@ -59,8 +89,18 @@ if [[ ! "${embedding_model}" =~ ^[A-Za-z0-9._:/-]+$ ]]; then
   echo "TEXT_EMBEDDING_MODEL_ID contains unsupported characters" >&2
   exit 1
 fi
+public_api_url="$(env_value PUBLIC_API_BASE_URL)"
+public_widget_url="$(env_value PUBLIC_WIDGET_URL)"
 if [[ ! "${public_url}" =~ ^https:// ]]; then
   echo "ADMIN_WEB_URL must be an HTTPS URL" >&2
+  exit 1
+fi
+if [[ ! "${public_api_url}" =~ ^https://.+/api/v1/?$ ]]; then
+  echo "PUBLIC_API_BASE_URL must be an HTTPS URL ending in /api/v1" >&2
+  exit 1
+fi
+if [[ ! "${public_widget_url}" =~ ^https://.+/widget/v1/cacanode-chat\.js$ ]]; then
+  echo "PUBLIC_WIDGET_URL must be the public HTTPS widget script URL" >&2
   exit 1
 fi
 

@@ -109,6 +109,37 @@ public class NotificationService {
     }
   }
 
+  public void sendAndRecordTicketCreatedEmail(
+      UUID tenantId,
+      UUID ticketId,
+      String email,
+      String customerName,
+      String tenantName,
+      String title,
+      String description,
+      String locale) {
+    String reference = ticketId.toString().substring(0, 8).toUpperCase();
+    Notification notification = new Notification();
+    notification.setTenantId(tenantId);
+    notification.setType(NotificationType.TICKET_CREATED);
+    notification.setTitle("Ticket #" + reference + " customer confirmation");
+    notification.setMessage("Ticket creation email sent to " + email);
+    notification.setStatus(NotificationStatus.PENDING);
+    notificationRepository.save(notification);
+
+    try {
+      emailService.sendTicketCreatedEmail(
+          email, customerName, tenantName, ticketId, title, description, locale);
+      notification.setStatus(NotificationStatus.SENT);
+      notification.setSentAt(LocalDateTime.now());
+    } catch (Exception e) {
+      notification.setStatus(NotificationStatus.FAILED);
+      log.error("Ticket creation email failed for ticket {}: {}", ticketId, e.getMessage());
+    } finally {
+      notificationRepository.save(notification);
+    }
+  }
+
   public void recordBillingNotice(UUID tenantId, NotificationType type, String title, String message) {
     Notification notification = new Notification();
     notification.setTenantId(tenantId);

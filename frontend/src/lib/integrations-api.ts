@@ -30,9 +30,17 @@ export type WidgetSettings = {
 };
 
 export type WidgetEmbed = {
+  tokenId: string | null;
+  tokenPrefix: string | null;
+  configured: boolean;
+  previewToken: string | null;
+};
+
+export type GeneratedWidgetEmbed = {
   tokenId: string;
   tokenPrefix: string;
   secret: string;
+  previewToken: string;
 };
 
 export type WebhookEndpoint = {
@@ -46,8 +54,12 @@ export type WebhookEndpoint = {
   createdAt: string;
 };
 
-export async function listIntegrationTokens(request: ApiRequest): Promise<IntegrationToken[]> {
-  return readJsonOrThrow(await request(`${getApiBase()}/tenants/me/integrations/tokens`));
+export async function listIntegrationTokens(
+  request: ApiRequest,
+  includeDeleted = false,
+): Promise<IntegrationToken[]> {
+  const params = includeDeleted ? "?includeDeleted=true" : "";
+  return readJsonOrThrow(await request(`${getApiBase()}/tenants/me/integrations/tokens${params}`));
 }
 
 export async function createIntegrationToken(
@@ -101,6 +113,12 @@ export async function updateWidgetSettings(
 
 export async function getWidgetEmbed(request: ApiRequest): Promise<WidgetEmbed> {
   return readJsonOrThrow(await request(`${getApiBase()}/tenants/me/integrations/widget/embed`));
+}
+
+export async function generateWidgetEmbed(request: ApiRequest): Promise<GeneratedWidgetEmbed> {
+  return readJsonOrThrow(await request(`${getApiBase()}/tenants/me/integrations/widget/embed`, {
+    method: "POST",
+  }));
 }
 
 export async function uploadWidgetIcon(

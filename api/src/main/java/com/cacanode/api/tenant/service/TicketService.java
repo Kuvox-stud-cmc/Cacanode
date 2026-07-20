@@ -2,12 +2,14 @@ package com.cacanode.api.tenant.service;
 
 import com.cacanode.api.common.exception.custom.BadRequestException;
 import com.cacanode.api.common.exception.custom.ResourceNotFoundException;
+import com.cacanode.api.common.event.TicketCreatedEvent;
 import com.cacanode.api.integration.service.WebhookService;
 import com.cacanode.api.tenant.dto.TicketDtos;
 import com.cacanode.api.tenant.enums.TicketPriority;
 import com.cacanode.api.tenant.enums.TicketSource;
 import com.cacanode.api.tenant.enums.TicketStatus;
 import com.cacanode.api.tenant.model.Ticket;
+import com.cacanode.api.tenant.model.Tenant;
 import com.cacanode.api.tenant.model.TicketNote;
 import com.cacanode.api.tenant.model.User;
 import com.cacanode.api.tenant.repository.ChatbotRepository;
@@ -23,10 +25,13 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.time.LocalDate;
+import java.util.Locale;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -38,6 +43,7 @@ import java.util.UUID;
 public class TicketService {
     private static final int DEFAULT_PAGE_SIZE = 50;
     private static final int MAX_PAGE_SIZE = 100;
+    private static final int MAX_SEARCH_LENGTH = 200;
 
     private final TicketRepository ticketRepository;
     private final TicketNoteRepository noteRepository;
@@ -47,6 +53,7 @@ public class TicketService {
     private final UserRepository userRepository;
     private final JdbcTemplate jdbcTemplate;
     private final WebhookService webhookService;
+    private final ApplicationEventPublisher eventPublisher;
 
     @Transactional
     public TicketDtos.Response createPublic(
@@ -64,8 +71,10 @@ public class TicketService {
         }
 
         SessionRow session = externalSession(principal, request.sessionId());
+        Tenant tenant = tenantRepository.findById(principal.tenantId())
+                .orElseThrow(() -> new ResourceNotFoundException("Tenant was not found"));
         Ticket ticket = new Ticket();
-        ticket.setTenant(tenantRepository.getReferenceById(principal.tenantId()));
+        ticket.setTenant(tenant);
         ticket.setChatbot(chatbotRepository.getReferenceById(principal.chatbotId()));
         ticket.setChatSessionId(request.sessionId());
         ticket.setIntegrationToken(tokenRepository.getReferenceById(principal.tokenId()));
@@ -86,6 +95,10 @@ public class TicketService {
         event.put("title", ticket.getTitle());
         event.put("status", ticket.getStatus().name());
         webhookService.enqueue(principal.tenantId(), "ticket.created", ticket.getId(), event);
+        eventPublisher.publishEvent(new TicketCreatedEvent(
+                this, principal.tenantId(), ticket.getId(), tenant.getName(),
+                ticket.getCustomerEmail(), ticket.getCustomerName(), ticket.getTitle(),
+                ticket.getDescription(), session.locale()));
         return toResponse(ticket, List.of());
     }
 
@@ -100,6 +113,26 @@ public class TicketService {
             Integer page,
             Integer size
     ) {
+        return list(tenantId, status, priority, source, assignedTo, unassigned, page, size,
+                null, null, null, null, null);
+    }
+
+    @Transactional(readOnly = true)
+    public Page<TicketDtos.Response> list(
+            UUID tenantId,
+            TicketStatus status,
+            TicketPriority priority,
+            TicketSource source,
+            UUID assignedTo,
+            boolean unassigned,
+            Integer page,
+            Integer size,
+            String searchText,
+            LocalDate createdFrom,
+            LocalDate createdTo,
+            String sort,
+            String direction
+    ) {
         int requestedPage = page == null ? 0 : page;
         int requestedSize = size == null ? DEFAULT_PAGE_SIZE : size;
         if (requestedPage < 0) {
@@ -111,6 +144,15 @@ public class TicketService {
         if (assignedTo != null && unassigned) {
             throw new BadRequestException("Assigned user and unassigned filters cannot be combined");
         }
+        String query = searchText == null || searchText.isBlank() ? null : searchText.strip();
+        if (query != null && query.length() > MAX_SEARCH_LENGTH) {
+            throw new BadRequestException("Search text must be 200 characters or fewer");
+        }
+        if (createdFrom != null && createdTo != null && createdFrom.isAfter(createdTo)) {
+            throw new BadRequestException("Creation start date must not be after end date");
+        }
+        String requestedSort = normalizeTicketSort(sort);
+        boolean ascending = normalizeDirection(direction).equals("asc");
 
         Specification<Ticket> specification = (root, criteriaQuery, builder) ->
                 builder.equal(root.get("tenant").get("id"), tenantId);
@@ -126,6 +168,25 @@ public class TicketService {
             specification = specification.and((root, criteriaQuery, builder) ->
                     builder.equal(root.get("source"), source));
         }
+        if (query != null) {
+            String pattern = "%" + escapeLike(query.toLowerCase(Locale.ROOT)) + "%";
+            specification = specification.and((root, criteriaQuery, builder) -> builder.or(
+                    builder.like(builder.lower(builder.function("str", String.class, root.get("id"))), pattern, '\\'),
+                    builder.like(builder.lower(root.get("title")), pattern, '\\'),
+                    builder.like(builder.lower(root.get("description")), pattern, '\\'),
+                    builder.like(builder.lower(root.get("customerName")), pattern, '\\'),
+                    builder.like(builder.lower(root.get("customerEmail")), pattern, '\\'),
+                    builder.like(builder.lower(root.get("externalUserId")), pattern, '\\')
+            ));
+        }
+        if (createdFrom != null) {
+            specification = specification.and((root, criteriaQuery, builder) ->
+                    builder.greaterThanOrEqualTo(root.get("createdAt"), createdFrom.atStartOfDay()));
+        }
+        if (createdTo != null) {
+            specification = specification.and((root, criteriaQuery, builder) ->
+                    builder.lessThan(root.get("createdAt"), createdTo.plusDays(1).atStartOfDay()));
+        }
         if (assignedTo != null) {
             specification = specification.and((root, criteriaQuery, builder) ->
                     builder.equal(root.get("assignedTo").get("id"), assignedTo));
@@ -133,14 +194,63 @@ public class TicketService {
             specification = specification.and((root, criteriaQuery, builder) ->
                     builder.isNull(root.get("assignedTo")));
         }
+        if (requestedSort.equals("priority") || requestedSort.equals("customer")) {
+            specification = specification.and((root, criteriaQuery, builder) -> {
+                if (criteriaQuery.getResultType() != Long.class && criteriaQuery.getResultType() != long.class) {
+                jakarta.persistence.criteria.Expression<?> primary = switch (requestedSort) {
+                    case "priority" -> builder.<Integer>selectCase()
+                            .when(builder.equal(root.get("priority"), TicketPriority.URGENT), 4)
+                            .when(builder.equal(root.get("priority"), TicketPriority.HIGH), 3)
+                            .when(builder.equal(root.get("priority"), TicketPriority.NORMAL), 2)
+                            .otherwise(1);
+                    case "customer" -> builder.lower(builder.coalesce(
+                            root.<String>get("customerName"), root.<String>get("customerEmail")));
+                    default -> builder.lower(builder.coalesce(
+                            root.<String>get("customerName"), root.<String>get("customerEmail")));
+                };
+                criteriaQuery.orderBy(
+                        ascending ? builder.asc(primary) : builder.desc(primary),
+                        ascending ? builder.asc(root.get("id")) : builder.desc(root.get("id"))
+                );
+                }
+                return builder.conjunction();
+            });
+        }
+
+        Sort pageableSort = Sort.unsorted();
+        if (requestedSort.equals("created") || requestedSort.equals("updated")) {
+            Sort.Direction sortDirection = ascending ? Sort.Direction.ASC : Sort.Direction.DESC;
+            pageableSort = Sort.by(
+                    new Sort.Order(sortDirection, requestedSort.equals("updated") ? "updatedAt" : "createdAt"),
+                    new Sort.Order(sortDirection, "id"));
+        }
 
         var pageable = PageRequest.of(
                 requestedPage,
                 requestedSize,
-                Sort.by(Sort.Order.desc("createdAt"), Sort.Order.desc("id"))
+                pageableSort
         );
         return ticketRepository.findAll(specification, pageable)
                 .map(ticket -> toResponse(ticket, List.of()));
+    }
+
+    private String normalizeTicketSort(String value) {
+        if (value == null || value.isBlank() || "created".equalsIgnoreCase(value)
+                || "createdAt".equalsIgnoreCase(value)) return "created";
+        if ("updated".equalsIgnoreCase(value) || "updatedAt".equalsIgnoreCase(value)) return "updated";
+        if ("priority".equalsIgnoreCase(value)) return "priority";
+        if ("customer".equalsIgnoreCase(value)) return "customer";
+        throw new BadRequestException("Sort must be created, updated, priority, or customer");
+    }
+
+    private String normalizeDirection(String value) {
+        if (value == null || value.isBlank() || "desc".equalsIgnoreCase(value)) return "desc";
+        if ("asc".equalsIgnoreCase(value)) return "asc";
+        throw new BadRequestException("Direction must be asc or desc");
+    }
+
+    private String escapeLike(String value) {
+        return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_");
     }
 
     @Transactional(readOnly = true)
@@ -208,12 +318,14 @@ public class TicketService {
         try {
             return jdbcTemplate.queryForObject(
                     """
-                    SELECT external_user_id, channel
+                    SELECT external_user_id, channel, locale
                     FROM chat_sessions
                     WHERE id = ? AND tenant_id = ? AND chatbot_id = ? AND integration_token_id = ?
                       AND channel IN ('WIDGET', 'CUSTOM_API')
                     """,
-                    (rs, rowNum) -> new SessionRow(rs.getString("external_user_id"), rs.getString("channel")),
+                    (rs, rowNum) -> new SessionRow(
+                            rs.getString("external_user_id"), rs.getString("channel"),
+                            rs.getString("locale")),
                     sessionId, principal.tenantId(), principal.chatbotId(), principal.tokenId()
             );
         } catch (EmptyResultDataAccessException e) {
@@ -249,6 +361,6 @@ public class TicketService {
         return value == null || value.isBlank() ? null : value.trim();
     }
 
-    private record SessionRow(String externalUserId, String channel) {
+    private record SessionRow(String externalUserId, String channel, String locale) {
     }
 }

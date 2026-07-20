@@ -13,6 +13,7 @@ import java.text.Normalizer;
 import java.util.HexFormat;
 import java.util.Locale;
 import java.util.UUID;
+import java.time.LocalDate;
 
 @Component
 public class DocumentListCacheKeyFactory {
@@ -23,7 +24,7 @@ public class DocumentListCacheKeyFactory {
     }
 
     public CanonicalFilters legacy() {
-        return canonical("legacy", 0, 0, null, null, null, null);
+        return canonical("legacy", 0, 0, null, null, null, null, null, null, null, null);
     }
 
     public CanonicalFilters paged(
@@ -34,7 +35,17 @@ public class DocumentListCacheKeyFactory {
             DocumentType type,
             DocumentVisibility visibility
     ) {
-        return canonical("paged", page, size, searchText, status, type, visibility);
+        return canonical("paged", page, size, searchText, status, type, visibility,
+                null, null, "uploaded", "desc");
+    }
+
+    public CanonicalFilters paged(
+            int page, int size, String searchText, DocumentStatus status, DocumentType type,
+            DocumentVisibility visibility, LocalDate uploadedFrom, LocalDate uploadedTo,
+            String sort, String direction
+    ) {
+        return canonical("paged", page, size, searchText, status, type, visibility,
+                uploadedFrom, uploadedTo, sort, direction);
     }
 
     public String key(UUID tenantId, UUID knowledgeBaseId, long generation, CanonicalFilters filters) {
@@ -49,7 +60,11 @@ public class DocumentListCacheKeyFactory {
             String searchText,
             DocumentStatus status,
             DocumentType type,
-            DocumentVisibility visibility
+            DocumentVisibility visibility,
+            LocalDate uploadedFrom,
+            LocalDate uploadedTo,
+            String sort,
+            String direction
     ) {
         String normalizedSearch = searchText == null ? null : Normalizer
                 .normalize(searchText.strip(), Normalizer.Form.NFC)
@@ -59,8 +74,13 @@ public class DocumentListCacheKeyFactory {
                 + "\nsearch=" + (normalizedSearch == null ? "" : normalizedSearch)
                 + "\nstatus=" + (status == null ? "" : status.name())
                 + "\ntype=" + (type == null ? "" : type.name())
-                + "\nvisibility=" + (visibility == null ? "" : visibility.name());
-        return new CanonicalFilters(mode, page, size, normalizedSearch, status, type, visibility, sha256(canonical));
+                + "\nvisibility=" + (visibility == null ? "" : visibility.name())
+                + "\nfrom=" + (uploadedFrom == null ? "" : uploadedFrom)
+                + "\nto=" + (uploadedTo == null ? "" : uploadedTo)
+                + "\nsort=" + (sort == null ? "" : sort)
+                + "\ndirection=" + (direction == null ? "" : direction);
+        return new CanonicalFilters(mode, page, size, normalizedSearch, status, type, visibility,
+                uploadedFrom, uploadedTo, sort, direction, sha256(canonical));
     }
 
     private String sha256(String value) {
@@ -80,6 +100,10 @@ public class DocumentListCacheKeyFactory {
             DocumentStatus status,
             DocumentType type,
             DocumentVisibility visibility,
+            LocalDate uploadedFrom,
+            LocalDate uploadedTo,
+            String sort,
+            String direction,
             String sha256
     ) {}
 }

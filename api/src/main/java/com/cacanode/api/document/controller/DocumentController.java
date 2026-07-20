@@ -2,12 +2,14 @@ package com.cacanode.api.document.controller;
 
 import java.util.List;
 import java.util.UUID;
+import java.time.LocalDate;
 import java.nio.charset.StandardCharsets;
 
 import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -53,7 +55,6 @@ public class DocumentController extends BaseController {
         this(documentService, null);
     }
 
-    @GetMapping
     public List<DocumentListItemResponse> list(
             @RequestParam("knowledgeBaseId") UUID knowledgeBaseId,
             @RequestParam(value = "page", required = false) Integer page,
@@ -79,6 +80,39 @@ public class DocumentController extends BaseController {
                 type,
                 visibility
         );
+    }
+
+    @GetMapping
+    public ResponseEntity<List<DocumentListItemResponse>> listResponse(
+            @RequestParam("knowledgeBaseId") UUID knowledgeBaseId,
+            @RequestParam(value = "page", required = false) Integer page,
+            @RequestParam(value = "size", required = false) Integer size,
+            @RequestParam(value = "q", required = false) String query,
+            @RequestParam(value = "status", required = false) DocumentStatus status,
+            @RequestParam(value = "type", required = false) DocumentType type,
+            @RequestParam(value = "visibility", required = false) DocumentVisibility visibility,
+            @RequestParam(value = "uploaded_from", required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate uploadedFrom,
+            @RequestParam(value = "uploaded_to", required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate uploadedTo,
+            @RequestParam(value = "sort", required = false) String sort,
+            @RequestParam(value = "direction", required = false) String direction,
+            HttpServletRequest request
+    ) {
+        UUID tenantId = getTenantId(request);
+        if (page == null && size == null && query == null && status == null && type == null
+                && visibility == null && uploadedFrom == null && uploadedTo == null
+                && sort == null && direction == null) {
+            List<DocumentListItemResponse> documents = documentService.list(tenantId, knowledgeBaseId);
+            return ResponseEntity.ok().header("X-Total-Count", Long.toString(documents.size()))
+                    .body(documents);
+        }
+        var result = documentService.listResult(
+                tenantId, knowledgeBaseId, page, size, query, status, type, visibility,
+                uploadedFrom, uploadedTo, sort, direction);
+        return ResponseEntity.ok()
+                .header("X-Total-Count", Long.toString(result.totalCount()))
+                .body(result.documents());
     }
 
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)

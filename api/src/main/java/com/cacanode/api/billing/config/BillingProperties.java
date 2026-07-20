@@ -42,6 +42,7 @@ public class BillingProperties {
         private String clientId = "";
         private String apiKey = "";
         private String checksumKey = "";
+        private String webhookUrl = "";
         private int maxRetries = 3;
     }
 

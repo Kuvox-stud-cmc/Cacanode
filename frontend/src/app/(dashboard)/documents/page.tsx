@@ -31,7 +31,7 @@ import {
   getDocumentStatusApi,
   isSupportedDocumentName,
   isTerminalDocumentStatus,
-  listDocumentsApi,
+  queryDocumentsApi,
   uploadDocumentApi,
   updateDocumentVisibilityApi,
   SUPPORTED_DOCUMENT_ACCEPT,
@@ -39,6 +39,8 @@ import {
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { getTenantWorkspaceApi } from "@/lib/workspace-api";
+import { ClearFiltersButton, DateRangeFields, FilterPanel, FilterSelect, PaginationControls, ResultsSummary, UrlSearchField } from "@/components/list/ListControls";
+import { oneOf, safeDate, safePage, safeSize, useUrlListState } from "@/hooks/useUrlListState";
 
 type DashboardDocument = Document & {
   localId?: string;
@@ -129,9 +131,12 @@ function TableSkeleton() {
 export default function DocumentsPage() {
   const router = useRouter();
   const { request } = useApiClient();
+  const { searchParams, update, clear } = useUrlListState();
   const user = useAuthStore((state) => state.user);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [documents, setDocuments] = useState<DashboardDocument[]>([]);
+  const [optimisticDocuments, setOptimisticDocuments] = useState<DashboardDocument[]>([]);
+  const [total, setTotal] = useState(0);
   const [workspace, setWorkspace] = useState<TenantWorkspace | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<DashboardDocument | null>(null);
@@ -140,15 +145,30 @@ export default function DocumentsPage() {
   const [uploadOpen, setUploadOpen] = useState(false);
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
   const [visibility, setVisibility] = useState<DocumentVisibility>("EMPLOYEE_ONLY");
+  const [loadedKey, setLoadedKey] = useState("");
+  const [revision, setRevision] = useState(0);
+  const page = safePage(searchParams.get("page"));
+  const size = safeSize(searchParams.get("size"));
+  const statusFilter = oneOf(searchParams.get("status"), ["all", "PENDING", "PROCESSING", "COMPLETED", "FAILED"] as const, "all");
+  const typeFilter = oneOf(searchParams.get("type"), ["all", "PDF", "DOCX", "TXT", "MARKDOWN", "HTML", "XLSX", "CSV"] as const, "all");
+  const accessFilter = oneOf(searchParams.get("access"), ["all", "EMPLOYEE_ONLY", "CUSTOMER_AND_EMPLOYEE"] as const, "all");
+  const uploadedFrom = safeDate(searchParams.get("from"));
+  const rawUploadedTo = safeDate(searchParams.get("to"));
+  const uploadedTo = rawUploadedTo && (!uploadedFrom || rawUploadedTo >= uploadedFrom) ? rawUploadedTo : "";
+  const sortValue = oneOf(searchParams.get("sort"), ["uploaded-desc", "uploaded-asc", "filename-asc", "filename-desc", "size-desc", "size-asc"] as const, "uploaded-desc");
+  const urlQuery = (searchParams.get("q") ?? "").slice(0, 200);
+  const [sort, direction] = sortValue.split("-") as ["uploaded" | "filename" | "size", "asc" | "desc"];
+  const hasFilters = Boolean(urlQuery || statusFilter !== "all" || typeFilter !== "all" || accessFilter !== "all" || uploadedFrom || uploadedTo || sortValue !== "uploaded-desc");
+  const displayDocuments = [...optimisticDocuments, ...documents];
+  const requestKey = [workspace?.knowledgeBase.id, urlQuery, statusFilter, typeFilter, accessFilter, uploadedFrom, uploadedTo, sortValue, page, size, revision].join("|");
+  const refreshing = !loading && loadedKey !== requestKey;
 
   useEffect(() => {
     let cancelled = false;
     getTenantWorkspaceApi(request)
       .then(async (tenantWorkspace) => {
-        const items = await listDocumentsApi(request, tenantWorkspace.knowledgeBase.id);
         if (!cancelled) {
           setWorkspace(tenantWorkspace);
-          setDocuments(items);
         }
       })
       .catch((error) => {
@@ -156,14 +176,33 @@ export default function DocumentsPage() {
           toast.error(error instanceof Error ? error.message : "Unable to load workspace");
         }
       })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
+      ;
 
     return () => {
       cancelled = true;
     };
   }, [request]);
+
+  useEffect(() => {
+    if (!workspace) return;
+    const controller = new AbortController();
+    queryDocumentsApi(request, workspace.knowledgeBase.id, {
+      page: page - 1, size, q: urlQuery || undefined,
+      status: statusFilter === "all" ? undefined : statusFilter,
+      type: typeFilter === "all" ? undefined : typeFilter,
+      visibility: accessFilter === "all" ? undefined : accessFilter,
+      uploadedFrom: uploadedFrom || undefined, uploadedTo: uploadedTo || undefined,
+      sort, direction, signal: controller.signal,
+    }).then((result) => {
+      if (controller.signal.aborted) return;
+      const pages = Math.max(1, Math.ceil(result.total / size));
+      if (page > pages) { update({ page: pages === 1 ? null : pages }, false); return; }
+      setDocuments(result.items); setTotal(result.total); setLoading(false); setLoadedKey(requestKey);
+    }).catch((error) => {
+      if (!(error instanceof DOMException && error.name === "AbortError")) toast.error(error instanceof Error ? error.message : "Unable to load documents");
+    });
+    return () => controller.abort();
+  }, [accessFilter, direction, page, request, requestKey, size, sort, statusFilter, typeFilter, update, uploadedFrom, uploadedTo, urlQuery, workspace]);
 
   useEffect(() => {
     const pollable = documents.filter(
@@ -177,6 +216,9 @@ export default function DocumentsPage() {
         pollable.map((document) => getDocumentStatusApi(request, document.id)),
       );
       if (cancelled) return;
+      if (updates.some((result, index) => result.status === "fulfilled" && result.value.status !== pollable[index]?.status)) {
+        setRevision((value) => value + 1);
+      }
       setDocuments((current) =>
         current.map((document) => {
           const index = pollable.findIndex((item) => item.id === document.id);
@@ -233,7 +275,7 @@ export default function DocumentsPage() {
       uploadedAt: new Date().toISOString(),
       visibility: selectedVisibility,
     }));
-    setDocuments((current) => [...optimisticDocuments, ...current]);
+    setOptimisticDocuments((current) => [...optimisticDocuments, ...current]);
 
     let nextUpload = 0;
     let successfulUploads = 0;
@@ -245,32 +287,19 @@ export default function DocumentsPage() {
         const { file, localId } = upload;
 
         try {
-          const uploaded = await uploadDocumentApi(
+          await uploadDocumentApi(
             request,
             file,
             workspace.knowledgeBase.id,
             selectedVisibility,
           );
           successfulUploads += 1;
-          setDocuments((current) =>
-            current.map((document) =>
-              document.localId === localId
-                ? {
-                    ...document,
-                    id: uploaded.id,
-                    jobId: uploaded.jobId,
-                    fileName: uploaded.fileName,
-                    status: uploaded.status,
-                    visibility: uploaded.visibility,
-                    uploadState: undefined,
-                  }
-                : document,
-            ),
-          );
+          setOptimisticDocuments((current) => current.filter((document) => document.localId !== localId));
+          setRevision((value) => value + 1);
         } catch (error) {
           const message = error instanceof Error ? error.message : "Upload failed";
           toast.error(`${file.name}: ${message}`);
-          setDocuments((current) =>
+          setOptimisticDocuments((current) =>
             current.map((document) =>
               document.localId === localId
                 ? {
@@ -325,6 +354,7 @@ export default function DocumentsPage() {
     try {
       const updated = await updateDocumentVisibilityApi(request, documentId, next);
       setDocuments((current) => current.map((item) => item.id === documentId ? { ...item, visibility: updated.visibility } : item));
+      setRevision((value) => value + 1);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Unable to update visibility");
     }
@@ -336,7 +366,7 @@ export default function DocumentsPage() {
     setDeletingId(document.id);
     try {
       await deleteDocumentApi(request, document.id);
-      setDocuments((current) => current.filter((item) => item.id !== document.id));
+      setRevision((value) => value + 1);
       setDeleteTarget(null);
       toast.success(`${document.fileName} deleted`);
     } catch (error) {
@@ -387,19 +417,30 @@ export default function DocumentsPage() {
         <p className="mt-1 text-xs text-slate-400">PDF, DOCX, TXT, Markdown, HTML, XLSX, and CSV up to 20 MB. Scanned PDFs and legacy Office files are excluded.</p>
       </div>
 
-      <Card>
+      <FilterPanel>
+        <UrlSearchField key={urlQuery} initialValue={urlQuery} onDebouncedChange={(value) => update({ q: value || null })} placeholder="Search filenames" />
+        <FilterSelect label="Indexing status" value={statusFilter} onChange={(value) => update({ status: value === "all" ? null : value })}><option value="all">All statuses</option><option value="PENDING">Pending</option><option value="PROCESSING">Indexing</option><option value="COMPLETED">Completed</option><option value="FAILED">Failed</option></FilterSelect>
+        <FilterSelect label="File type" value={typeFilter} onChange={(value) => update({ type: value === "all" ? null : value })}><option value="all">All types</option>{["PDF", "DOCX", "TXT", "MARKDOWN", "HTML", "XLSX", "CSV"].map((value) => <option key={value}>{value}</option>)}</FilterSelect>
+        <FilterSelect label="Access" value={accessFilter} onChange={(value) => update({ access: value === "all" ? null : value })}><option value="all">All access</option><option value="EMPLOYEE_ONLY">Employees only</option><option value="CUSTOMER_AND_EMPLOYEE">Everyone</option></FilterSelect>
+        <DateRangeFields prefix="Uploaded" from={uploadedFrom} to={uploadedTo} onFromChange={(value) => update({ from: value || null })} onToChange={(value) => update({ to: value || null })} />
+        <FilterSelect label="Sort" value={sortValue} onChange={(value) => update({ sort: value === "uploaded-desc" ? null : value })}><option value="uploaded-desc">Newest uploaded</option><option value="uploaded-asc">Oldest uploaded</option><option value="filename-asc">Filename A–Z</option><option value="filename-desc">Filename Z–A</option><option value="size-desc">Largest first</option><option value="size-asc">Smallest first</option></FilterSelect>
+        <ClearFiltersButton disabled={!hasFilters} onClick={clear} />
+      </FilterPanel>
+      <ResultsSummary total={total} refreshing={refreshing} />
+
+      <Card className="overflow-hidden">
         {loading ? (
           <TableSkeleton />
-        ) : documents.length === 0 ? (
+        ) : displayDocuments.length === 0 ? (
           <CardContent className="py-16 text-center">
             <FileText className="mx-auto mb-3 h-10 w-10 text-slate-300" />
-            <p className="font-medium text-slate-500">No documents yet</p>
+            <p className="font-medium text-slate-500">{hasFilters ? "No documents match these filters" : "No documents yet"}</p>
             <p className="mt-1 text-sm text-slate-400">
               Upload your first digital document or spreadsheet to start indexing
             </p>
           </CardContent>
         ) : (
-          <Table>
+          <div className="overflow-x-auto"><Table>
             <TableHeader>
               <TableRow>
                 <TableHead>File Name</TableHead>
@@ -413,7 +454,7 @@ export default function DocumentsPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {documents.map((doc) => (
+              {displayDocuments.map((doc) => (
                 <TableRow
                   key={doc.localId ?? doc.id}
                   className={!doc.uploadState ? "cursor-pointer hover:bg-slate-50" : undefined}
@@ -490,8 +531,9 @@ export default function DocumentsPage() {
                 </TableRow>
               ))}
             </TableBody>
-          </Table>
+          </Table></div>
         )}
+        {!loading && <PaginationControls page={page} size={size} total={total} onPageChange={(value) => update({ page: value === 1 ? null : value }, false)} onSizeChange={(value) => update({ size: value === 20 ? null : value })} />}
       </Card>
 
       <Dialog open={uploadOpen} onOpenChange={setUploadOpen}>

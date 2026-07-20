@@ -18,9 +18,11 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.format.annotation.DateTimeFormat;
 
 import java.util.List;
 import java.util.UUID;
+import java.time.LocalDate;
 
 @RestController
 @RequestMapping("/api/v1/tenants/me/tickets")
@@ -28,7 +30,6 @@ import java.util.UUID;
 public class TicketController extends BaseController {
     private final TicketService ticketService;
 
-    @GetMapping
     public Page<TicketDtos.Response> list(
             @RequestParam(required = false) TicketStatus status,
             @RequestParam(required = false) TicketPriority priority,
@@ -43,6 +44,30 @@ public class TicketController extends BaseController {
                 getTenantId(request), status, priority, source, assignedTo,
                 Boolean.TRUE.equals(unassigned), page, size
         );
+    }
+
+    @GetMapping
+    public Page<TicketDtos.Response> listResponse(
+            @RequestParam(required = false) TicketStatus status,
+            @RequestParam(required = false) TicketPriority priority,
+            @RequestParam(required = false) TicketSource source,
+            @RequestParam(required = false) UUID assignedTo,
+            @RequestParam(required = false) Boolean unassigned,
+            @RequestParam(required = false) Integer page,
+            @RequestParam(required = false) Integer size,
+            @RequestParam(value = "q", required = false) String query,
+            @RequestParam(value = "created_from", required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate createdFrom,
+            @RequestParam(value = "created_to", required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate createdTo,
+            @RequestParam(required = false) String sort,
+            @RequestParam(required = false) String direction,
+            HttpServletRequest request
+    ) {
+        return ticketService.list(
+                getTenantId(request), status, priority, source, assignedTo,
+                Boolean.TRUE.equals(unassigned), page, size, query, createdFrom, createdTo,
+                sort, direction);
     }
 
     @GetMapping("/assignees")

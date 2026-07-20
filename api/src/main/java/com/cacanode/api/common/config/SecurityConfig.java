@@ -120,6 +120,7 @@ public class SecurityConfig {
 
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
         config.setAllowedHeaders(List.of("*"));
+        config.setExposedHeaders(List.of("X-Total-Count", "X-Next-Cursor"));
         config.setAllowCredentials(true); // required for HttpOnly cookies
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();

@@ -42,8 +42,10 @@ public class IntegrationController extends BaseController {
     private final ManagedWidgetTokenService managedWidgetTokenService;
 
     @GetMapping("/tokens")
-    public List<IntegrationTokenDtos.Item> listTokens(HttpServletRequest request) {
-        return tokenService.list(getTenantId(request));
+    public List<IntegrationTokenDtos.Item> listTokens(
+            @RequestParam(value = "includeDeleted", defaultValue = "false") boolean includeDeleted,
+            HttpServletRequest request) {
+        return tokenService.list(getTenantId(request), includeDeleted);
     }
 
     @PostMapping("/tokens")
@@ -86,7 +88,14 @@ public class IntegrationController extends BaseController {
     public ResponseEntity<WidgetEmbedDtos.Response> getWidgetEmbed(HttpServletRequest request) {
         return ResponseEntity.ok()
                 .header(HttpHeaders.CACHE_CONTROL, "no-store")
-                .body(managedWidgetTokenService.getOrCreate(getTenantId(request)));
+                .body(managedWidgetTokenService.get(getTenantId(request)));
+    }
+
+    @PostMapping("/widget/embed")
+    public ResponseEntity<WidgetEmbedDtos.Generated> generateWidgetEmbed(HttpServletRequest request) {
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CACHE_CONTROL, "no-store")
+                .body(managedWidgetTokenService.generate(getTenantId(request)));
     }
 
     @PostMapping(value = "/widget/icon", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)

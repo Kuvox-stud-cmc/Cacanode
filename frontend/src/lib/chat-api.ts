@@ -27,12 +27,25 @@ export async function createChatSessionApi(
 
 export async function listPlaygroundSessionsApi(
   request: ApiRequest,
-  limit = 50,
-  offset = 0,
-): Promise<PlaygroundSession[]> {
-  const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
-  const res = await request(`${getApiBase()}/chat/playground/sessions?${params}`);
-  return readJsonOrThrow<PlaygroundSession[]>(res);
+  query: {
+    limit?: number; cursor?: string | null; q?: string; status?: string;
+    activityFrom?: string; activityTo?: string; sort?: string; direction?: "asc" | "desc";
+    signal?: AbortSignal;
+  } = {},
+): Promise<{ items: PlaygroundSession[]; nextCursor: string | null }> {
+  const params = new URLSearchParams({ limit: String(query.limit ?? 30) });
+  if (query.cursor) params.set("cursor", query.cursor);
+  if (query.q) params.set("q", query.q.slice(0, 200));
+  if (query.status) params.set("status", query.status);
+  if (query.activityFrom) params.set("activity_from", query.activityFrom);
+  if (query.activityTo) params.set("activity_to", query.activityTo);
+  if (query.sort) params.set("sort", query.sort);
+  if (query.direction) params.set("direction", query.direction);
+  const res = await request(`${getApiBase()}/chat/playground/sessions?${params}`, { signal: query.signal });
+  return {
+    items: await readJsonOrThrow<PlaygroundSession[]>(res),
+    nextCursor: res.headers.get("X-Next-Cursor"),
+  };
 }
 
 export async function hidePlaygroundSessionApi(

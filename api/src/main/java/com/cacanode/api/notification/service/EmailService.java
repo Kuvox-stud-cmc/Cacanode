@@ -7,6 +7,7 @@ import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.UUID;
 
 import lombok.extern.slf4j.Slf4j;
 
@@ -146,6 +147,97 @@ public class EmailService {
                         expiresAt.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")))
         );
         sendWithFallback(message);
+    }
+
+    public void sendTicketCreatedEmail(
+            String toEmail,
+            String customerName,
+            String tenantName,
+            UUID ticketId,
+            String title,
+            String description,
+            String locale
+    ) {
+        boolean vietnamese = locale != null && locale.toLowerCase().startsWith("vi");
+        String reference = ticketId.toString().substring(0, 8).toUpperCase();
+        String displayTenant = headerText(tenantName == null || tenantName.isBlank() ? "Support" : tenantName);
+        String displayName = headerText(customerName == null || customerName.isBlank()
+                ? (vietnamese ? "bạn" : "there") : customerName);
+        String safeTenant = escapeHtml(displayTenant);
+        String safeName = escapeHtml(displayName);
+        String safeTitle = escapeHtml(title);
+        String safeDescription = escapeHtml(description).replace("\n", "<br>");
+        String subject = vietnamese
+                ? "Đã nhận yêu cầu hỗ trợ #%s - %s".formatted(reference, displayTenant)
+                : "Support ticket #%s received - %s".formatted(reference, displayTenant);
+        String heading = vietnamese ? "Yêu cầu hỗ trợ đã được tiếp nhận" : "Your support request was received";
+        String greeting = vietnamese ? "Xin chào " + safeName + "," : "Hello " + safeName + ",";
+        String received = vietnamese
+                ? "%s đã nhận được yêu cầu hỗ trợ của bạn.".formatted(safeTenant)
+                : "%s has received your support request.".formatted(safeTenant);
+        String status = vietnamese ? "Đang mở" : "Open";
+        String ticketLabel = vietnamese ? "Mã ticket" : "Ticket";
+        String titleLabel = vietnamese ? "Tiêu đề" : "Title";
+        String descriptionLabel = vietnamese ? "Nội dung" : "Description";
+        String statusLabel = vietnamese ? "Trạng thái" : "Status";
+        String followUp = vietnamese
+                ? "Đội ngũ hỗ trợ sẽ liên hệ với bạn qua địa chỉ email này."
+                : "The support team will follow up using this email address.";
+        String footer = vietnamese
+                ? "Email được gửi an toàn bởi CacaNode."
+                : "Delivered securely by CacaNode.";
+
+        EmailMessage message = new EmailMessage(
+                toEmail,
+                customerName == null || customerName.isBlank() ? toEmail : displayName,
+                subject,
+                """
+                <!DOCTYPE html>
+                <html><head><meta charset="UTF-8"><style>
+                body { font-family:Arial,sans-serif; background:#f8fafc; margin:0; padding:0; }
+                .container { max-width:600px; margin:40px auto; background:#fff; border-radius:10px;
+                  padding:36px; box-shadow:0 2px 10px rgba(15,23,42,.08); }
+                .brand { font-size:22px; font-weight:bold; color:#4f46e5; margin-bottom:24px; }
+                h1 { font-size:22px; color:#0f172a; } p { color:#475569; line-height:1.6; }
+                .ticket { margin:24px 0; overflow:hidden; border:1px solid #e2e8f0; border-radius:8px; }
+                .row { padding:12px 16px; border-bottom:1px solid #e2e8f0; }
+                .row:last-child { border-bottom:0; } .label { color:#64748b; font-size:12px;
+                  font-weight:bold; letter-spacing:.04em; text-transform:uppercase; }
+                .value { margin-top:5px; color:#0f172a; line-height:1.55; }
+                .footer { margin-top:28px; color:#94a3b8; font-size:12px; }
+                </style></head><body><div class="container">
+                <div class="brand">%s</div>
+                <h1>%s</h1>
+                <p>%s</p><p>%s</p>
+                <div class="ticket">
+                  <div class="row"><div class="label">%s</div><div class="value">#%s</div></div>
+                  <div class="row"><div class="label">%s</div><div class="value">%s</div></div>
+                  <div class="row"><div class="label">%s</div><div class="value">%s</div></div>
+                  <div class="row"><div class="label">%s</div><div class="value">%s</div></div>
+                </div>
+                <p>%s</p>
+                <div class="footer">%s</div>
+                </div></body></html>
+                """.formatted(safeTenant, heading, greeting, received,
+                        ticketLabel, reference, titleLabel, safeTitle,
+                        descriptionLabel, safeDescription, statusLabel, status, followUp, footer)
+        );
+        sendWithFallback(message);
+    }
+
+    private String escapeHtml(String value) {
+        if (value == null) {
+            return "";
+        }
+        return value.replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;")
+                .replace("\"", "&quot;")
+                .replace("'", "&#39;");
+    }
+
+    private String headerText(String value) {
+        return value.replace('\r', ' ').replace('\n', ' ').trim();
     }
 
     private void sendWithFallback(EmailMessage message) {

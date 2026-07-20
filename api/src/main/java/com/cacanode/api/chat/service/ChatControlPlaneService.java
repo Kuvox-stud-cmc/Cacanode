@@ -20,6 +20,7 @@ import com.cacanode.api.document.enums.DocumentStatus;
 import com.cacanode.api.document.enums.DocumentVisibility;
 import com.cacanode.api.document.model.Document;
 import com.cacanode.api.document.repository.DocumentRepository;
+import com.cacanode.api.document.service.PublicEvidenceService;
 import com.cacanode.api.integration.service.WebhookService;
 import com.cacanode.api.notification.enums.NotificationStatus;
 import com.cacanode.api.notification.enums.NotificationType;
@@ -41,11 +42,15 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
+import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.LocalDateTime;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -55,6 +60,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.regex.Pattern;
+import java.util.Base64;
+import java.util.Locale;
 
 @Service
 @RequiredArgsConstructor
@@ -62,6 +70,8 @@ public class ChatControlPlaneService {
     private static final String PROMPT_SCHEMA_VERSION = "chat-prompts-v2";
     private static final List<ChatChannel> EXTERNAL_CHANNELS =
             List.of(ChatChannel.WIDGET, ChatChannel.CUSTOM_API);
+    private static final Pattern CITATION_MARKER = Pattern.compile(
+            "\\s*\\[S\\d+\\]", Pattern.CASE_INSENSITIVE);
 
     private final ChatSessionRepository sessionRepository;
     private final ChatMessageRepository messageRepository;
@@ -76,8 +86,11 @@ public class ChatControlPlaneService {
     private final NotificationRepository notificationRepository;
     private final WebhookService webhookService;
     private final AiInferenceClient inferenceClient;
+    private final PublicEvidenceService publicEvidenceService;
     private final ObjectMapper objectMapper;
     private final TransactionTemplate transactions;
+    @Autowired(required = false)
+    private NamedParameterJdbcTemplate namedJdbc;
 
     public ChatDtos.SessionResponse createEmployeeSession(
             UUID tenantId, UUID userId, ChatDtos.CreateSessionRequest request) {
@@ -177,7 +190,8 @@ public class ChatControlPlaneService {
                 if (duplicate.getStatus() == ChatTurnStatus.COMPLETED) {
                     ChatMessage assistant = messageRepository.findById(duplicate.getAssistantMessageId())
                             .orElseThrow();
-                    return new PreparedTurn(duplicate.getId(), null, toAssistant(assistant));
+                    return new PreparedTurn(duplicate.getId(), null,
+                            toAssistant(assistant, session, supportsPublicEvidence(session.getChannel())));
                 }
                 duplicate.setStatus(ChatTurnStatus.PENDING);
                 duplicate.setFailureCode(null);
@@ -232,20 +246,24 @@ public class ChatControlPlaneService {
         if (knowledgeBase.getSearchRevision() != context.revision()) {
             return new FinalizeResult(true, null);
         }
-        validateCitations(session, context, answer.citations());
+        boolean ticketDraft = isTicketDraft(answer.action());
+        List<ChatDtos.CitationResponse> persistedCitations = ticketDraft ? List.of() : answer.citations();
+        String persistedAnswer = ticketDraft ? withoutCitationMarkers(answer.answer()) : answer.answer();
+        validateCitations(session, context, persistedCitations);
         ChatMessage assistant = new ChatMessage();
         assistant.setSessionId(session.getId());
         assistant.setTenantId(session.getTenantId());
         assistant.setRole("assistant");
-        assistant.setContent(answer.answer());
-        assistant.setCitations(answer.citations().stream().map(this::citationMap).toList());
+        assistant.setContent(persistedAnswer);
+        assistant.setCitations(persistedCitations.stream().map(this::citationMap).toList());
         assistant.setAction(answer.action() == null ? new HashMap<>() : answer.action());
         assistant.setSequenceNumber(allocateSequence(session));
         assistant = messageRepository.save(assistant);
         turn.setAssistantMessageId(assistant.getId());
         turn.setStatus(ChatTurnStatus.COMPLETED);
         turn.setFailureCode(null);
-        return new FinalizeResult(false, toAssistant(assistant));
+        return new FinalizeResult(false,
+                toAssistant(assistant, session, supportsPublicEvidence(session.getChannel())));
     }
 
     private GenerationContext rebuildContext(UUID turnId, String requestId) {
@@ -312,7 +330,8 @@ public class ChatControlPlaneService {
         ChatSession session = authorizedSession(tenantId, userId, tokenId, sessionId);
         return messageRepository.findBySessionIdAndSequenceNumberGreaterThanOrderBySequenceNumberAsc(
                 session.getId(), Math.max(0, after), PageRequest.of(0, Math.min(Math.max(limit, 1), 200)))
-                .stream().map(this::toMessage).toList();
+                .stream().map(message -> toMessage(
+                        message, session, supportsPublicEvidence(session.getChannel()))).toList();
     }
 
     public void close(UUID tenantId, UUID userId, UUID tokenId, UUID sessionId) {
@@ -336,6 +355,10 @@ public class ChatControlPlaneService {
 
     public List<ChatDtos.PlaygroundSessionResponse> playground(
             UUID tenantId, UUID userId, int limit, int offset) {
+        if (namedJdbc != null) {
+            return playgroundPage(tenantId, userId, limit, offset, null, null, null,
+                    null, null, null, null).sessions();
+        }
         int requested = Math.min(Math.max(limit, 1), 100);
         List<ChatSession> all = sessionRepository
                 .findByTenantIdAndUserIdAndChannelAndHiddenAtIsNullOrderByLastActivityAtDesc(
@@ -352,6 +375,68 @@ public class ChatControlPlaneService {
         }).toList();
     }
 
+    public PlaygroundPage playgroundPage(
+            UUID tenantId, UUID userId, int limit, int offset, String cursor,
+            String searchText, String status, LocalDate activityFrom, LocalDate activityTo,
+            String sort, String direction
+    ) {
+        int requested = Math.min(Math.max(limit, 1), 100);
+        int requestedOffset = Math.max(offset, 0);
+        String query = normalizeSearch(searchText);
+        String requestedStatus = normalizeStatus(status);
+        String requestedSort = normalizePlaygroundSort(sort);
+        String requestedDirection = normalizeDirection(direction);
+        validateDates(activityFrom, activityTo, "Activity");
+        if (namedJdbc == null) {
+            return new PlaygroundPage(playground(tenantId, userId, requested, requestedOffset), null);
+        }
+
+        String sortColumn = "created".equals(requestedSort) ? "s.created_at" : "s.last_activity_at";
+        String comparison = "asc".equals(requestedDirection) ? ">" : "<";
+        String order = "asc".equals(requestedDirection) ? "ASC" : "DESC";
+        StringBuilder sql = new StringBuilder("""
+                SELECT s.id, s.status, s.created_at, s.last_activity_at
+                FROM chat_sessions s
+                WHERE s.tenant_id = :tenantId AND s.user_id = :userId
+                  AND s.channel = 'EMPLOYEE_PLAYGROUND' AND s.hidden_at IS NULL
+                """);
+        MapSqlParameterSource params = new MapSqlParameterSource()
+                .addValue("tenantId", tenantId).addValue("userId", userId);
+        appendStatusDateAndTranscript(sql, params, requestedStatus, activityFrom, activityTo,
+                query, sortColumn, true);
+        if (cursor != null && !cursor.isBlank()) {
+            CursorValue decoded = decodeCursor(cursor);
+            sql.append(" AND (").append(sortColumn).append(", s.id) ").append(comparison)
+                    .append(" (:cursorTime, :cursorId)");
+            params.addValue("cursorTime", decoded.timestamp()).addValue("cursorId", decoded.id());
+        }
+        sql.append(" ORDER BY ").append(sortColumn).append(' ').append(order)
+                .append(", s.id ").append(order).append(" LIMIT :fetch");
+        if (cursor == null || cursor.isBlank()) sql.append(" OFFSET :offset");
+        params.addValue("fetch", requested + 1).addValue("offset", requestedOffset);
+
+        List<SessionRow> rows = namedJdbc.query(sql.toString(), params, (rs, rowNum) -> new SessionRow(
+                uuid(rs.getObject("id")), rs.getString("status"),
+                rs.getTimestamp("created_at").toLocalDateTime(),
+                rs.getTimestamp("last_activity_at").toLocalDateTime()));
+        boolean hasMore = rows.size() > requested;
+        if (hasMore) rows = new ArrayList<>(rows.subList(0, requested));
+        Map<UUID, SessionMessageSummary> summaries = playgroundSummaries(rows.stream()
+                .map(SessionRow::id).toList());
+        List<ChatDtos.PlaygroundSessionResponse> sessions = rows.stream().map(row -> {
+            SessionMessageSummary summary = summaries.getOrDefault(row.id(), new SessionMessageSummary(null, 0));
+            String title = summary.title();
+            if (title == null || title.isBlank()) title = row.createdAt().toLocalDate().toString();
+            title = title.trim().substring(0, Math.min(60, title.trim().length()));
+            return new ChatDtos.PlaygroundSessionResponse(row.id(), title, summary.count(), row.status(),
+                    row.createdAt(), row.lastActivityAt());
+        }).toList();
+        String next = hasMore && !rows.isEmpty()
+                ? encodeCursor("created".equals(requestedSort) ? rows.getLast().createdAt()
+                        : rows.getLast().lastActivityAt(), rows.getLast().id()) : null;
+        return new PlaygroundPage(sessions, next);
+    }
+
     public void hidePlayground(UUID tenantId, UUID userId, UUID sessionId) {
         transactions.executeWithoutResult(status -> {
             ChatSession session = sessionRepository.findForUpdate(sessionId, tenantId)
@@ -366,6 +451,10 @@ public class ChatControlPlaneService {
 
     public List<ChatDtos.ConversationListItemResponse> conversations(
             UUID tenantId, String status, String channel, int limit, int offset) {
+        if (namedJdbc != null) {
+            return conversationPage(tenantId, status, channel, limit, offset, null,
+                    null, null, null, null).conversations();
+        }
         int requested = Math.min(Math.max(limit, 1), 100);
         return sessionRepository.findByTenantIdAndChannelInOrderByCreatedAtDesc(
                         tenantId, EXTERNAL_CHANNELS, PageRequest.of(0, Math.min(offset + requested, 1000)))
@@ -380,6 +469,191 @@ public class ChatControlPlaneService {
                         item.getUpdatedAt(), item.getClosedAt())).toList();
     }
 
+    public ConversationPage conversationPage(
+            UUID tenantId, String status, String channel, int limit, int offset,
+            String searchText, LocalDate startedFrom, LocalDate startedTo,
+            String sort, String direction
+    ) {
+        int requested = Math.min(Math.max(limit, 1), 100);
+        int requestedOffset = Math.max(offset, 0);
+        String query = normalizeSearch(searchText);
+        String requestedStatus = normalizeStatus(status);
+        String requestedChannel = normalizeExternalChannel(channel);
+        String requestedSort = normalizeConversationSort(sort);
+        String requestedDirection = normalizeDirection(direction);
+        validateDates(startedFrom, startedTo, "Start");
+        if (namedJdbc == null) {
+            List<ChatDtos.ConversationListItemResponse> fallback = conversations(
+                    tenantId, requestedStatus, requestedChannel, requested, requestedOffset);
+            return new ConversationPage(fallback, fallback.size());
+        }
+
+        StringBuilder where = new StringBuilder("""
+                FROM chat_sessions s
+                WHERE s.tenant_id = :tenantId AND s.channel IN ('WIDGET', 'CUSTOM_API')
+                """);
+        MapSqlParameterSource params = new MapSqlParameterSource().addValue("tenantId", tenantId);
+        if (requestedStatus != null) {
+            where.append(" AND s.status = :status"); params.addValue("status", requestedStatus);
+        }
+        if (requestedChannel != null) {
+            where.append(" AND s.channel = :channel"); params.addValue("channel", requestedChannel);
+        }
+        if (startedFrom != null) {
+            where.append(" AND s.created_at >= :startedFrom");
+            params.addValue("startedFrom", startedFrom.atStartOfDay());
+        }
+        if (startedTo != null) {
+            where.append(" AND s.created_at < :startedUntil");
+            params.addValue("startedUntil", startedTo.plusDays(1).atStartOfDay());
+        }
+        if (query != null) {
+            where.append("""
+                     AND (lower(coalesce(s.customer_name, '')) LIKE :pattern ESCAPE '\\'
+                       OR lower(coalesce(s.customer_email, '')) LIKE :pattern ESCAPE '\\'
+                       OR lower(coalesce(s.external_user_id, '')) LIKE :pattern ESCAPE '\\'
+                       OR EXISTS (SELECT 1 FROM chat_messages m WHERE m.session_id = s.id
+                           AND lower(m.content) LIKE :pattern ESCAPE '\\'))
+                    """);
+            params.addValue("pattern", likePattern(query));
+        }
+        Long total = namedJdbc.queryForObject("SELECT count(*) " + where, params, Long.class);
+        String sortColumn = switch (requestedSort) {
+            case "activity" -> "s.last_activity_at";
+            case "customer" -> "lower(coalesce(nullif(s.customer_name, ''), nullif(s.customer_email, ''), s.external_user_id, ''))";
+            default -> "s.created_at";
+        };
+        String order = "asc".equals(requestedDirection) ? "ASC" : "DESC";
+        String sql = """
+                SELECT s.id, s.channel, s.external_user_id, s.customer_name, s.customer_email,
+                       s.status, s.created_at, s.updated_at, s.closed_at,
+                       (SELECT count(*) FROM chat_messages mc WHERE mc.session_id = s.id) AS message_count
+                """ + where + " ORDER BY " + sortColumn + " " + order + ", s.id " + order
+                + " LIMIT :limit OFFSET :offset";
+        params.addValue("limit", requested).addValue("offset", requestedOffset);
+        List<ChatDtos.ConversationListItemResponse> items = namedJdbc.query(sql, params, (rs, rowNum) ->
+                new ChatDtos.ConversationListItemResponse(
+                        uuid(rs.getObject("id")), rs.getString("channel"), rs.getString("external_user_id"),
+                        rs.getString("customer_name"), rs.getString("customer_email"), rs.getString("status"),
+                        rs.getLong("message_count"), rs.getTimestamp("created_at").toLocalDateTime(),
+                        rs.getTimestamp("updated_at").toLocalDateTime(),
+                        rs.getTimestamp("closed_at") == null ? null : rs.getTimestamp("closed_at").toLocalDateTime()));
+        return new ConversationPage(items, total == null ? 0 : total);
+    }
+
+    private void appendStatusDateAndTranscript(
+            StringBuilder sql, MapSqlParameterSource params, String status, LocalDate from,
+            LocalDate to, String query, String dateColumn, boolean rolesOnly
+    ) {
+        if (status != null) { sql.append(" AND s.status = :status"); params.addValue("status", status); }
+        if (from != null) { sql.append(" AND ").append(dateColumn).append(" >= :dateFrom"); params.addValue("dateFrom", from.atStartOfDay()); }
+        if (to != null) { sql.append(" AND ").append(dateColumn).append(" < :dateUntil"); params.addValue("dateUntil", to.plusDays(1).atStartOfDay()); }
+        if (query != null) {
+            sql.append(" AND EXISTS (SELECT 1 FROM chat_messages m WHERE m.session_id = s.id");
+            if (rolesOnly) sql.append(" AND m.role IN ('user', 'assistant')");
+            sql.append(" AND lower(m.content) LIKE :pattern ESCAPE '\\')");
+            params.addValue("pattern", likePattern(query));
+        }
+    }
+
+    private Map<UUID, SessionMessageSummary> playgroundSummaries(List<UUID> ids) {
+        if (ids.isEmpty()) return Map.of();
+        Map<UUID, SessionMessageSummary> result = new LinkedHashMap<>();
+        namedJdbc.query("""
+                SELECT session_id, role, content, sequence_number
+                FROM chat_messages WHERE session_id IN (:ids)
+                ORDER BY session_id, sequence_number
+                """, new MapSqlParameterSource("ids", ids), rs -> {
+            UUID id = uuid(rs.getObject("session_id"));
+            SessionMessageSummary current = result.getOrDefault(id, new SessionMessageSummary(null, 0));
+            String title = current.title();
+            if (title == null && "user".equals(rs.getString("role"))) title = rs.getString("content");
+            result.put(id, new SessionMessageSummary(title, current.count() + 1));
+        });
+        return result;
+    }
+
+    private String normalizeSearch(String value) {
+        if (value == null || value.isBlank()) return null;
+        String normalized = value.strip();
+        if (normalized.length() > 200) throw new ChatApiException(HttpStatus.BAD_REQUEST,
+                "INVALID_SEARCH", "Search text must be 200 characters or fewer.");
+        return normalized;
+    }
+
+    private String normalizeStatus(String value) {
+        if (value == null || value.isBlank()) return null;
+        try { return ChatSessionStatus.valueOf(value.toUpperCase(Locale.ROOT)).name(); }
+        catch (IllegalArgumentException exception) { throw invalidFilter("Status must be OPEN or CLOSED."); }
+    }
+
+    private String normalizeExternalChannel(String value) {
+        if (value == null || value.isBlank()) return null;
+        String normalized = value.toUpperCase(Locale.ROOT);
+        if (!normalized.equals("WIDGET") && !normalized.equals("CUSTOM_API"))
+            throw invalidFilter("Channel must be WIDGET or CUSTOM_API.");
+        return normalized;
+    }
+
+    private String normalizePlaygroundSort(String value) {
+        if (value == null || value.isBlank() || value.equalsIgnoreCase("activity")) return "activity";
+        if (value.equalsIgnoreCase("created") || value.equalsIgnoreCase("creation")) return "created";
+        throw invalidFilter("Sort must be activity or created.");
+    }
+
+    private String normalizeConversationSort(String value) {
+        if (value == null || value.isBlank() || value.equalsIgnoreCase("started")) return "started";
+        if (value.equalsIgnoreCase("activity") || value.equalsIgnoreCase("recent")) return "activity";
+        if (value.equalsIgnoreCase("customer")) return "customer";
+        throw invalidFilter("Sort must be started, activity, or customer.");
+    }
+
+    private String normalizeDirection(String value) {
+        if (value == null || value.isBlank() || value.equalsIgnoreCase("desc")) return "desc";
+        if (value.equalsIgnoreCase("asc")) return "asc";
+        throw invalidFilter("Direction must be asc or desc.");
+    }
+
+    private void validateDates(LocalDate from, LocalDate to, String label) {
+        if (from != null && to != null && from.isAfter(to))
+            throw invalidFilter(label + " start date must not be after end date.");
+    }
+
+    private ChatApiException invalidFilter(String message) {
+        return new ChatApiException(HttpStatus.BAD_REQUEST, "INVALID_FILTER", message);
+    }
+
+    private String likePattern(String value) {
+        return "%" + value.toLowerCase(Locale.ROOT).replace("\\", "\\\\")
+                .replace("%", "\\%").replace("_", "\\_") + "%";
+    }
+
+    private String encodeCursor(LocalDateTime timestamp, UUID id) {
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(
+                (timestamp + "|" + id).getBytes(StandardCharsets.UTF_8));
+    }
+
+    private CursorValue decodeCursor(String cursor) {
+        try {
+            String decoded = new String(Base64.getUrlDecoder().decode(cursor), StandardCharsets.UTF_8);
+            int separator = decoded.lastIndexOf('|');
+            return new CursorValue(LocalDateTime.parse(decoded.substring(0, separator)),
+                    UUID.fromString(decoded.substring(separator + 1)));
+        } catch (RuntimeException exception) {
+            throw invalidFilter("Cursor is invalid.");
+        }
+    }
+
+    private UUID uuid(Object value) {
+        return value instanceof UUID id ? id : UUID.fromString(value.toString());
+    }
+
+    public record PlaygroundPage(List<ChatDtos.PlaygroundSessionResponse> sessions, String nextCursor) {}
+    public record ConversationPage(List<ChatDtos.ConversationListItemResponse> conversations, long totalCount) {}
+    private record CursorValue(LocalDateTime timestamp, UUID id) {}
+    private record SessionRow(UUID id, String status, LocalDateTime createdAt, LocalDateTime lastActivityAt) {}
+    private record SessionMessageSummary(String title, long count) {}
+
     public ChatDtos.ConversationDetailResponse conversation(UUID tenantId, UUID sessionId) {
         ChatSession session = sessionRepository.findByIdAndTenantIdAndHiddenAtIsNull(sessionId, tenantId)
                 .filter(item -> EXTERNAL_CHANNELS.contains(item.getChannel()))
@@ -390,7 +664,25 @@ public class ChatControlPlaneService {
                 session.getCustomerName(), session.getCustomerEmail(), session.getCustomerMetadata(),
                 session.getStatus().name(), session.getCreatedAt(), session.getUpdatedAt(),
                 session.getClosedAt(), messageRepository.findBySessionIdOrderBySequenceNumberAsc(sessionId)
-                .stream().map(this::toMessage).toList());
+                .stream().map(message -> toMessage(message, session, false)).toList());
+    }
+
+    public void closeConversation(UUID tenantId, UUID sessionId) {
+        transactions.executeWithoutResult(status -> {
+            ChatSession session = sessionRepository.findForUpdate(sessionId, tenantId)
+                    .filter(item -> EXTERNAL_CHANNELS.contains(item.getChannel()))
+                    .orElseThrow(() -> new ChatApiException(HttpStatus.NOT_FOUND,
+                            "CONVERSATION_NOT_FOUND", "Conversation was not found."));
+            if (session.getStatus() == ChatSessionStatus.CLOSED) return;
+            session.setStatus(ChatSessionStatus.CLOSED);
+            session.setClosedAt(LocalDateTime.now());
+            Map<String, Object> payload = new HashMap<>();
+            payload.put("conversationId", sessionId.toString());
+            payload.put("chatbotId", session.getChatbotId().toString());
+            payload.put("channel", session.getChannel().name());
+            payload.put("externalUserId", session.getExternalUserId());
+            webhookService.enqueue(tenantId, "conversation.closed", sessionId, payload);
+        });
     }
 
     private GenerationContext captureContext(
@@ -546,25 +838,64 @@ public class ChatControlPlaneService {
                 session.getLocale());
     }
 
-    private ChatDtos.AssistantMessageResponse toAssistant(ChatMessage message) {
+    private ChatDtos.AssistantMessageResponse toAssistant(
+            ChatMessage message, ChatSession session, boolean includePublicEvidence) {
+        boolean ticketDraft = isTicketDraft(message.getAction());
         return new ChatDtos.AssistantMessageResponse(
-                message.getRole(), message.getContent(), citations(message),
+                message.getRole(), ticketDraft ? withoutCitationMarkers(message.getContent()) : message.getContent(),
+                ticketDraft ? List.of() : citations(message, session, includePublicEvidence),
                 message.getAction() == null || message.getAction().isEmpty() ? null : message.getAction());
     }
 
-    private ChatDtos.MessageResponse toMessage(ChatMessage message) {
+    private ChatDtos.MessageResponse toMessage(
+            ChatMessage message, ChatSession session, boolean includePublicEvidence) {
+        boolean ticketDraft = isTicketDraft(message.getAction());
         return new ChatDtos.MessageResponse(
-                message.getRole(), message.getContent(), citations(message), message.getSequenceNumber(),
+                message.getRole(), ticketDraft ? withoutCitationMarkers(message.getContent()) : message.getContent(),
+                ticketDraft ? List.of() : citations(message, session, includePublicEvidence),
+                message.getSequenceNumber(),
                 message.getAction() == null || message.getAction().isEmpty() ? null : message.getAction());
     }
 
-    private List<ChatDtos.CitationResponse> citations(ChatMessage message) {
-        return message.getCitations().stream().map(value -> objectMapper.convertValue(
-                value, ChatDtos.CitationResponse.class)).toList();
+    private List<ChatDtos.CitationResponse> citations(
+            ChatMessage message, ChatSession session, boolean includePublicEvidence) {
+        List<ChatDtos.CitationResponse> citations = message.getCitations().stream()
+                .map(value -> objectMapper.convertValue(value, ChatDtos.CitationResponse.class)).toList();
+        if (!includePublicEvidence || session.getIntegrationTokenId() == null) {
+            return citations;
+        }
+        return citations.stream().map(citation -> new ChatDtos.CitationResponse(
+                citation.id(), citation.documentId(), citation.sourceName(), citation.pageNumber(),
+                citation.chunkIndex(), citation.score(), citation.snippet(), citation.unitId(),
+                citation.modality(), citation.sectionPath(), citation.blockType(), citation.sheetName(),
+                citation.cellRange(), citation.tableId(), publicEvidenceService.issue(
+                        session.getTenantId(), session.getKnowledgeBaseId(),
+                        session.getIntegrationTokenId(), citation)
+        )).toList();
     }
 
     private Map<String, Object> citationMap(ChatDtos.CitationResponse citation) {
         return objectMapper.convertValue(citation, new com.fasterxml.jackson.core.type.TypeReference<>() { });
+    }
+
+    static boolean supportsPublicEvidence(ChatChannel channel) {
+        return EXTERNAL_CHANNELS.contains(channel);
+    }
+
+    static boolean isTicketDraft(Map<String, Object> action) {
+        if (action == null) {
+            return false;
+        }
+        Object type = action.get("type");
+        return "ticket_draft".equals(type) || "CREATE_TICKET_DRAFT".equals(type);
+    }
+
+    static String withoutCitationMarkers(String content) {
+        if (content == null) {
+            return "";
+        }
+        return CITATION_MARKER.matcher(content).replaceAll("")
+                .replaceAll("[ \\t]{2,}", " ").trim();
     }
 
     private String fingerprint(String content, Map<String, Object> metadata) {

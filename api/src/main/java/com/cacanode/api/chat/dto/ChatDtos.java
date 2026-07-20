@@ -63,7 +63,8 @@ public final class ChatDtos {
             @JsonProperty("block_type") String blockType,
             @JsonProperty("sheet_name") String sheetName,
             @JsonProperty("cell_range") String cellRange,
-            @JsonProperty("table_id") String tableId
+            @JsonProperty("table_id") String tableId,
+            @JsonProperty("public_url") String publicUrl
     ) {
     }
 

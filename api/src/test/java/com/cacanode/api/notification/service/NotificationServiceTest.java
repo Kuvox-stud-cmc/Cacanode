@@ -15,6 +15,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import com.cacanode.api.notification.enums.NotificationStatus;
+import com.cacanode.api.notification.enums.NotificationType;
 import com.cacanode.api.notification.model.Notification;
 import com.cacanode.api.notification.repository.NotificationRepository;
 
@@ -66,6 +67,23 @@ class NotificationServiceTest {
 
         Notification saved = lastSavedNotification();
         assertEquals(NotificationStatus.FAILED, saved.getStatus());
+    }
+
+    @Test
+    void ticketEmailIsRecordedAsSent() {
+        UUID ticketId = UUID.randomUUID();
+
+        notificationService.sendAndRecordTicketCreatedEmail(
+                UUID.randomUUID(), ticketId, "customer@example.com", "Ada", "Acme",
+                "Refund request", "Charged twice", "en");
+
+        Notification saved = lastSavedNotification();
+        assertEquals(NotificationType.TICKET_CREATED, saved.getType());
+        assertEquals(NotificationStatus.SENT, saved.getStatus());
+        assertNotNull(saved.getSentAt());
+        verify(emailService).sendTicketCreatedEmail(
+                "customer@example.com", "Ada", "Acme", ticketId,
+                "Refund request", "Charged twice", "en");
     }
 
     private Notification lastSavedNotification() {

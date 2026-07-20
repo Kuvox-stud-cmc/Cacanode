@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { Bot } from "lucide-react";
 
 export default function Footer() {
   return (
@@ -23,6 +22,7 @@ export default function Footer() {
             <ul className="space-y-2.5 text-sm">
               <li><a href="#features" className="hover:text-white transition-colors">Features</a></li>
               <li><Link href="/pricing" className="hover:text-white transition-colors">Pricing</Link></li>
+              <li><Link href="/documentation" className="hover:text-white transition-colors">Documentation</Link></li>
               <li><a href="#how-it-works" className="hover:text-white transition-colors">How It Works</a></li>
               <li><Link href="/widget/preview" className="hover:text-white transition-colors">Widget Demo</Link></li>
             </ul>

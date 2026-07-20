@@ -10,6 +10,20 @@ import { readJsonOrThrow } from "@/lib/api-error";
 
 export type ApiRequest = (endpoint: string, options?: RequestInit) => Promise<Response>;
 
+export type DocumentQuery = {
+  page?: number;
+  size?: number;
+  q?: string;
+  status?: string;
+  type?: string;
+  visibility?: string;
+  uploadedFrom?: string;
+  uploadedTo?: string;
+  sort?: "uploaded" | "filename" | "size";
+  direction?: "asc" | "desc";
+  signal?: AbortSignal;
+};
+
 export async function listDocumentsApi(
   request: ApiRequest,
   knowledgeBaseId: string,
@@ -17,6 +31,29 @@ export async function listDocumentsApi(
   const params = new URLSearchParams({ knowledgeBaseId });
   const res = await request(`${getApiBase()}/documents?${params.toString()}`);
   return readJsonOrThrow<Document[]>(res);
+}
+
+export async function queryDocumentsApi(
+  request: ApiRequest,
+  knowledgeBaseId: string,
+  query: DocumentQuery,
+): Promise<{ items: Document[]; total: number }> {
+  const params = new URLSearchParams({
+    knowledgeBaseId,
+    page: String(query.page ?? 0),
+    size: String(query.size ?? 20),
+  });
+  if (query.q) params.set("q", query.q.slice(0, 200));
+  if (query.status) params.set("status", query.status);
+  if (query.type) params.set("type", query.type);
+  if (query.visibility) params.set("visibility", query.visibility);
+  if (query.uploadedFrom) params.set("uploaded_from", query.uploadedFrom);
+  if (query.uploadedTo) params.set("uploaded_to", query.uploadedTo);
+  if (query.sort) params.set("sort", query.sort);
+  if (query.direction) params.set("direction", query.direction);
+  const res = await request(`${getApiBase()}/documents?${params}`, { signal: query.signal });
+  const items = await readJsonOrThrow<Document[]>(res);
+  return { items, total: Number(res.headers.get("X-Total-Count") ?? items.length) };
 }
 
 export async function uploadDocumentApi(

@@ -86,7 +86,7 @@ A subscription or trial grants access according to its plan entitlements:
 - Integration credential management.
 - Usage, quota, and operational status views.
 
-Commercial entitlements are represented by tenant subscription records and projected onto the tenant runtime. Self-service Pro purchases use server-created PayOS payment links, and activation occurs only after a verified PayOS webhook is durably processed. Enterprise provisioning remains sales-led.
+Commercial entitlements are represented by tenant subscription records and projected onto the tenant runtime. Self-service Pro purchases use server-created PayOS payment links, and activation occurs after a verified PayOS webhook or an authoritative PayOS payment-status reconciliation. Enterprise provisioning remains sales-led.
 
 ### Metered usage
 
@@ -1128,11 +1128,11 @@ Enterprise numeric limits are nullable. A `null` limit means custom or unlimited
 
 Only `TENANT_ADMIN` users may create checkouts. The server resolves the amount and entitlement snapshot from the catalog, allocates the PayOS order code from a database sequence, and creates a payment link that expires after 30 minutes. `Idempotency-Key` is supported for checkout creation.
 
-The browser return and cancel URLs control presentation only. The frontend polls CacaNode's payment-status endpoint every two seconds for up to thirty seconds and never treats PayOS query parameters as proof of payment.
+The browser return and cancel URLs control presentation only. On a PayOS return, the frontend polls CacaNode's payment-status endpoint; each open-payment read reconciles against PayOS immediately and never treats return query parameters as proof of payment.
 
-Subscription activation requires a webhook verified through the pinned `vn.payos:payos-java:2.0.1` SDK. Processing checks the order code, payment-link ID, VND currency, and expected amount. Mismatches move the order to `REVIEW` and never activate entitlements. Successful duplicate webhooks are idempotent and do not extend the subscription twice.
+Webhook activation is verified through the pinned `vn.payos:payos-java:2.0.1` SDK. The application confirms `PAYOS_WEBHOOK_URL` with PayOS at startup and before checkout creation. Webhook and reconciliation processing check the order code, payment-link ID, VND currency or paid amount, and expected amount. Mismatches move the order to `REVIEW` and never activate entitlements. Successful duplicate processing is idempotent and does not extend the subscription twice.
 
-Pending payments are reconciled against PayOS every five minutes. Rate-limit and server failures receive bounded retries and emit PayOS billing metrics.
+Pending payments are also reconciled against PayOS every five minutes as a background fallback. Rate-limit and server failures receive bounded retries and emit PayOS billing metrics.
 
 ### Quota and feature enforcement
 
