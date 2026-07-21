@@ -4,5 +4,9 @@ import { routing } from "@/i18n/routing";
 export default createMiddleware(routing);
 
 export const config = {
-  matcher: "/((?!api|trpc|_next|_vercel|widget|.*\\..*).*)",
+  matcher: [
+    "/((?!api|trpc|_next|_vercel|widget|.*\\..*).*)",
+    "/evidence/:path*",
+    "/:locale(en|vi)/evidence/:path*",
+  ],
 };
