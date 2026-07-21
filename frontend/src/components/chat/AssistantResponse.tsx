@@ -1,5 +1,8 @@
+"use client";
+
 import type { ReactNode } from "react";
-import Link from "next/link";
+import { useTranslations } from "next-intl";
+import { Link } from "@/i18n/navigation";
 import { ExternalLink, FileText } from "lucide-react";
 
 import { documentViewerHref } from "@/lib/document-links";
@@ -20,6 +23,7 @@ function InlineMarkdown({
   text: string;
   citations: Map<string, ChatCitation>;
 }) {
+  const t = useTranslations("AssistantResponse");
   const tokens = text.split(/(\[S\d+\]|\*\*[^*]+\*\*|`[^`]+`|\[[^\]]+\]\([^)]+\))/g);
   return tokens.map((token, index) => {
     const citation = citations.get(token.slice(1, -1));
@@ -29,7 +33,7 @@ function InlineMarkdown({
           key={`${token}-${index}`}
           href={documentViewerHref(citation.document_id, [citation])}
           className="mx-0.5 inline-flex translate-y-[-1px] items-center rounded-md bg-indigo-50 px-1.5 py-0.5 text-xs font-semibold text-indigo-700 no-underline transition-colors hover:bg-indigo-100"
-          title={`Open evidence in ${citation.source_name}`}
+          title={t("openEvidenceIn", { source: citation.source_name })}
         >
           {citation.id}
         </Link>
@@ -195,6 +199,7 @@ export function AssistantResponse({
   citations?: ChatCitation[];
   error?: boolean;
 }) {
+  const t = useTranslations("AssistantResponse");
   const citationsById = new Map(citations.map((citation) => [citation.id, citation]));
   const grouped = Array.from(
     citations.reduce((documents, citation) => {
@@ -210,7 +215,7 @@ export function AssistantResponse({
       <div className="text-sm sm:text-[15px]">{markdownBlocks(content, citationsById)}</div>
       {grouped.length > 0 && (
         <div className="mt-6 border-t border-slate-200 pt-4">
-          <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-400">Sources</p>
+          <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-400">{t("sources")}</p>
           <div className="grid gap-2 sm:grid-cols-2">
             {grouped.map(([documentId, documentCitations]) => (
               <Link
@@ -223,7 +228,7 @@ export function AssistantResponse({
                 </span>
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-sm font-medium text-slate-800">{documentCitations[0]?.source_name}</span>
-                  <span className="block text-xs text-slate-500">Open cited evidence</span>
+                  <span className="block text-xs text-slate-500">{t("openCitedEvidence")}</span>
                 </span>
                 <ExternalLink className="size-4 shrink-0 text-slate-400 group-hover:text-indigo-600" />
               </Link>

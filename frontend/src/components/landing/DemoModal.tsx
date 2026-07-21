@@ -1,6 +1,7 @@
 "use client";
 
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
+import { useTranslations } from "next-intl";
 import ChatWidgetPanel from "@/components/widget/ChatWidgetPanel";
 import { X, Bot } from "lucide-react";
 
@@ -10,6 +11,7 @@ interface DemoModalProps {
 }
 
 export default function DemoModal({ open, onClose }: DemoModalProps) {
+  const t = useTranslations("Landing");
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
       {/*
@@ -22,7 +24,7 @@ export default function DemoModal({ open, onClose }: DemoModalProps) {
         style={{ height: "82vh" }}
       >
         {/* a11y title (visually hidden) */}
-        <DialogTitle className="sr-only">CacaNode live demo</DialogTitle>
+        <DialogTitle className="sr-only">{t("demo.modalTitle")}</DialogTitle>
 
         {/* Custom header */}
         <div className="flex items-center justify-between px-5 py-3.5 border-b border-slate-200 shrink-0 bg-white">
@@ -31,13 +33,15 @@ export default function DemoModal({ open, onClose }: DemoModalProps) {
               <Bot className="w-4 h-4 text-white" />
             </div>
             <div>
-              <p className="font-semibold text-slate-800 text-sm leading-tight">See CacaNode in action</p>
-              <p className="text-xs text-slate-400 leading-tight">Type a message and watch the AI respond</p>
+              <p className="font-semibold text-slate-800 text-sm leading-tight">{t("hero.seeAction")}</p>
+              <p className="text-xs text-slate-400 leading-tight">{t("demo.modalDescription")}</p>
             </div>
           </div>
           <button
+            type="button"
             onClick={onClose}
             className="p-1.5 rounded-md hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors"
+            aria-label={t("demo.close")}
           >
             <X className="w-4 h-4" />
           </button>
@@ -54,10 +58,10 @@ export default function DemoModal({ open, onClose }: DemoModalProps) {
                 <span className="font-semibold text-slate-700 text-xs">Acme Corp</span>
               </div>
               <div className="flex gap-4 text-xs text-slate-400">
-                <span>Home</span>
-                <span>Products</span>
-                <span>Support</span>
-                <span>Pricing</span>
+                <span>{t("demo.home")}</span>
+                <span>{t("demo.products")}</span>
+                <span>{t("demo.support")}</span>
+                <span>{t("demo.pricing")}</span>
               </div>
             </div>
 
@@ -119,7 +123,7 @@ export default function DemoModal({ open, onClose }: DemoModalProps) {
               fill
               alwaysOpen
               primaryColor="#4f46e5"
-              botName="Support Bot"
+              botName={t("demo.supportBot")}
             />
           </div>
         </div>

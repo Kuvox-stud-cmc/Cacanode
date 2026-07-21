@@ -115,22 +115,31 @@ public class ChatControlPlaneService {
             UUID tenantId, UUID userId, UUID sessionId, String content,
             Map<String, Object> metadata, String idempotencyKey, String requestId) {
         return submit(tenantId, userId, null, sessionId, content, metadata,
-                idempotencyKey, requestId);
+                null, false, idempotencyKey, requestId);
     }
 
     public ChatDtos.AssistantMessageResponse submitExternalMessage(
             UUID tenantId, UUID tokenId, UUID sessionId, String content,
             Map<String, Object> metadata, String idempotencyKey, String requestId) {
         return submit(tenantId, null, tokenId, sessionId, content, metadata,
-                idempotencyKey, requestId);
+                null, false, idempotencyKey, requestId);
+    }
+
+    public ChatDtos.AssistantMessageResponse submitWidgetMessage(
+            UUID tenantId, UUID tokenId, UUID sessionId, String content,
+            Map<String, Object> metadata, String locale,
+            String idempotencyKey, String requestId) {
+        return submit(tenantId, null, tokenId, sessionId, content, metadata,
+                locale, true, idempotencyKey, requestId);
     }
 
     private ChatDtos.AssistantMessageResponse submit(
             UUID tenantId, UUID userId, UUID tokenId, UUID sessionId, String content,
-            Map<String, Object> metadata, String idempotencyKey, String requestId) {
+            Map<String, Object> metadata, String locale, boolean localeInFingerprint,
+            String idempotencyKey, String requestId) {
         PreparedTurn prepared = transactions.execute(status -> prepareTurn(
                 tenantId, userId, tokenId, sessionId, content, metadata,
-                idempotencyKey, requestId));
+                locale, localeInFingerprint, idempotencyKey, requestId));
         Objects.requireNonNull(prepared);
         if (prepared.replayed() != null) {
             return prepared.replayed();
@@ -170,11 +179,17 @@ public class ChatControlPlaneService {
 
     private PreparedTurn prepareTurn(
             UUID tenantId, UUID userId, UUID tokenId, UUID sessionId, String content,
-            Map<String, Object> metadata, String idempotencyKey, String requestId) {
+            Map<String, Object> metadata, String requestedLocale, boolean localeInFingerprint,
+            String idempotencyKey, String requestId) {
         ChatSession session = lockedAuthorizedSession(tenantId, userId, tokenId, sessionId);
+        if (requestedLocale != null && !requestedLocale.isBlank()
+                && !requestedLocale.equals(session.getLocale())) {
+            session.setLocale(requestedLocale);
+        }
         String keyHash = idempotencyKey == null || idempotencyKey.isBlank()
                 ? null : sha256(idempotencyKey);
-        String fingerprint = fingerprint(content, metadata);
+        String fingerprint = fingerprint(
+                content, metadata, localeInFingerprint ? session.getLocale() : null);
         if (keyHash != null) {
             ChatTurn duplicate = turnRepository.findBySessionIdAndIdempotencyKeyHash(sessionId, keyHash)
                     .orElse(null);
@@ -898,15 +913,24 @@ public class ChatControlPlaneService {
                 .replaceAll("[ \\t]{2,}", " ").trim();
     }
 
-    private String fingerprint(String content, Map<String, Object> metadata) {
-        Map<String, Object> value = new LinkedHashMap<>();
-        value.put("content", content);
-        value.put("metadata", metadata == null ? Map.of() : new java.util.TreeMap<>(metadata));
+    private String fingerprint(String content, Map<String, Object> metadata, String locale) {
+        Map<String, Object> value = fingerprintPayload(content, metadata, locale);
         try {
             return sha256(objectMapper.writeValueAsString(value));
         } catch (JsonProcessingException exception) {
             throw new IllegalArgumentException("Message metadata is not serializable", exception);
         }
+    }
+
+    static Map<String, Object> fingerprintPayload(
+            String content, Map<String, Object> metadata, String locale) {
+        Map<String, Object> value = new LinkedHashMap<>();
+        value.put("content", content);
+        value.put("metadata", metadata == null ? Map.of() : new java.util.TreeMap<>(metadata));
+        if (locale != null) {
+            value.put("locale", locale);
+        }
+        return value;
     }
 
     private String sha256(String value) {

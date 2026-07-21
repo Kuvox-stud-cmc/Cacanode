@@ -10,9 +10,11 @@
 
   var sourceUrl = new URL(script.src, window.location.href);
   var frame = document.createElement("iframe");
+  var initialVietnamese = String(navigator.language || "").toLowerCase().startsWith("vi");
+  var initialTitle = initialVietnamese ? "Trò chuyện hỗ trợ khách hàng" : "Customer support chat";
   frame.src = sourceUrl.origin + "/widget/widget.html";
-  frame.title = "Customer support chat";
-  frame.setAttribute("aria-label", "Customer support chat");
+  frame.title = initialTitle;
+  frame.setAttribute("aria-label", initialTitle);
   frame.setAttribute("allow", "clipboard-write");
   frame.style.position = "fixed";
   frame.style.right = "20px";
@@ -38,6 +40,11 @@
     if (event.data.type === "position") {
       frame.style.left = event.data.position === "BOTTOM_LEFT" ? "20px" : "auto";
       frame.style.right = event.data.position === "BOTTOM_LEFT" ? "auto" : "20px";
+    }
+    if (event.data.type === "locale") {
+      var title = event.data.locale === "vi" ? "Trò chuyện hỗ trợ khách hàng" : "Customer support chat";
+      frame.title = title;
+      frame.setAttribute("aria-label", title);
     }
   });
 

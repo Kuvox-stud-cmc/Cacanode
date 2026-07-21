@@ -2,18 +2,20 @@
 
 import { useState, useEffect } from "react";
 import Image from "next/image";
-import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { Menu, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { LanguageSwitcher } from "@/components/i18n/LanguageSwitcher";
+import { Link, usePathname } from "@/i18n/navigation";
 
 const navigation = [
-  { href: "/", label: "Chat Playground" },
-  { href: "/documentation", label: "Documentation" },
-  { href: "/pricing", label: "Pricing" },
+  { href: "/", labelKey: "chatPlayground" as const },
+  { href: "/documentation", labelKey: "documentation" as const },
+  { href: "/pricing", labelKey: "pricing" as const },
 ];
 
 export default function PublicNavbar() {
+  const t = useTranslations("Navigation");
   const pathname = usePathname();
   const [scrolled, setScrolled] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -38,7 +40,7 @@ export default function PublicNavbar() {
         </Link>
 
         {/* Desktop nav */}
-        <nav aria-label="Primary navigation" className="hidden items-center gap-2 text-sm md:flex">
+        <nav aria-label={t("primary")} className="hidden items-center gap-2 text-sm md:flex">
           {navigation.map((item) => {
             const active = pathname === item.href;
             return (
@@ -52,7 +54,7 @@ export default function PublicNavbar() {
                     : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
                 }`}
               >
-                {item.label}
+                {t(item.labelKey)}
               </Link>
             );
           })}
@@ -60,22 +62,25 @@ export default function PublicNavbar() {
 
         {/* Desktop CTAs */}
         <div className="hidden md:flex items-center gap-3">
+          <LanguageSwitcher />
           <Link href="/login">
             <Button variant="ghost" size="sm">
-              Log in
+              {t("login")}
             </Button>
           </Link>
           <Link href="/register">
             <Button size="sm" className="bg-indigo-600 hover:bg-indigo-700 text-white">
-              Get Started
+              {t("getStarted")}
             </Button>
           </Link>
         </div>
 
         {/* Mobile hamburger */}
         <button
+          type="button"
           className="md:hidden p-1.5 rounded-md text-slate-600 hover:bg-slate-100"
           onClick={() => setMobileOpen((o) => !o)}
+          aria-label={mobileOpen ? t("closeNavigation") : t("openNavigation")}
         >
           {mobileOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
         </button>
@@ -94,18 +99,19 @@ export default function PublicNavbar() {
               }`}
               onClick={() => setMobileOpen(false)}
             >
-              {item.label}
+              {t(item.labelKey)}
             </Link>
           ))}
           <div className="flex gap-2 pt-2">
+            <LanguageSwitcher className="shrink-0" />
             <Link href="/login" className="flex-1">
               <Button variant="outline" size="sm" className="w-full">
-                Log in
+                {t("login")}
               </Button>
             </Link>
             <Link href="/register" className="flex-1">
               <Button size="sm" className="w-full bg-indigo-600 hover:bg-indigo-700 text-white">
-                Get Started
+                {t("getStarted")}
               </Button>
             </Link>
           </div>

@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import Link from "next/link";
+import { useTranslations } from "next-intl";
+import { Link } from "@/i18n/navigation";
 import { Sparkles, MessageSquare, Play } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import DemoModal from "./DemoModal";
@@ -10,6 +11,7 @@ const avatarColors = ["bg-indigo-500", "bg-violet-500", "bg-emerald-500", "bg-am
 const avatarInitials = ["AC", "BT", "CR", "DK", "EL"];
 
 export default function HeroSection() {
+  const t = useTranslations("Landing");
   const [demoOpen, setDemoOpen] = useState(false);
 
   return (
@@ -19,17 +21,16 @@ export default function HeroSection() {
         <div>
           <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-indigo-50 border border-indigo-100 text-indigo-700 text-xs font-medium mb-6">
             <Sparkles className="w-3.5 h-3.5" />
-            Powered by GPT-4o
+            {t("hero.badge")}
           </div>
 
           <h1 className="text-4xl sm:text-5xl font-bold text-slate-900 leading-tight mb-5">
-            Add AI support to your website{" "}
-            <span className="text-indigo-600">in minutes</span>
+            {t("hero.title")}{" "}
+            <span className="text-indigo-600">{t("hero.titleAccent")}</span>
           </h1>
 
           <p className="text-lg text-slate-500 leading-relaxed mb-8">
-            Upload your docs. Train your bot. Paste one snippet. Your customers
-            get instant, accurate answers 24/7 — without a single support ticket.
+            {t("hero.description")}
           </p>
 
           <div className="flex flex-col sm:flex-row gap-3 mb-10">
@@ -38,7 +39,7 @@ export default function HeroSection() {
                 size="lg"
                 className="bg-indigo-600 hover:bg-indigo-700 text-white px-8"
               >
-                Start for free
+                {t("hero.startFree")}
               </Button>
             </Link>
             <Button
@@ -48,7 +49,7 @@ export default function HeroSection() {
               onClick={() => setDemoOpen(true)}
             >
               <Play className="w-4 h-4 fill-current" />
-              See it in action
+              {t("hero.seeAction")}
             </Button>
           </div>
 
@@ -65,7 +66,7 @@ export default function HeroSection() {
               ))}
             </div>
             <p className="text-sm text-slate-500">
-              <span className="font-semibold text-slate-800">500+</span> teams already using CacaNode
+              <span className="font-semibold text-slate-800">500+</span> {t("hero.socialProof")}
             </p>
           </div>
         </div>
@@ -101,23 +102,23 @@ export default function HeroSection() {
                 <div className="bg-white rounded-xl shadow-lg border border-slate-200 overflow-hidden text-xs">
                   <div className="bg-indigo-600 px-3 py-2 flex items-center gap-1.5">
                     <MessageSquare className="w-3 h-3 text-white" />
-                    <span className="text-white font-medium text-xs">Support Bot</span>
+                    <span className="text-white font-medium text-xs">{t("demo.supportBot")}</span>
                     <span className="ml-auto text-indigo-200 text-xs">●</span>
                   </div>
                   <div className="p-2.5 space-y-2 bg-slate-50">
                     <div className="flex justify-start">
                       <div className="bg-white px-2 py-1.5 rounded-lg text-slate-700 shadow-sm max-w-[85%]">
-                        Hi! How can I help? 👋
+                        {t("demo.greeting")}
                       </div>
                     </div>
                     <div className="flex justify-end">
                       <div className="bg-indigo-600 px-2 py-1.5 rounded-lg text-white max-w-[85%]">
-                        What&apos;s your return policy?
+                        {t("demo.question")}
                       </div>
                     </div>
                     <div className="flex justify-start">
                       <div className="bg-white px-2 py-1.5 rounded-lg text-slate-700 shadow-sm max-w-[90%]">
-                        Returns accepted within 30 days of purchase!
+                        {t("demo.answer")}
                       </div>
                     </div>
                   </div>
@@ -133,7 +134,7 @@ export default function HeroSection() {
               {/* Floating badge */}
               <div className="absolute top-4 right-4 bg-white rounded-full px-3 py-1.5 shadow-md border border-slate-100 flex items-center gap-1.5 text-xs">
                 <span className="w-2 h-2 rounded-full bg-green-500" />
-                <span className="text-slate-700 font-medium">Avg. response 1.2s</span>
+                <span className="text-slate-700 font-medium">{t("demo.averageResponse")}</span>
               </div>
             </div>
           </div>

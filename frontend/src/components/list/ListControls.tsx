@@ -2,6 +2,7 @@
 
 import { Search, SlidersHorizontal, X } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
+import { useFormatter, useTranslations } from "next-intl";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -11,23 +12,24 @@ import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 export function SearchField({
   value,
   onChange,
-  placeholder = "Search",
-  label = "Search records",
+  placeholder,
+  label,
 }: {
   value: string;
   onChange: (value: string) => void;
   placeholder?: string;
   label?: string;
 }) {
+  const t = useTranslations("ListControls");
   return (
     <div className="relative min-w-0 flex-1">
       <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
       <Input
-        aria-label={label}
+        aria-label={label ?? t("searchRecords")}
         value={value}
         maxLength={200}
         onChange={(event) => onChange(event.target.value)}
-        placeholder={placeholder}
+        placeholder={placeholder ?? t("search")}
         className="pl-9"
       />
     </div>
@@ -83,7 +85,7 @@ export function DateRangeFields({
   to,
   onFromChange,
   onToChange,
-  prefix = "Date",
+  prefix,
 }: {
   from: string;
   to: string;
@@ -91,14 +93,16 @@ export function DateRangeFields({
   onToChange: (value: string) => void;
   prefix?: string;
 }) {
+  const t = useTranslations("ListControls");
+  const rangePrefix = prefix ?? t("date");
   return (
     <div className="grid grid-cols-2 gap-2">
       <Label className="space-y-1 text-xs text-slate-500">
-        <span>{prefix} from</span>
+        <span>{t("from", { prefix: rangePrefix })}</span>
         <Input type="date" value={from} onChange={(event) => onFromChange(event.target.value)} />
       </Label>
       <Label className="space-y-1 text-xs text-slate-500">
-        <span>{prefix} to</span>
+        <span>{t("to", { prefix: rangePrefix })}</span>
         <Input type="date" min={from || undefined} value={to} onChange={(event) => onToChange(event.target.value)} />
       </Label>
     </div>
@@ -115,18 +119,21 @@ export function FilterPanel({ children }: { children: ReactNode }) {
 }
 
 export function ClearFiltersButton({ onClick, disabled }: { onClick: () => void; disabled?: boolean }) {
+  const t = useTranslations("ListControls");
   return (
     <Button type="button" variant="ghost" size="sm" disabled={disabled} onClick={onClick} className="gap-1.5">
-      <X className="size-3.5" /> Clear
+      <X className="size-3.5" /> {t("clear")}
     </Button>
   );
 }
 
 export function ResultsSummary({ total, refreshing }: { total: number; refreshing?: boolean }) {
+  const t = useTranslations("ListControls");
+  const format = useFormatter();
   return (
     <p className="text-sm text-slate-500" aria-live="polite">
-      {total.toLocaleString()} {total === 1 ? "result" : "results"}
-      {refreshing ? <span className="ml-2 text-indigo-500">Refreshing…</span> : null}
+      {t("results", { count: total, formattedCount: format.number(total) })}
+      {refreshing ? <span className="ml-2 text-indigo-500">{t("refreshing")}</span> : null}
     </p>
   );
 }
@@ -144,13 +151,14 @@ export function PaginationControls({
   onPageChange: (page: number) => void;
   onSizeChange: (size: number) => void;
 }) {
+  const t = useTranslations("ListControls");
   const pages = Math.max(1, Math.ceil(total / size));
   return (
     <div className="flex flex-col gap-3 border-t border-slate-200 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
       <label className="flex items-center gap-2 text-sm text-slate-500">
-        Rows
+        {t("rows")}
         <select
-          aria-label="Rows per page"
+          aria-label={t("rowsPerPage")}
           className="h-9 rounded-md border border-slate-200 bg-white px-2 text-sm"
           value={size}
           onChange={(event) => onSizeChange(Number(event.target.value))}
@@ -159,10 +167,10 @@ export function PaginationControls({
         </select>
       </label>
       <div className="flex items-center justify-between gap-3 sm:justify-end">
-        <span className="text-sm text-slate-500">Page {page} of {pages}</span>
+        <span className="text-sm text-slate-500">{t("pageOf", { page, pages })}</span>
         <div className="flex gap-2">
-          <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => onPageChange(page - 1)}>Previous</Button>
-          <Button variant="outline" size="sm" disabled={page >= pages} onClick={() => onPageChange(page + 1)}>Next</Button>
+          <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => onPageChange(page - 1)}>{t("previous")}</Button>
+          <Button variant="outline" size="sm" disabled={page >= pages} onClick={() => onPageChange(page + 1)}>{t("next")}</Button>
         </div>
       </div>
     </div>

@@ -249,6 +249,7 @@ def test_default_customer_prompt_is_polite_conversational_and_tenant_specific() 
 
     assert "Acme Corporation" in acme
     assert "Respond to every customer message politely" in acme
+    assert "same language as the latest customer message" in acme
     assert "greetings, thanks, farewells" in acme
     assert "without requiring a citation" in acme
     assert "instead of guessing" in acme
@@ -455,6 +456,7 @@ async def test_customer_channels_receive_tenant_prompt_below_platform_rules(chan
     assert 'Tenant display name: "Acme Corporation".' in system_prompt
     assert "Politely respond to every customer message" in system_prompt
     assert "Greetings, thanks, farewells" in system_prompt
+    assert "Respond in the same language as the latest customer message." in system_prompt
     assert "--- BEGIN TENANT INSTRUCTIONS ---" in system_prompt
     assert "--- END TENANT INSTRUCTIONS ---" in system_prompt
     assert "Never infer, reveal, or mix data from another tenant." in system_prompt
@@ -504,7 +506,7 @@ async def test_employee_playground_prompt_is_unchanged_by_tenant_prompt() -> Non
         "If the sources do not contain the answer, say you do not know. "
         "Cite factual claims with [S1], [S2], etc. "
         "Keep the answer concise, with at most three short sentences. "
-        "Respond in locale en."
+        "Respond in the same language as the question. "
     )
 
 

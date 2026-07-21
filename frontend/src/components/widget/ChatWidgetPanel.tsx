@@ -1,25 +1,45 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import { useLocale } from "next-intl";
 import { useChatStore } from "@/components/providers/StoreProvider";
 import { useShallow } from "zustand/react/shallow";
 import type { Message } from "@/types";
 import { MessageSquare, X, Send } from "lucide-react";
 
-const MOCK_RESPONSES = [
-  "Thank you for reaching out! Based on our documentation, I can help with that. Our return policy allows returns within 30 days of purchase in original condition.",
-  "Great question! We support PDF, DOCX, and TXT files up to 50MB each. You can upload multiple documents at once using drag and drop.",
-  "I'd be happy to help! You can find that information in your account settings under the Billing section. Let me know if you need further assistance.",
-  "Absolutely! CacaNode supports over 50 languages and will automatically respond in the visitor's language regardless of the document language.",
-];
+type WidgetLocale = "en" | "vi";
 
-function TypingIndicator() {
+const WIDGET_COPY = {
+  en: {
+    supportBot: "Support Bot", online: "Online", placeholder: "Type a message…", thinking: "Thinking…",
+    open: "Open support chat", close: "Close support chat", send: "Send message", language: "Language",
+    responses: [
+      "Thank you for reaching out! Based on our documentation, our return policy allows returns within 30 days of purchase in original condition.",
+      "Great question! We support PDF, DOCX, and TXT files up to 50MB each. You can upload multiple documents at once.",
+      "You can find that information in your account settings under Billing. Let me know if you need more help.",
+      "CacaNode supports over 50 languages and can respond in the visitor's language regardless of the document language.",
+    ],
+  },
+  vi: {
+    supportBot: "Bot hỗ trợ", online: "Đang trực tuyến", placeholder: "Nhập tin nhắn…", thinking: "Đang suy nghĩ…",
+    open: "Mở trò chuyện hỗ trợ", close: "Đóng trò chuyện hỗ trợ", send: "Gửi tin nhắn", language: "Ngôn ngữ",
+    responses: [
+      "Cảm ơn bạn đã liên hệ! Theo tài liệu của chúng tôi, sản phẩm còn nguyên trạng có thể được đổi trả trong vòng 30 ngày kể từ ngày mua.",
+      "Câu hỏi hay! Chúng tôi hỗ trợ tệp PDF, DOCX và TXT tối đa 50MB mỗi tệp. Bạn có thể tải nhiều tài liệu cùng lúc.",
+      "Bạn có thể tìm thông tin đó trong phần Thanh toán của cài đặt tài khoản. Hãy cho tôi biết nếu bạn cần thêm trợ giúp.",
+      "CacaNode hỗ trợ hơn 50 ngôn ngữ và có thể phản hồi bằng ngôn ngữ của khách truy cập bất kể ngôn ngữ tài liệu.",
+    ],
+  },
+} as const;
+
+function TypingIndicator({ label }: { label: string }) {
   return (
-    <div className="flex gap-1 items-center px-3 py-2 bg-white rounded-xl shadow-sm w-fit">
+    <div className="flex gap-1 items-center px-3 py-2 bg-white rounded-xl shadow-sm w-fit" role="status" aria-label={label}>
+      <span className="sr-only">{label}</span>
       {[0, 1, 2].map((i) => (
         <span
           key={i}
-          className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce"
+          className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce motion-reduce:animate-none"
           style={{ animationDelay: `${i * 150}ms` }}
         />
       ))}
@@ -38,10 +58,13 @@ interface ChatWidgetPanelProps {
 
 export default function ChatWidgetPanel({
   primaryColor = "#4f46e5",
-  botName = "Support Bot",
+  botName,
   alwaysOpen = false,
   fill = false,
 }: ChatWidgetPanelProps) {
+  const dashboardLocale = useLocale();
+  const [widgetLocale, setWidgetLocale] = useState<WidgetLocale>(dashboardLocale === "vi" ? "vi" : "en");
+  const copy = WIDGET_COPY[widgetLocale];
   const [isOpen, setIsOpen] = useState(false);
   const [inputValue, setInputValue] = useState("");
   const [showTyping, setShowTyping] = useState(false);
@@ -87,7 +110,7 @@ export default function ChatWidgetPanel({
       setShowTyping(false);
       startStreaming();
 
-      const response = MOCK_RESPONSES[Math.floor(Math.random() * MOCK_RESPONSES.length)];
+      const response = copy.responses[Math.floor(Math.random() * copy.responses.length)];
       const words = response.split(" ");
       let index = 0;
       const interval = setInterval(() => {
@@ -103,7 +126,7 @@ export default function ChatWidgetPanel({
   };
 
   const sharedProps = {
-    botName,
+    botName: botName ?? copy.supportBot,
     primaryColor,
     messages,
     isStreaming,
@@ -114,6 +137,9 @@ export default function ChatWidgetPanel({
     sendMessage,
     messagesEndRef,
     fill,
+    widgetLocale,
+    setWidgetLocale,
+    copy,
   };
 
   if (alwaysOpen || fill) {
@@ -129,9 +155,11 @@ export default function ChatWidgetPanel({
         />
       )}
       <button
+        type="button"
         onClick={() => setIsOpen((o) => !o)}
         className="rounded-full flex items-center justify-center shadow-lg hover:opacity-90 transition-opacity"
         style={{ width: "52px", height: "52px", backgroundColor: primaryColor }}
+        aria-label={isOpen ? copy.close : copy.open}
       >
         {isOpen ? (
           <X className="w-5 h-5 text-white" />
@@ -156,6 +184,9 @@ interface ChatWindowProps {
   onClose?: () => void;
   messagesEndRef: React.RefObject<HTMLDivElement | null>;
   fill?: boolean;
+  widgetLocale: WidgetLocale;
+  setWidgetLocale: (locale: WidgetLocale) => void;
+  copy: (typeof WIDGET_COPY)[WidgetLocale];
 }
 
 function ChatWindow({
@@ -171,6 +202,9 @@ function ChatWindow({
   onClose,
   messagesEndRef,
   fill,
+  widgetLocale,
+  setWidgetLocale,
+  copy,
 }: ChatWindowProps) {
   const containerClass = fill
     ? "flex flex-col w-full h-full bg-white"
@@ -191,18 +225,23 @@ function ChatWindow({
           </div>
           <div>
             <p className="text-white font-semibold text-sm">{botName}</p>
-            <p className="text-white/70 text-xs">Online</p>
+            <p className="text-white/70 text-xs">{copy.online}</p>
           </div>
         </div>
+        <div className="flex items-center gap-1.5">
+          <div className="flex items-center rounded-full border border-white/30 bg-white/10 p-0.5 text-[10px] font-bold text-white/80" role="group" aria-label={copy.language}>
+            {(["en", "vi"] as const).map((locale) => <button key={locale} type="button" aria-pressed={widgetLocale === locale} onClick={() => setWidgetLocale(locale)} className={`rounded-full px-1.5 py-1 ${widgetLocale === locale ? "bg-white text-slate-800" : "hover:bg-white/10"}`}>{locale.toUpperCase()}</button>)}
+          </div>
         {onClose && (
-          <button onClick={onClose} className="text-white/70 hover:text-white transition-colors">
+          <button type="button" onClick={onClose} className="text-white/70 hover:text-white transition-colors" aria-label={copy.close}>
             <X className="w-4 h-4" />
           </button>
         )}
+        </div>
       </div>
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-3 space-y-2 bg-slate-50 min-h-0">
+      <div className="flex-1 overflow-y-auto p-3 space-y-2 bg-slate-50 min-h-0" aria-live="polite" aria-busy={showTyping || isStreaming}>
         {messages.map((msg) => (
           <div key={msg.id} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
             <div
@@ -220,7 +259,7 @@ function ChatWindow({
 
         {showTyping && (
           <div className="flex justify-start">
-            <TypingIndicator />
+            <TypingIndicator label={copy.thinking} />
           </div>
         )}
 
@@ -244,15 +283,18 @@ function ChatWindow({
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && sendMessage()}
-            placeholder="Type a message..."
+            placeholder={copy.placeholder}
+            aria-label={copy.placeholder}
             className="flex-1 text-sm px-3 py-1.5 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
             disabled={isStreaming || showTyping}
           />
           <button
+            type="button"
             onClick={sendMessage}
             disabled={!inputValue.trim() || isStreaming || showTyping}
             className="p-1.5 text-white rounded-lg hover:opacity-90 disabled:opacity-40 transition-opacity"
             style={{ backgroundColor: primaryColor }}
+            aria-label={copy.send}
           >
             <Send className="w-4 h-4" />
           </button>

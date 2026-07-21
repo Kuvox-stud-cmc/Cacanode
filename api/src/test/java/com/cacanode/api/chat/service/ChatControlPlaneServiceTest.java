@@ -7,6 +7,7 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ChatControlPlaneServiceTest {
@@ -32,5 +33,20 @@ class ChatControlPlaneServiceTest {
         assertTrue(ChatControlPlaneService.supportsPublicEvidence(ChatChannel.WIDGET));
         assertTrue(ChatControlPlaneService.supportsPublicEvidence(ChatChannel.CUSTOM_API));
         assertFalse(ChatControlPlaneService.supportsPublicEvidence(ChatChannel.EMPLOYEE_PLAYGROUND));
+    }
+
+    @Test
+    void widgetLocaleParticipatesInIdempotencyFingerprintInput() {
+        Map<String, Object> en = ChatControlPlaneService.fingerprintPayload(
+                "Hello", Map.of("surface", "widget"), "en-US");
+        Map<String, Object> vi = ChatControlPlaneService.fingerprintPayload(
+                "Hello", Map.of("surface", "widget"), "vi-VN");
+        Map<String, Object> customApi = ChatControlPlaneService.fingerprintPayload(
+                "Hello", Map.of("surface", "api"), null);
+
+        assertEquals("en-US", en.get("locale"));
+        assertEquals("vi-VN", vi.get("locale"));
+        assertNotEquals(en, vi);
+        assertFalse(customApi.containsKey("locale"));
     }
 }

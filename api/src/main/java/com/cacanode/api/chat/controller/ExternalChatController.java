@@ -49,21 +49,30 @@ public class ExternalChatController {
                 principal.tokenId(), ChatChannel.CUSTOM_API, body);
     }
 
-    @PostMapping({
-            "/api/v1/widget/chat/sessions/{sessionId}/messages",
-            "/api/v1/external/chat/sessions/{sessionId}/messages"
-    })
-    public ChatDtos.AssistantMessageResponse submit(
+    @PostMapping("/api/v1/widget/chat/sessions/{sessionId}/messages")
+    public ChatDtos.AssistantMessageResponse submitWidget(
             @PathVariable UUID sessionId,
-            @Valid @RequestBody ChatDtos.SubmitMessageRequest body,
+            @Valid @RequestBody ChatDtos.WidgetSubmitMessageRequest body,
             @RequestHeader("Authorization") String authorization,
             @RequestHeader(value = "X-Parent-Origin", required = false) String parentOrigin,
             @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
-            @RequestHeader(value = "X-Request-ID", required = false) String requestId,
-            HttpServletRequest request) {
-        String scope = request.getRequestURI().contains("/widget/")
-                ? IntegrationTokenService.WIDGET_SCOPE : IntegrationTokenService.API_SCOPE;
-        var principal = tokenService.authenticate(authorization, scope, parentOrigin);
+            @RequestHeader(value = "X-Request-ID", required = false) String requestId) {
+        var principal = tokenService.authenticate(
+                authorization, IntegrationTokenService.WIDGET_SCOPE, parentOrigin);
+        return chatService.submitWidgetMessage(
+                principal.tenantId(), principal.tokenId(), sessionId, body.content(),
+                body.metadata(), body.locale(), idempotencyKey, requestId);
+    }
+
+    @PostMapping("/api/v1/external/chat/sessions/{sessionId}/messages")
+    public ChatDtos.AssistantMessageResponse submitApi(
+            @PathVariable UUID sessionId,
+            @Valid @RequestBody ChatDtos.SubmitMessageRequest body,
+            @RequestHeader("Authorization") String authorization,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
+            @RequestHeader(value = "X-Request-ID", required = false) String requestId) {
+        var principal = tokenService.authenticate(
+                authorization, IntegrationTokenService.API_SCOPE, null);
         return chatService.submitExternalMessage(
                 principal.tenantId(), principal.tokenId(), sessionId, body.content(),
                 body.metadata(), idempotencyKey, requestId);

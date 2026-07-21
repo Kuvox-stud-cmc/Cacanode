@@ -9,7 +9,8 @@ import {
   type FormEvent,
   type KeyboardEvent,
 } from "react"
-import Link from "next/link"
+import { useFormatter, useTranslations } from "next-intl"
+import { Link } from "@/i18n/navigation"
 import toast from "react-hot-toast"
 import {
   ArrowUp,
@@ -53,6 +54,7 @@ import {
   SUPPORTED_DOCUMENT_ACCEPT,
 } from "@/lib/documents-api"
 import {
+  ChatMessageTimeoutError,
   createChatSessionApi,
   getChatMessagesApi,
   submitChatMessageApi,
@@ -126,23 +128,6 @@ function sourceFromDocument(document: Document): SourceDocument {
   }
 }
 
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
-}
-
-function statusLabel(status: SourceStatus): string {
-  const labels: Record<SourceStatus, string> = {
-    UPLOADING: "Uploading",
-    PENDING: "Pending",
-    PROCESSING: "Indexing",
-    COMPLETED: "Ready",
-    FAILED: "Failed",
-  }
-  return labels[status]
-}
-
 function statusClass(status: SourceStatus): string {
   const classes: Record<SourceStatus, string> = {
     UPLOADING: "bg-slate-100 text-slate-600",
@@ -159,10 +144,11 @@ function isSupportedFile(file: File): boolean {
 }
 
 function Playground({ authenticated }: { authenticated: boolean }) {
+  const t = useTranslations("Chat")
+  const format = useFormatter()
   const { request } = useApiClient()
   const user = useAuthStore((state) => state.user)
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const suppressRestoredComposerFocus = useRef(false)
   const canPersistStateRef = useRef(false)
   const activeChatAbortRef = useRef<AbortController | null>(null)
   const historyAbortRef = useRef<AbortController | null>(null)
@@ -195,6 +181,12 @@ function Playground({ authenticated }: { authenticated: boolean }) {
   const [historyCollapsed, setHistoryCollapsed] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<PlaygroundSession | null>(null)
   const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null)
+
+  function formatBytes(bytes: number): string {
+    if (bytes < 1024) return `${format.number(bytes)} B`
+    if (bytes < 1024 * 1024) return `${format.number(bytes / 1024, { maximumFractionDigits: 1 })} KB`
+    return `${format.number(bytes / (1024 * 1024), { maximumFractionDigits: 1 })} MB`
+  }
 
   const hasCompletedSource = sources.some((source) => source.status === "COMPLETED")
   const hasIndexingSource = sources.some(
@@ -242,7 +234,7 @@ function Playground({ authenticated }: { authenticated: boolean }) {
       historyNextCursorRef.current = result.nextCursor
       if (!append) setSessionId((current) => preferredSessionId ?? current ?? result.items[0]?.id ?? null)
     } catch (error) {
-      if (!(error instanceof DOMException && error.name === "AbortError")) setHistoryError(error instanceof Error ? error.message : "Unable to load conversations")
+      if (!(error instanceof DOMException && error.name === "AbortError")) setHistoryError(error instanceof Error ? error.message : t("fallback.loadConversations"))
     } finally {
       if (requestId === historyRequestRef.current) {
         setHistoryLoading(false)
@@ -250,7 +242,7 @@ function Playground({ authenticated }: { authenticated: boolean }) {
         historyLoadingMoreRef.current = false
       }
     }
-  }, [authenticated, request])
+  }, [authenticated, request, t])
 
   useEffect(() => {
     if (!authenticated) return
@@ -267,14 +259,14 @@ function Playground({ authenticated }: { authenticated: boolean }) {
       })
       .catch((error) => {
         if (!cancelled) {
-          toast.error(error instanceof Error ? error.message : "Unable to load workspace")
+          toast.error(error instanceof Error ? error.message : t("fallback.loadWorkspace"))
         }
       })
 
     return () => {
       cancelled = true
     }
-  }, [authenticated, request])
+  }, [authenticated, request, t])
 
   useEffect(() => {
     if (!authenticated || !workspace) return
@@ -312,7 +304,7 @@ function Playground({ authenticated }: { authenticated: boolean }) {
         if (!controller.signal.aborted) setSearchResults(result.items)
       }).catch((error) => {
         if (!controller.signal.aborted && !(error instanceof DOMException && error.name === "AbortError")) {
-          setSearchError(error instanceof Error ? error.message : "Unable to search conversations")
+          setSearchError(error instanceof Error ? error.message : t("fallback.searchConversations"))
         }
       }).finally(() => {
         if (!controller.signal.aborted) setSearchLoading(false)
@@ -322,7 +314,7 @@ function Playground({ authenticated }: { authenticated: boolean }) {
       window.clearTimeout(timer)
       controller.abort()
     }
-  }, [debouncedChatSearch, request, searchDialogOpen])
+  }, [debouncedChatSearch, request, searchDialogOpen, t])
 
   useEffect(() => {
     if (!authenticated || !workspace) return
@@ -348,7 +340,7 @@ function Playground({ authenticated }: { authenticated: boolean }) {
           )
         })
       } catch (error) {
-        toast.error(error instanceof Error ? error.message : "Unable to load documents")
+        toast.error(error instanceof Error ? error.message : t("fallback.loadDocuments"))
       }
     }
 
@@ -357,7 +349,7 @@ function Playground({ authenticated }: { authenticated: boolean }) {
     return () => {
       cancelled = true
     }
-  }, [authenticated, request, workspace])
+  }, [authenticated, request, t, workspace])
 
   useEffect(() => {
     if (!authenticated || !workspace || !sessionId || sending) return
@@ -383,13 +375,13 @@ function Playground({ authenticated }: { authenticated: boolean }) {
           setSessionId(null)
           return
         }
-        toast.error(error instanceof Error ? error.message : "Unable to load chat history")
+        toast.error(error instanceof Error ? error.message : t("fallback.loadHistory"))
       })
 
     return () => {
       cancelled = true
     }
-  }, [authenticated, request, sending, sessionId, workspace])
+  }, [authenticated, request, sending, sessionId, t, workspace])
 
   useEffect(() => {
     return () => {
@@ -455,21 +447,11 @@ function Playground({ authenticated }: { authenticated: boolean }) {
     return true
   }
 
-  function handleComposerFocus() {
-    if (suppressRestoredComposerFocus.current) {
-      suppressRestoredComposerFocus.current = false
-      return
-    }
+  function handleComposerClick() {
     requireAuthentication()
   }
 
   function handleAuthDialogOpenChange(open: boolean) {
-    if (!open) {
-      suppressRestoredComposerFocus.current = true
-      window.setTimeout(() => {
-        suppressRestoredComposerFocus.current = false
-      }, 250)
-    }
     setAuthDialogOpen(open)
   }
 
@@ -480,7 +462,7 @@ function Playground({ authenticated }: { authenticated: boolean }) {
 
   async function createSession(): Promise<string> {
     if (!workspace) {
-      throw new Error("Workspace is still loading.")
+      throw new Error(t("workspaceLoading"))
     }
     const session = await createChatSessionApi(request, {
       chatbot_id: workspace.chatbot.id,
@@ -524,7 +506,7 @@ function Playground({ authenticated }: { authenticated: boolean }) {
         setSessionId(remaining[0]?.id ?? null)
       }
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Unable to hide conversation")
+      toast.error(error instanceof Error ? error.message : t("fallback.hideConversation"))
     } finally {
       setDeletingSessionId(null)
     }
@@ -538,8 +520,8 @@ function Playground({ authenticated }: { authenticated: boolean }) {
     if (!hasCompletedSource) {
       toast.error(
         hasIndexingSource
-          ? "Wait for at least one document to finish indexing."
-          : "Upload a supported digital document or spreadsheet before asking a question.",
+          ? t("waitForIndexing")
+          : t("uploadBeforeQuestion"),
       )
       return
     }
@@ -548,7 +530,7 @@ function Playground({ authenticated }: { authenticated: boolean }) {
     setMessages((current) => [
       ...current,
       { id: makeId(), role: "user", content },
-      { id: assistantId, role: "assistant", content: "Thinking...", loading: true },
+      { id: assistantId, role: "assistant", content: t("thinking"), loading: true },
     ])
     setMessage("")
     setSending(true)
@@ -584,7 +566,7 @@ function Playground({ authenticated }: { authenticated: boolean }) {
         const assistantMessage: ChatMessage = {
           id: assistantId,
           role: "assistant",
-          content: response.content.trim() || "No answer was generated. Please retry.",
+          content: response.content.trim() || t("fallback.noAnswer"),
           citations: response.citations,
           error: response.content.trim().length === 0,
         }
@@ -600,10 +582,12 @@ function Playground({ authenticated }: { authenticated: boolean }) {
     } catch (error) {
       const aborted = abortController.signal.aborted
       const errorMessage = aborted
-        ? "Canceled."
-        : error instanceof Error
+        ? t("canceled")
+        : error instanceof ChatMessageTimeoutError
+          ? t("fallback.timeout")
+          : error instanceof Error
           ? error.message
-          : "Unable to answer."
+          : t("fallback.answer")
       setMessages((current) =>
         current.map((item) =>
           item.id === assistantId
@@ -629,6 +613,13 @@ function Playground({ authenticated }: { authenticated: boolean }) {
   }
 
   function handleComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (!authenticated) {
+      if (event.key === "Enter" || event.key.length === 1) {
+        event.preventDefault()
+        requireAuthentication()
+      }
+      return
+    }
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault()
       void submitMessage()
@@ -644,7 +635,7 @@ function Playground({ authenticated }: { authenticated: boolean }) {
 
   async function uploadFiles(files: File[]) {
     if (!workspace) {
-      toast.error("Workspace is still loading.")
+      toast.error(t("workspaceLoading"))
       return
     }
 
@@ -692,7 +683,7 @@ function Playground({ authenticated }: { authenticated: boolean }) {
         )
       } catch (error) {
         const errorMessage =
-          error instanceof Error ? error.message : "Upload failed"
+          error instanceof Error ? error.message : t("fallback.upload")
         setSources((current) =>
           current.map((source) =>
             source.localId === localId
@@ -720,26 +711,26 @@ function Playground({ authenticated }: { authenticated: boolean }) {
     <div className="flex h-full flex-col bg-slate-50">
       <div className="space-y-2 border-b border-slate-200 p-3">
         <Button className="w-full justify-start gap-2" variant="outline" disabled={sending} onClick={startNewChat}>
-          <Plus className="size-4" /> New Chat
+          <Plus className="size-4" /> {t("newChat")}
         </Button>
         <Button className="w-full justify-start gap-2 text-slate-600" variant="ghost" disabled={sending} onClick={() => setSearchDialogOpen(true)}>
-          <Search className="size-4" /> Search chats
+          <Search className="size-4" /> {t("searchChats")}
         </Button>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto p-2">
         {historyLoading ? Array.from({ length: 5 }).map((_, index) => <div key={index} className="mb-2 h-14 animate-pulse rounded-lg bg-slate-200" />) : historyError && history.length === 0 ? (
-          <div className="p-3 text-sm text-red-700"><AlertCircle className="mb-2 size-5" /><p>{historyError}</p><Button className="mt-3" size="sm" variant="outline" onClick={() => void loadHistory()}>Retry</Button></div>
+          <div className="p-3 text-sm text-red-700"><AlertCircle className="mb-2 size-5" /><p>{historyError}</p><Button className="mt-3" size="sm" variant="outline" onClick={() => void loadHistory()}>{t("retry")}</Button></div>
         ) : history.length === 0 ? (
-          <p className="p-4 text-center text-sm text-slate-500">Your conversations will appear here.</p>
+          <p className="p-4 text-center text-sm text-slate-500">{t("historyWillAppear")}</p>
         ) : <>{history.map((item) => (
           <div key={item.id} className={cn("group mb-1 flex items-start rounded-lg", sessionId === item.id ? "bg-indigo-100 text-indigo-950" : "hover:bg-slate-200")}>
             <button type="button" disabled={sending} onClick={() => switchSession(item.id)} className="min-w-0 flex-1 px-3 py-2 text-left disabled:cursor-not-allowed">
               <p className="truncate text-sm font-medium">{item.title}</p>
-              <p className="mt-0.5 text-xs text-slate-500">{new Date(item.last_activity_at).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</p>
+              <p className="mt-0.5 text-xs text-slate-500">{format.dateTime(new Date(item.last_activity_at), { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</p>
             </button>
-            <button type="button" disabled={sending || Boolean(deletingSessionId)} onClick={() => requestDeleteSession(item)} className="m-1 rounded-md p-2 text-slate-400 opacity-0 hover:bg-white hover:text-red-600 group-hover:opacity-100 focus:opacity-100" aria-label={`Hide ${item.title}`}><Trash2 className="size-4" /></button>
+            <button type="button" disabled={sending || Boolean(deletingSessionId)} onClick={() => requestDeleteSession(item)} className="m-1 rounded-md p-2 text-slate-400 opacity-0 hover:bg-white hover:text-red-600 group-hover:opacity-100 focus:opacity-100" aria-label={t("hideConversation", { title: item.title })}><Trash2 className="size-4" /></button>
           </div>
-        ))}<div ref={desktopSentinelRef} className="h-1" />{historyLoadingMore && <Loader2 className="mx-auto my-3 size-4 animate-spin text-indigo-600" />}{historyError && <button type="button" className="mx-auto my-3 flex items-center gap-1 text-xs text-red-600" onClick={() => void loadHistory(undefined, true)}><RotateCw className="size-3" /> Retry loading older chats</button>}{!historyNextCursor && !historyError && <p className="py-3 text-center text-xs text-slate-400">End of history</p>}</>}
+        ))}<div ref={desktopSentinelRef} className="h-1" />{historyLoadingMore && <Loader2 className="mx-auto my-3 size-4 animate-spin text-indigo-600" />}{historyError && <button type="button" className="mx-auto my-3 flex items-center gap-1 text-xs text-red-600" onClick={() => void loadHistory(undefined, true)}><RotateCw className="size-3" /> {t("retryOlder")}</button>}{!historyNextCursor && !historyError && <p className="py-3 text-center text-xs text-slate-400">{t("endHistory")}</p>}</>}
       </div>
     </div>
   )
@@ -748,14 +739,14 @@ function Playground({ authenticated }: { authenticated: boolean }) {
     <div>
       <div className="mb-2 flex items-center justify-between px-2">
         <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">
-          Conversations
+          {t("conversations")}
         </p>
         <button
           type="button"
           disabled={sending}
           onClick={startNewChat}
           className="rounded-md p-1.5 text-slate-300 transition-colors hover:bg-slate-800 hover:text-white disabled:opacity-50"
-          aria-label="Start new chat"
+          aria-label={t("startNewChat")}
         >
           <Plus className="size-4" />
         </button>
@@ -766,7 +757,7 @@ function Playground({ authenticated }: { authenticated: boolean }) {
         onClick={() => setSearchDialogOpen(true)}
         className="mx-1 mb-2 flex w-[calc(100%-0.5rem)] items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-slate-300 transition-colors hover:bg-slate-800 hover:text-white disabled:opacity-50"
       >
-        <Search className="size-4" /> Search chats
+        <Search className="size-4" /> {t("searchChats")}
       </button>
       <div className="max-h-[min(48dvh,28rem)] overflow-y-auto">
         {historyLoading ? (
@@ -781,11 +772,11 @@ function Playground({ authenticated }: { authenticated: boolean }) {
               className="mt-2 text-xs font-medium text-white underline underline-offset-4"
               onClick={() => void loadHistory()}
             >
-              Retry
+              {t("retry")}
             </button>
           </div>
         ) : history.length === 0 ? (
-          <p className="px-2 py-3 text-sm text-slate-400">No conversations yet.</p>
+          <p className="px-2 py-3 text-sm text-slate-400">{t("noConversations")}</p>
         ) : (
           <>{history.map((item) => (
             <div
@@ -808,12 +799,12 @@ function Playground({ authenticated }: { authenticated: boolean }) {
                 disabled={sending || Boolean(deletingSessionId)}
                 onClick={() => requestDeleteSession(item)}
                 className="mr-1 rounded-md p-1.5 text-slate-400 opacity-70 transition-colors hover:bg-slate-700 hover:text-red-300 focus:opacity-100"
-                aria-label={`Hide ${item.title}`}
+                aria-label={t("hideConversation", { title: item.title })}
               >
                 <Trash2 className="size-3.5" />
               </button>
             </div>
-          ))}<div ref={mobileSentinelRef} className="h-1" />{historyLoadingMore && <Loader2 className="mx-auto my-3 size-4 animate-spin text-indigo-300" />}{historyError && <button type="button" className="mx-auto my-3 flex items-center gap-1 text-xs text-red-300" onClick={() => void loadHistory(undefined, true)}><RotateCw className="size-3" /> Retry</button>}{!historyNextCursor && !historyError && <p className="py-3 text-center text-xs text-slate-500">End of history</p>}</>
+          ))}<div ref={mobileSentinelRef} className="h-1" />{historyLoadingMore && <Loader2 className="mx-auto my-3 size-4 animate-spin text-indigo-300" />}{historyError && <button type="button" className="mx-auto my-3 flex items-center gap-1 text-xs text-red-300" onClick={() => void loadHistory(undefined, true)}><RotateCw className="size-3" /> {t("retry")}</button>}{!historyNextCursor && !historyError && <p className="py-3 text-center text-xs text-slate-500">{t("endHistory")}</p>}</>
         )}
       </div>
     </div>
@@ -850,7 +841,7 @@ function Playground({ authenticated }: { authenticated: boolean }) {
               type="button"
               onClick={() => setHistoryCollapsed((collapsed) => !collapsed)}
               className="absolute -right-3 top-4 z-10 grid size-7 place-items-center rounded-full border border-slate-200 bg-white text-slate-500 shadow-sm transition-all duration-200 hover:scale-105 hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300"
-              aria-label={historyCollapsed ? "Expand conversation history" : "Collapse conversation history"}
+              aria-label={historyCollapsed ? t("expandHistory") : t("collapseHistory")}
               aria-expanded={!historyCollapsed}
             >
               {historyCollapsed ? (
@@ -871,14 +862,14 @@ function Playground({ authenticated }: { authenticated: boolean }) {
                 <Sparkles className="size-7" />
               </div>
               <h2 className="text-2xl font-semibold tracking-tight text-slate-900">
-                Chat with your documents
+                {t("emptyTitle")}
               </h2>
               <p className="mt-2 text-sm leading-6 text-slate-500 sm:text-base">
-                Upload a digital document or spreadsheet, wait for indexing, then ask questions with citations.
+                {t("emptyDescription")}
               </p>
               {!authenticated && (
                 <p className="mt-4 rounded-full bg-slate-100 px-3 py-1.5 text-xs font-medium text-slate-600">
-                  Sign in to start a conversation
+                  {t("signInToStart")}
                 </p>
               )}
             </div>
@@ -939,7 +930,7 @@ function Playground({ authenticated }: { authenticated: boolean }) {
                     </p>
                     <p className="truncate text-[11px] text-slate-500">
                       {formatBytes(source.fileSizeBytes)}
-                      {source.status === "COMPLETED" ? " · Ready to answer" : ""}
+                      {source.status === "COMPLETED" ? ` · ${t("readyToAnswer")}` : ""}
                     </p>
                     <span
                       className={cn(
@@ -947,7 +938,7 @@ function Playground({ authenticated }: { authenticated: boolean }) {
                         statusClass(source.status),
                       )}
                     >
-                      {statusLabel(source.status)}
+                      {t(`status.${source.status}`)}
                     </span>
                   </div>
                 </div>
@@ -959,17 +950,17 @@ function Playground({ authenticated }: { authenticated: boolean }) {
             <textarea
               value={message}
               readOnly={!authenticated}
-              onFocus={handleComposerFocus}
+              onClick={handleComposerClick}
               onChange={(event) => authenticated && setMessage(event.target.value)}
               onKeyDown={handleComposerKeyDown}
               rows={2}
               placeholder={
                 hasCompletedSource
-                  ? "Ask a question about your indexed sources..."
-                  : "Upload and index a source before chatting..."
+                  ? t("questionPlaceholder")
+                  : t("uploadPlaceholder")
               }
               className="block max-h-36 min-h-14 w-full resize-none bg-transparent px-2 py-1.5 text-sm leading-6 text-slate-900 outline-none placeholder:text-slate-400"
-              aria-label="Message"
+              aria-label={t("message")}
             />
             <div className="flex h-9 items-center justify-between gap-2">
               <div className="relative">
@@ -984,15 +975,15 @@ function Playground({ authenticated }: { authenticated: boolean }) {
                   aria-expanded={sourceMenuOpen}
                 >
                   <Paperclip className="size-4" />
-                  <span>Add source</span>
+                  <span>{t("addSource")}</span>
                 </button>
                 {sourceMenuOpen && (
                   <div className="absolute bottom-11 left-0 z-20 w-44 rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl">
                     <button type="button" onClick={() => chooseUpload("EMPLOYEE_ONLY")} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-100">
-                      <Upload className="size-4" /> Upload for employees
+                      <Upload className="size-4" /> {t("uploadEmployees")}
                     </button>
                     {user?.role === "TENANT_ADMIN" && <button type="button" onClick={() => chooseUpload("CUSTOMER_AND_EMPLOYEE")} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-100">
-                      <Upload className="size-4" /> Upload for everyone
+                      <Upload className="size-4" /> {t("uploadEveryone")}
                     </button>}
                   </div>
                 )}
@@ -1011,7 +1002,7 @@ function Playground({ authenticated }: { authenticated: boolean }) {
                   onClick={cancelMessage}
                   className="h-9 rounded-lg px-3 text-sm font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900 hidden"
                 >
-                  Cancel
+                  {t("cancel")}
                 </button>
               )}
               <button
@@ -1026,14 +1017,14 @@ function Playground({ authenticated }: { authenticated: boolean }) {
                   !sending && sendDisabled &&
                     "cursor-not-allowed bg-slate-200 text-slate-400 hover:bg-slate-200",
                 )}
-                aria-label={sending ? "Cancel response" : "Send message"}
+                aria-label={sending ? t("cancelResponse") : t("sendMessage")}
               >
                 {sending ? <Square className="size-3.5 fill-current" /> : <ArrowUp className="size-4" />}
               </button>
             </div>
           </div>
           <p className="mt-2 text-center text-[11px] text-slate-400">
-            Files are uploaded to CacaNode and indexed before answers are generated.
+            {t("uploadNotice")}
           </p>
         </form>
       </div>
@@ -1053,18 +1044,18 @@ function Playground({ authenticated }: { authenticated: boolean }) {
       >
         <DialogContent className="max-w-xl gap-0 overflow-hidden p-0">
           <DialogHeader className="sr-only">
-            <DialogTitle>Search chats</DialogTitle>
-            <DialogDescription>Search conversation titles and message transcripts.</DialogDescription>
+            <DialogTitle>{t("searchChats")}</DialogTitle>
+            <DialogDescription>{t("searchDescription")}</DialogDescription>
           </DialogHeader>
           <div className="relative border-b border-slate-200">
             <Search className="pointer-events-none absolute left-4 top-1/2 size-5 -translate-y-1/2 text-slate-400" />
             <input
               autoFocus
-              aria-label="Search chats"
+              aria-label={t("searchChats")}
               value={chatSearch}
               maxLength={200}
               onChange={(event) => setChatSearch(event.target.value)}
-              placeholder="Search chats"
+              placeholder={t("searchChats")}
               className="h-14 w-full bg-white pl-12 pr-12 text-base text-slate-900 outline-none placeholder:text-slate-400"
             />
             {searchLoading && <Loader2 className="absolute right-4 top-1/2 size-4 -translate-y-1/2 animate-spin text-slate-400" />}
@@ -1076,11 +1067,11 @@ function Playground({ authenticated }: { authenticated: boolean }) {
               </div>
             ) : !searchLoading && searchResults.length === 0 ? (
               <div className="grid min-h-48 place-items-center px-5 text-center">
-                <div><Search className="mx-auto mb-3 size-7 text-slate-300" /><p className="text-sm font-medium text-slate-600">{chatSearch.trim() ? "No chats found" : "No conversations yet"}</p>{chatSearch.trim() && <p className="mt-1 text-xs text-slate-400">Try a different word or phrase.</p>}</div>
+                <div><Search className="mx-auto mb-3 size-7 text-slate-300" /><p className="text-sm font-medium text-slate-600">{chatSearch.trim() ? t("noChatsFound") : t("noConversations")}</p>{chatSearch.trim() && <p className="mt-1 text-xs text-slate-400">{t("tryDifferentSearch")}</p>}</div>
               </div>
             ) : (
               <div className="space-y-1">
-                {!chatSearch.trim() && <p className="px-3 py-2 text-xs font-semibold uppercase tracking-wider text-slate-400">Recent</p>}
+                {!chatSearch.trim() && <p className="px-3 py-2 text-xs font-semibold uppercase tracking-wider text-slate-400">{t("recent")}</p>}
                 {searchResults.map((item) => (
                   <button
                     key={item.id}
@@ -1093,7 +1084,7 @@ function Playground({ authenticated }: { authenticated: boolean }) {
                     className="flex w-full items-center gap-3 rounded-lg px-3 py-3 text-left transition-colors hover:bg-slate-100 focus-visible:bg-slate-100 focus-visible:outline-none"
                   >
                     <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-slate-100 text-slate-500"><Search className="size-4" /></span>
-                    <span className="min-w-0 flex-1"><span className="block truncate text-sm font-medium text-slate-800">{item.title}</span><span className="mt-0.5 block text-xs text-slate-400">{new Date(item.last_activity_at).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })} · {item.message_count} messages</span></span>
+                    <span className="min-w-0 flex-1"><span className="block truncate text-sm font-medium text-slate-800">{item.title}</span><span className="mt-0.5 block text-xs text-slate-400">{format.dateTime(new Date(item.last_activity_at), { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })} · {t("messageCount", { count: item.message_count })}</span></span>
                   </button>
                 ))}
               </div>
@@ -1108,9 +1099,9 @@ function Playground({ authenticated }: { authenticated: boolean }) {
             <div className="mb-1 grid size-10 place-items-center rounded-xl bg-indigo-50 text-indigo-600">
               <Sparkles className="size-5" />
             </div>
-            <DialogTitle>Sign in to start chatting</DialogTitle>
+            <DialogTitle>{t("authTitle")}</DialogTitle>
             <DialogDescription>
-              Create an account or sign in to attach sources and send messages.
+              {t("authDescription")}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter className="sm:grid sm:grid-cols-2">
@@ -1119,14 +1110,14 @@ function Playground({ authenticated }: { authenticated: boolean }) {
               nativeButton={false}
               render={<Link href="/register?next=%2F" />}
             >
-              Create account
+              {t("createAccount")}
             </Button>
             <Button
               nativeButton={false}
               className="bg-indigo-600 text-white hover:bg-indigo-700"
               render={<Link href="/login?next=%2F" />}
             >
-              Sign in
+              {t("signIn")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1140,9 +1131,9 @@ function Playground({ authenticated }: { authenticated: boolean }) {
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Delete conversation?</DialogTitle>
+            <DialogTitle>{t("deleteTitle")}</DialogTitle>
             <DialogDescription>
-              <span className="font-medium text-slate-700">{deleteTarget?.title}</span> will be removed from your conversation history. It may still be retained for workspace analytics.
+              <span className="font-medium text-slate-700">{deleteTarget?.title}</span> {t("deleteDescription")}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -1151,7 +1142,7 @@ function Playground({ authenticated }: { authenticated: boolean }) {
               disabled={Boolean(deletingSessionId)}
               onClick={() => setDeleteTarget(null)}
             >
-              Cancel
+              {t("cancel")}
             </Button>
             <Button
               variant="destructive"
@@ -1163,7 +1154,7 @@ function Playground({ authenticated }: { authenticated: boolean }) {
               ) : (
                 <Trash2 className="size-4" />
               )}
-              Delete conversation
+              {t("deleteConversation")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1179,12 +1170,13 @@ function Playground({ authenticated }: { authenticated: boolean }) {
 }
 
 export default function ChatPlayground() {
+  const t = useTranslations("Chat")
   const status = useTokenRehydration()
 
   if (status === "rehydrating") {
     return (
       <div className="grid min-h-dvh place-items-center bg-white">
-        <Loader2 className="size-8 animate-spin text-indigo-600" aria-label="Loading" />
+        <Loader2 className="size-8 animate-spin text-indigo-600" aria-label={t("loading")} />
       </div>
     )
   }

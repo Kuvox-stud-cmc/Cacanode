@@ -1,10 +1,15 @@
 'use client';
 
 import { useCallback, useRef } from 'react'
+import { useTranslations } from 'next-intl'
 import { useAuthStore } from '@/components/providers/StoreProvider'
 import { getApiBase } from '@/lib/auth-api'
+import { useRouter } from '@/i18n/navigation'
+import { withNext } from '@/lib/auth-redirect'
 
 export function useApiClient() {
+  const t = useTranslations('Common')
+  const router = useRouter()
   const accessToken = useAuthStore(s => s.accessToken)
   const setAuth = useAuthStore(s => s.setAuth)
   const clearAuth = useAuthStore(s => s.clearAuth)
@@ -70,17 +75,19 @@ export function useApiClient() {
       processQueue(null, newToken)
 
       response = await makeRequest(newToken)
-    } catch (err) {
-      processQueue(err, null)
+    } catch {
+      const sessionError = new Error(t('sessionExpired'))
+      processQueue(sessionError, null)
       clearAuth()
-      window.location.href = '/login'
-      throw new Error('Session expired')
+      const destination = `${window.location.pathname}${window.location.search}${window.location.hash}`
+      router.replace(withNext('/login', destination))
+      throw sessionError
     } finally {
       isRefreshingRef.current = false
     }
 
     return response
-  }, [accessToken, setAuth, clearAuth])
+  }, [accessToken, setAuth, clearAuth, router, t])
 
   return { request }
 }

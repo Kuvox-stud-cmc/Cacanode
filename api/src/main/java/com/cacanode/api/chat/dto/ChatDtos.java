@@ -4,6 +4,7 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
 import java.time.LocalDateTime;
@@ -36,6 +37,13 @@ public final class ChatDtos {
     public record SubmitMessageRequest(
             @NotBlank @Size(max = 32000) String content,
             Map<String, Object> metadata
+    ) {
+    }
+
+    public record WidgetSubmitMessageRequest(
+            @NotBlank @Size(max = 32000) String content,
+            Map<String, Object> metadata,
+            @Pattern(regexp = "en-US|vi-VN") String locale
     ) {
     }
 

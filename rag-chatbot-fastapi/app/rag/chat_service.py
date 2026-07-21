@@ -402,7 +402,6 @@ class RagChatService:
                 completion = await self._complete_with_usage(
                     self._external_prompt_messages(
                         question=content,
-                        locale=session.locale,
                         chunks=selected,
                         citations=citations,
                         history=external_history,
@@ -413,7 +412,6 @@ class RagChatService:
                     if is_external
                     else self._prompt_messages(
                         question=content,
-                        locale=session.locale,
                         chunks=selected,
                         citations=citations,
                         calculation_context=calculation_text,
@@ -542,7 +540,6 @@ class RagChatService:
         self,
         *,
         question: str,
-        locale: str,
         chunks: list[RetrievedChunk],
         citations: list[Citation],
         calculation_context: str | None = None,
@@ -561,7 +558,7 @@ class RagChatService:
                     "If the sources do not contain the answer, say you do not know. "
                     "Cite factual claims with [S1], [S2], etc. "
                     "Keep the answer concise, with at most three short sentences. "
-                    f"Respond in locale {locale}."
+                    "Respond in the same language as the question. "
                 ),
             },
             {
@@ -578,7 +575,6 @@ class RagChatService:
         self,
         *,
         question: str,
-        locale: str,
         chunks: list[RetrievedChunk],
         citations: list[Citation],
         history: list[ChatMessage],
@@ -622,7 +618,7 @@ class RagChatService:
                     "For knowledge questions, answer only from supplied sources and cite claims "
                     "with "
                     "[S1], [S2], etc. If sources are insufficient, say so. "
-                    f"Respond in locale {locale}.\n\n"
+                    "Respond in the same language as the latest customer message.\n\n"
                     "Tenant-specific customer answer instructions:\n"
                     "--- BEGIN TENANT INSTRUCTIONS ---\n"
                     f"{effective_tenant_prompt}\n"

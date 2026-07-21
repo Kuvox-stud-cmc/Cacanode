@@ -12,20 +12,20 @@ import {
 
 export type AppNavigationItem = {
   href: string
-  label: string
+  labelKey: "chat" | "dashboard" | "documents" | "conversations" | "tickets" | "analytics" | "documentation" | "users" | "settings"
   icon: LucideIcon
   tenantAdminOnly?: boolean
   placement?: "main" | "footer"
 }
 
 export const appNavigation: AppNavigationItem[] = [
-  { href: "/", label: "Chat", icon: MessageSquare },
-  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/documents", label: "Documents", icon: FileText },
-  { href: "/conversations", label: "Conversations", icon: MessageSquare },
-  { href: "/tickets", label: "Tickets", icon: TicketCheck },
-  { href: "/analytics", label: "Analytics", icon: BarChart2 },
-  { href: "/documentation", label: "Documentation", icon: BookOpen, placement: "footer" },
-  { href: "/users", label: "Users", icon: Users },
-  { href: "/settings", label: "Settings", icon: Settings, tenantAdminOnly: true },
+  { href: "/", labelKey: "chat", icon: MessageSquare },
+  { href: "/dashboard", labelKey: "dashboard", icon: LayoutDashboard },
+  { href: "/documents", labelKey: "documents", icon: FileText },
+  { href: "/conversations", labelKey: "conversations", icon: MessageSquare },
+  { href: "/tickets", labelKey: "tickets", icon: TicketCheck },
+  { href: "/analytics", labelKey: "analytics", icon: BarChart2 },
+  { href: "/documentation", labelKey: "documentation", icon: BookOpen, placement: "footer" },
+  { href: "/users", labelKey: "users", icon: Users },
+  { href: "/settings", labelKey: "settings", icon: Settings, tenantAdminOnly: true },
 ]

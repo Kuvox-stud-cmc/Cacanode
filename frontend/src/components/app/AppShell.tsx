@@ -2,8 +2,7 @@
 
 import { useEffect, useState, type ReactNode } from "react"
 import Image from "next/image"
-import Link from "next/link"
-import { usePathname, useRouter } from "next/navigation"
+import { useTranslations } from "next-intl"
 import { Loader2, LogOut, Menu, X } from "lucide-react"
 import { useAuthStore } from "@/components/providers/StoreProvider"
 import { useTokenRehydration } from "@/hooks/useTokenRehydration"
@@ -12,6 +11,8 @@ import { getBillingAccount, type BillingAccount } from "@/lib/billing-api"
 import { useApiClient } from "@/hooks/useApiClient"
 import { appNavigation } from "@/components/app/navigation"
 import { PlanStatusBadge } from "@/components/billing/PlanStatusBadge"
+import { LanguageSwitcher } from "@/components/i18n/LanguageSwitcher"
+import { Link, usePathname, useRouter } from "@/i18n/navigation"
 import { withNext } from "@/lib/auth-redirect"
 import { cn } from "@/lib/utils"
 
@@ -31,6 +32,7 @@ type AppShellProps = {
 }
 
 export function AppShell({ children, contentClassName, mobileNavContent }: AppShellProps) {
+  const t = useTranslations("Navigation")
   const pathname = usePathname()
   const router = useRouter()
   const user = useAuthStore((state) => state.user)
@@ -46,8 +48,8 @@ export function AppShell({ children, contentClassName, mobileNavContent }: AppSh
   const footerNavigation = visibleNavigation.filter((item) => item.placement === "footer")
   const pageTitle =
     appNavigation.find(
-      (item) => item.href === pathname || pathname.startsWith(`${item.href}/`),
-    )?.label ?? "Dashboard"
+      (item) => item.href === pathname || (item.href !== "/" && pathname.startsWith(`${item.href}/`)),
+    )?.labelKey ?? "dashboard"
 
   useEffect(() => {
     if (!user?.tenantId) return
@@ -93,14 +95,14 @@ export function AppShell({ children, contentClassName, mobileNavContent }: AppSh
             type="button"
             className="ml-auto rounded-md p-1 text-slate-300 hover:bg-slate-800 xl:hidden"
             onClick={() => setSidebarOpen(false)}
-            aria-label="Close navigation"
+            aria-label={t("closeNavigation")}
           >
             <X className="size-5" />
           </button>
         </div>
 
         <nav className="flex-1 space-y-1 overflow-y-auto p-3">
-          {primaryNavigation.map(({ href, label, icon: Icon }) => {
+          {primaryNavigation.map(({ href, labelKey, icon: Icon }) => {
             const isActive = pathname === href
             return (
               <Link
@@ -115,7 +117,7 @@ export function AppShell({ children, contentClassName, mobileNavContent }: AppSh
                 )}
               >
                 <Icon className="size-4" />
-                {label}
+                {t(labelKey)}
               </Link>
             )
           })}
@@ -132,7 +134,7 @@ export function AppShell({ children, contentClassName, mobileNavContent }: AppSh
           )}
         </nav>
 
-        {footerNavigation.map(({ href, label, icon: Icon }) => (
+        {footerNavigation.map(({ href, labelKey, icon: Icon }) => (
           <div key={href} className="border-t border-slate-700 px-3 py-3">
             <Link
               href={href}
@@ -143,8 +145,8 @@ export function AppShell({ children, contentClassName, mobileNavContent }: AppSh
                 <Icon className="size-4" />
               </span>
               <span className="min-w-0">
-                <span className="block text-sm font-medium text-slate-100">{label}</span>
-                <span className="block text-[11px] text-slate-400">Guides, API, and setup</span>
+                <span className="block text-sm font-medium text-slate-100">{t(labelKey)}</span>
+                <span className="block text-[11px] text-slate-400">{t("guidesApiSetup")}</span>
               </span>
             </Link>
           </div>
@@ -156,13 +158,13 @@ export function AppShell({ children, contentClassName, mobileNavContent }: AppSh
               {initialsFrom(user?.fullName)}
             </div>
             <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-medium">{user?.fullName ?? "User"}</p>
+              <p className="truncate text-sm font-medium">{user?.fullName ?? t("user")}</p>
               <p className="truncate text-xs text-slate-400">{user?.email ?? ""}</p>
               <div className="mt-1.5">
                 {user?.role === "TENANT_ADMIN" ? (
                   <Link
                     href="/settings?tab=quota"
-                    aria-label="Open billing settings"
+                    aria-label={t("openBillingSettings")}
                     className="inline-flex rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400"
                   >
                     <PlanStatusBadge
@@ -185,7 +187,7 @@ export function AppShell({ children, contentClassName, mobileNavContent }: AppSh
             className="flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm text-slate-300 transition-colors hover:bg-slate-800 hover:text-white"
           >
             <LogOut className="size-4" />
-            Log out
+            {t("logout")}
           </button>
         </div>
       </aside>
@@ -195,7 +197,7 @@ export function AppShell({ children, contentClassName, mobileNavContent }: AppSh
           type="button"
           className="fixed inset-0 z-30 bg-black/50 xl:hidden"
           onClick={() => setSidebarOpen(false)}
-          aria-label="Close navigation"
+          aria-label={t("closeNavigation")}
         />
       )}
 
@@ -205,11 +207,12 @@ export function AppShell({ children, contentClassName, mobileNavContent }: AppSh
             type="button"
             onClick={() => setSidebarOpen(true)}
             className="rounded-md p-1.5 text-slate-600 hover:bg-slate-100 xl:hidden"
-            aria-label="Open navigation"
+            aria-label={t("openNavigation")}
           >
             <Menu className="size-5" />
           </button>
-          <h1 className="font-semibold text-slate-800">{pageTitle}</h1>
+          <h1 className="font-semibold text-slate-800">{t(pageTitle)}</h1>
+          <LanguageSwitcher className="ml-auto" />
         </header>
         <main className={cn("p-4 sm:p-6", contentClassName)}>{children}</main>
       </div>
@@ -218,6 +221,7 @@ export function AppShell({ children, contentClassName, mobileNavContent }: AppSh
 }
 
 export function ProtectedAppShell({ children }: { children: ReactNode }) {
+  const common = useTranslations("Common")
   const router = useRouter()
   const status = useTokenRehydration()
 
@@ -231,7 +235,7 @@ export function ProtectedAppShell({ children }: { children: ReactNode }) {
   if (status === "rehydrating") {
     return (
       <div className="grid min-h-dvh place-items-center bg-slate-100">
-        <Loader2 className="size-8 animate-spin text-indigo-600" aria-label="Loading" />
+        <Loader2 className="size-8 animate-spin text-indigo-600" aria-label={common("loading")} />
       </div>
     )
   }

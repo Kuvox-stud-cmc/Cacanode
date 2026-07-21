@@ -1,8 +1,10 @@
+"use client"
+
+import { useTranslations } from "next-intl"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 
 export type PlanPresentation = {
-  label: string
   className: string
 }
 
@@ -12,7 +14,6 @@ export function getPlanPresentation(
 ): PlanPresentation {
   if (status?.trim().toUpperCase() === "GRACE") {
     return {
-      label: "Pro · Grace",
       className: "border-red-300 bg-red-100 text-red-800",
     }
   }
@@ -20,29 +21,24 @@ export function getPlanPresentation(
   switch (plan?.trim().toUpperCase()) {
     case "TRIAL":
       return {
-        label: "Trial",
         className: "border-amber-300 bg-amber-100 text-amber-800",
       }
     case "FREE":
     case "STARTER":
       return {
-        label: "Starter",
         className: "border-slate-300 bg-slate-100 text-slate-700",
       }
     case "PRO":
       return {
-        label: "Pro",
         className: "border-indigo-300 bg-indigo-100 text-indigo-800",
       }
     case "BUSINESS":
     case "ENTERPRISE":
       return {
-        label: "Enterprise",
         className: "border-emerald-300 bg-emerald-100 text-emerald-800",
       }
     default:
       return {
-        label: "Current plan",
         className: "border-slate-300 bg-slate-100 text-slate-700",
       }
   }
@@ -57,13 +53,21 @@ export function PlanStatusBadge({
   plan: string | null | undefined
   status?: string | null
 }) {
+  const t = useTranslations("PlanBadge")
   const presentation = getPlanPresentation(plan, status)
+  const normalizedPlan = plan?.trim().toUpperCase()
+  const label = status?.trim().toUpperCase() === "GRACE" ? t("grace")
+    : normalizedPlan === "TRIAL" ? t("trial")
+    : normalizedPlan === "FREE" || normalizedPlan === "STARTER" ? t("starter")
+    : normalizedPlan === "PRO" ? t("pro")
+    : normalizedPlan === "BUSINESS" || normalizedPlan === "ENTERPRISE" ? t("enterprise")
+    : t("current")
   return (
     <Badge
       variant="outline"
       className={cn("font-semibold", presentation.className, className)}
     >
-      {presentation.label}
+      {label}
     </Badge>
   )
 }

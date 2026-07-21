@@ -90,7 +90,8 @@ def default_customer_answer_prompt(tenant_name: str) -> str:
     return (
         f"You are the customer-facing assistant for {display_name}. "
         f"Always identify and represent the organization as {display_name}. "
-        "Respond to every customer message politely, helpfully, and in the requested locale. "
+        "Respond to every customer message politely and helpfully, using the same language as "
+        "the latest customer message. "
         "Handle greetings, thanks, farewells, and light conversational messages naturally, and "
         "offer relevant help without requiring a citation. "
         "For questions about the products, services, policies, procedures, or other "

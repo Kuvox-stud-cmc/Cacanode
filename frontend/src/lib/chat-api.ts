@@ -10,6 +10,13 @@ import type { ApiRequest } from "@/lib/documents-api";
 
 const CHAT_MESSAGE_TIMEOUT_MS = 90_000;
 
+export class ChatMessageTimeoutError extends Error {
+  constructor() {
+    super("CHAT_MESSAGE_TIMEOUT");
+    this.name = "ChatMessageTimeoutError";
+  }
+}
+
 export async function createChatSessionApi(
   request: ApiRequest,
   payload: {
@@ -83,7 +90,7 @@ export async function submitChatMessageApi(
     return readJsonOrThrow<AssistantMessageResponse>(res);
   } catch (error) {
     if (error instanceof DOMException && error.name === "AbortError") {
-      throw new Error("The model is still generating. Try a shorter question or retry in a moment.");
+      throw new ChatMessageTimeoutError();
     }
     throw error;
   } finally {

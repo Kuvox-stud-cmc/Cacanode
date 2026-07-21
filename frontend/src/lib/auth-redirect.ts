@@ -1,12 +1,18 @@
 const AUTH_DESTINATION_KEY = "cacanode:auth-destination"
 
+function withoutUiLocale(pathname: string): string {
+  if (pathname === "/en" || pathname === "/vi") return "/"
+  if (pathname.startsWith("/en/") || pathname.startsWith("/vi/")) return pathname.slice(3)
+  return pathname
+}
+
 export function safeInternalPath(value: string | null | undefined): string | null {
   if (!value || !value.startsWith("/") || value.startsWith("//")) return null
 
   try {
     const url = new URL(value, "http://cacanode.local")
     if (url.origin !== "http://cacanode.local") return null
-    return `${url.pathname}${url.search}${url.hash}`
+    return `${withoutUiLocale(url.pathname)}${url.search}${url.hash}`
   } catch {
     return null
   }

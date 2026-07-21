@@ -8,7 +8,7 @@
 </head>
 <body>
 <main id="widget" class="widget" data-open="false">
-    <section class="panel" aria-label="Support conversation">
+    <section id="panel" class="panel" aria-label="Support conversation">
         <header class="header">
             <div class="header-identity">
                 <span class="header-icon-shell" aria-hidden="true">
@@ -17,10 +17,17 @@
                 </span>
                 <span class="header-copy">
                 <strong id="display-name">Assistant</strong>
-                <span>Online</span>
+                <span id="online-status">Online</span>
                 </span>
             </div>
-            <button id="close" class="icon-button" type="button" aria-label="Close chat">&#10005;</button>
+            <div class="header-actions">
+                <div id="language-switcher" class="language-switcher" role="group" aria-label="Language">
+                    <button type="button" data-locale="en" aria-pressed="true">EN</button>
+                    <span aria-hidden="true">/</span>
+                    <button type="button" data-locale="vi" aria-pressed="false">VI</button>
+                </div>
+                <button id="close" class="icon-button" type="button" aria-label="Close chat">&#10005;</button>
+            </div>
         </header>
         <div id="messages" class="messages" aria-live="polite"></div>
         <form id="composer" class="composer">
@@ -38,12 +45,12 @@
 <dialog id="ticket-dialog">
     <form id="ticket-form" method="dialog">
         <header>
-            <strong>Create support ticket</strong>
+            <strong id="ticket-heading">Create support ticket</strong>
             <button id="ticket-cancel" class="icon-button" type="button" aria-label="Close">&#10005;</button>
         </header>
-        <label>Email<input id="ticket-email" type="email" maxlength="320" required></label>
-        <label>Title<input id="ticket-title" maxlength="255" required></label>
-        <label>Description<textarea id="ticket-description" rows="6" maxlength="10000" required></textarea></label>
+        <label><span id="ticket-email-label">Email</span><input id="ticket-email" type="email" maxlength="320" required></label>
+        <label><span id="ticket-title-label">Title</span><input id="ticket-title" maxlength="255" required></label>
+        <label><span id="ticket-description-label">Description</span><textarea id="ticket-description" rows="6" maxlength="10000" required></textarea></label>
         <button id="ticket-submit" class="primary" type="submit">Create ticket</button>
     </form>
 </dialog>
@@ -51,6 +58,30 @@
 <script>
 (function () {
   "use strict";
+  var translations = {
+    en: {
+      title: "CacaNode Support", panel: "Support conversation", online: "Online",
+      closeChat: "Close chat", typeMessage: "Type a message", message: "Message",
+      sendMessage: "Send message", poweredBy: "Powered by CacaNode", openChat: "Open support chat",
+      ticketHeading: "Create support ticket", close: "Close", email: "Email", ticketTitle: "Title",
+      description: "Description", createTicket: "Create ticket", requestFailed: "Request failed",
+      iconFailed: "Unable to load widget icon", openSource: "Open source: {source}",
+      sourceDocument: "Source document", sources: "Sources", unavailable: "The support widget is unavailable.",
+      ticketCreated: "Ticket {id} was created. We will follow up by email.", language: "Language",
+      thinking: "Thinking"
+    },
+    vi: {
+      title: "Hỗ trợ CacaNode", panel: "Cuộc trò chuyện hỗ trợ", online: "Đang trực tuyến",
+      closeChat: "Đóng trò chuyện", typeMessage: "Nhập tin nhắn", message: "Tin nhắn",
+      sendMessage: "Gửi tin nhắn", poweredBy: "Cung cấp bởi CacaNode", openChat: "Mở trò chuyện hỗ trợ",
+      ticketHeading: "Tạo phiếu hỗ trợ", close: "Đóng", email: "Email", ticketTitle: "Tiêu đề",
+      description: "Mô tả", createTicket: "Tạo phiếu", requestFailed: "Yêu cầu thất bại",
+      iconFailed: "Không thể tải biểu tượng tiện ích", openSource: "Mở nguồn: {source}",
+      sourceDocument: "Tài liệu nguồn", sources: "Nguồn", unavailable: "Tiện ích hỗ trợ hiện không khả dụng.",
+      ticketCreated: "Đã tạo phiếu {id}. Chúng tôi sẽ phản hồi qua email.", language: "Ngôn ngữ",
+      thinking: "Đang suy nghĩ"
+    }
+  };
   var token = null;
   var config = null;
   var sessionId = null;
@@ -58,12 +89,87 @@
   var currentDraft = null;
   var iconObjectUrl = null;
   var previewChatApiBaseUrl = null;
+  var currentLocale = "en";
+  var localeWasChosen = false;
   var widget = document.getElementById("widget");
   var messages = document.getElementById("messages");
   var composer = document.getElementById("composer");
   var input = document.getElementById("message");
   var send = document.getElementById("send");
   var dialog = document.getElementById("ticket-dialog");
+
+  function tr(key, values) {
+    var text = translations[currentLocale][key] || translations.en[key] || key;
+    Object.keys(values || {}).forEach(function (name) {
+      text = text.replace("{" + name + "}", values[name]);
+    });
+    return text;
+  }
+
+  function localeApiValue() {
+    return currentLocale === "vi" ? "vi-VN" : "en-US";
+  }
+
+  function browserLocale() {
+    return String(navigator.language || "en").toLowerCase().startsWith("vi") ? "vi" : "en";
+  }
+
+  function localeStorageKey() {
+    return "cacanode-widget-locale:" + (parentOrigin || "unknown");
+  }
+
+  function localizedEvidenceUrl(value) {
+    var publicUrl = safePublicUrl(value);
+    if (!publicUrl) return null;
+    try {
+      var parsed = new URL(publicUrl);
+      if (currentLocale === "vi" && !parsed.pathname.startsWith("/vi/")) parsed.pathname = "/vi" + parsed.pathname;
+      if (currentLocale === "en" && parsed.pathname.startsWith("/vi/evidence/")) parsed.pathname = parsed.pathname.slice(3);
+      return parsed.toString();
+    } catch (error) {
+      return publicUrl;
+    }
+  }
+
+  function refreshEvidenceLinks() {
+    document.querySelectorAll("[data-public-evidence]").forEach(function (link) {
+      link.href = localizedEvidenceUrl(link.dataset.publicEvidence) || link.dataset.publicEvidence;
+    });
+  }
+
+  function applyLocale() {
+    document.documentElement.lang = currentLocale;
+    document.title = tr("title");
+    document.getElementById("panel").setAttribute("aria-label", tr("panel"));
+    document.getElementById("online-status").textContent = tr("online");
+    document.getElementById("close").setAttribute("aria-label", tr("closeChat"));
+    input.placeholder = tr("typeMessage");
+    input.setAttribute("aria-label", tr("message"));
+    send.setAttribute("aria-label", tr("sendMessage"));
+    document.getElementById("branding").textContent = tr("poweredBy");
+    document.getElementById("launcher").setAttribute("aria-label", tr("openChat"));
+    document.getElementById("language-switcher").setAttribute("aria-label", tr("language"));
+    document.getElementById("ticket-heading").textContent = tr("ticketHeading");
+    document.getElementById("ticket-cancel").setAttribute("aria-label", tr("close"));
+    document.getElementById("ticket-email-label").textContent = tr("email");
+    document.getElementById("ticket-title-label").textContent = tr("ticketTitle");
+    document.getElementById("ticket-description-label").textContent = tr("description");
+    document.getElementById("ticket-submit").textContent = tr("createTicket");
+    document.querySelectorAll("[data-locale]").forEach(function (button) {
+      button.setAttribute("aria-pressed", button.dataset.locale === currentLocale ? "true" : "false");
+    });
+    refreshEvidenceLinks();
+    parent.postMessage({source: "cacanode-widget", type: "locale", locale: currentLocale, title: tr("panel")}, parentOrigin || "*");
+  }
+
+  function setLocale(nextLocale, persist) {
+    currentLocale = nextLocale === "vi" ? "vi" : "en";
+    if (persist && parentOrigin) {
+      localeWasChosen = true;
+      try { localStorage.setItem(localeStorageKey(), currentLocale); } catch (error) { /* Storage can be blocked. */ }
+    }
+    applyLocale();
+  }
 
   function api(path, options) {
     options = options || {};
@@ -77,7 +183,7 @@
       var body = response.status === 204 ? null : await response.json().catch(function () { return null; });
       if (!response.ok) {
         var message = body && body.error && body.error.message || body && body.message
-          || body && body.detail || "Request failed";
+          || body && body.detail || tr("requestFailed");
         throw new Error(message);
       }
       return body;
@@ -88,7 +194,7 @@
     var headers = {"Authorization": "Bearer " + token};
     if (parentOrigin) headers["X-Parent-Origin"] = parentOrigin;
     return fetch(path, {headers: headers}).then(async function (response) {
-      if (!response.ok) throw new Error("Unable to load widget icon");
+      if (!response.ok) throw new Error(tr("iconFailed"));
       return response.blob();
     });
   }
@@ -156,15 +262,17 @@
       if (match.index > cursor) item.appendChild(document.createTextNode(content.slice(cursor, match.index)));
       var id = match[0].slice(1, -1).toUpperCase();
       var citation = byId.get(id);
-      var publicUrl = citation && safePublicUrl(citation.public_url || citation.publicUrl);
+      var rawPublicUrl = citation && safePublicUrl(citation.public_url || citation.publicUrl);
+      var publicUrl = rawPublicUrl && localizedEvidenceUrl(rawPublicUrl);
       if (citation && publicUrl) {
         var link = document.createElement("a");
         link.className = "citation-link";
         link.href = publicUrl;
+        link.dataset.publicEvidence = rawPublicUrl;
         link.target = "_blank";
         link.rel = "noopener noreferrer";
         link.textContent = citation.id;
-        link.title = "Open source: " + citation.source_name;
+        link.title = tr("openSource", {source: citation.source_name});
         item.appendChild(link);
       } else {
         item.appendChild(document.createTextNode(match[0]));
@@ -177,21 +285,23 @@
   function appendSourceCards(item, citations) {
     var sources = new Map();
     (citations || []).forEach(function (citation) {
-      var publicUrl = safePublicUrl(citation.public_url || citation.publicUrl);
+      var rawPublicUrl = safePublicUrl(citation.public_url || citation.publicUrl);
+      var publicUrl = rawPublicUrl && localizedEvidenceUrl(rawPublicUrl);
       if (!publicUrl || sources.has(citation.document_id)) return;
-      sources.set(citation.document_id, {url: publicUrl, name: citation.source_name || "Source document"});
+      sources.set(citation.document_id, {url: publicUrl, rawUrl: rawPublicUrl, name: citation.source_name || tr("sourceDocument")});
     });
     if (sources.size === 0) return;
     var container = document.createElement("div");
     container.className = "message-sources";
     var label = document.createElement("div");
     label.className = "message-sources-label";
-    label.textContent = "Sources";
+    label.textContent = tr("sources");
     container.appendChild(label);
     sources.forEach(function (source) {
       var link = document.createElement("a");
       link.className = "source-card";
       link.href = source.url;
+      link.dataset.publicEvidence = source.rawUrl;
       link.target = "_blank";
       link.rel = "noopener noreferrer";
       var name = document.createElement("span");
@@ -211,6 +321,32 @@
     appendMessageContent(item, content, citations || []);
     if (role === "assistant") appendSourceCards(item, citations || []);
     messages.appendChild(item);
+    messages.scrollTop = messages.scrollHeight;
+  }
+
+  function addThinking() {
+    var item = document.createElement("div");
+    item.className = "message assistant thinking";
+    item.setAttribute("role", "status");
+    item.setAttribute("aria-label", tr("thinking"));
+    var label = document.createElement("span");
+    label.className = "visually-hidden";
+    label.textContent = tr("thinking");
+    item.appendChild(label);
+    var dots = document.createElement("span");
+    dots.className = "thinking-dots";
+    dots.setAttribute("aria-hidden", "true");
+    [0, 1, 2].forEach(function () { dots.appendChild(document.createElement("span")); });
+    item.appendChild(dots);
+    messages.setAttribute("aria-busy", "true");
+    messages.appendChild(item);
+    messages.scrollTop = messages.scrollHeight;
+    return item;
+  }
+
+  function removeThinking(item) {
+    if (item && item.parentNode) item.parentNode.removeChild(item);
+    messages.setAttribute("aria-busy", "false");
     messages.scrollTop = messages.scrollHeight;
   }
 
@@ -235,6 +371,10 @@
   async function initialize(incomingToken, origin, previewConfig) {
     token = incomingToken;
     parentOrigin = origin;
+    var savedLocale = null;
+    try { savedLocale = localStorage.getItem(localeStorageKey()); } catch (error) { /* Storage can be blocked. */ }
+    localeWasChosen = savedLocale === "en" || savedLocale === "vi";
+    setLocale(savedLocale || previewConfig && previewConfig.uiLocale || browserLocale(), false);
     try {
       applyConfig(previewConfig || await api("/api/v1/public/widget/config", {headers: {"X-Parent-Origin": parentOrigin}}));
       addMessage("assistant", config.welcomeMessage);
@@ -246,11 +386,11 @@
       }
       var session = await api("/api/v1/widget/chat/sessions", {
         method: "POST",
-        body: JSON.stringify({external_user_id: visitorId, locale: navigator.language || "en"})
+        body: JSON.stringify({external_user_id: visitorId, locale: localeApiValue()})
       });
       sessionId = session.id;
     } catch (error) {
-      addMessage("error", error.message || "The support widget is unavailable.");
+      addMessage("error", error.message || tr("unavailable"));
       input.disabled = true;
       send.disabled = true;
     }
@@ -260,6 +400,7 @@
     if (event.source !== parent || !event.data || event.data.source !== "cacanode-host") return;
     if (event.data.type === "preview-config" && token && event.data.config) {
       applyConfig(event.data.config);
+      if (!localeWasChosen && event.data.config.uiLocale) setLocale(event.data.config.uiLocale, false);
       return;
     }
     if (event.data.type !== "init" || token) return;
@@ -269,6 +410,9 @@
 
   document.getElementById("launcher").addEventListener("click", function () { setOpen(true); });
   document.getElementById("close").addEventListener("click", function () { setOpen(false); });
+  document.querySelectorAll("[data-locale]").forEach(function (button) {
+    button.addEventListener("click", function () { setLocale(button.dataset.locale, true); });
+  });
 
   composer.addEventListener("submit", async function (event) {
     event.preventDefault();
@@ -277,11 +421,14 @@
     addMessage("user", content);
     input.value = "";
     send.disabled = true;
+    var thinking = addThinking();
     try {
       var response = await api("/api/v1/widget/chat/sessions/" + sessionId + "/messages", {
         method: "POST",
-        body: JSON.stringify({content: content})
+        body: JSON.stringify({content: content, locale: localeApiValue()})
       });
+      removeThinking(thinking);
+      thinking = null;
       addMessage("assistant", response.content, response.citations || []);
       if (response.action && response.action.type === "ticket_draft") {
         currentDraft = response.action;
@@ -292,8 +439,11 @@
         dialog.showModal();
       }
     } catch (error) {
-      addMessage("error", error.message);
+      removeThinking(thinking);
+      thinking = null;
+      addMessage("error", error.message || tr("requestFailed"));
     } finally {
+      removeThinking(thinking);
       send.disabled = false;
       input.focus();
     }
@@ -316,16 +466,17 @@
         })
       });
       dialog.close();
-      addMessage("assistant", "Ticket " + ticket.id.slice(0, 8) + " was created. We will follow up by email.");
+      addMessage("assistant", tr("ticketCreated", {id: ticket.id.slice(0, 8)}));
       currentDraft = null;
     } catch (error) {
-      addMessage("error", error.message);
+      addMessage("error", error.message || tr("requestFailed"));
       dialog.close();
     } finally {
       button.disabled = false;
     }
   });
 
+  applyLocale();
   parent.postMessage({source: "cacanode-widget", type: "ready"}, "*");
 })();
 </script>

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useTranslations } from "next-intl";
 import PlanCardGrid from "@/components/landing/PlanCardGrid";
 import { getPublicBillingPlans, type BillingInterval, type BillingPlan } from "@/lib/billing-api";
 
@@ -11,10 +12,11 @@ type PricingSectionProps = {
 };
 
 export default function PricingSection({
-  title = "Simple, transparent pricing",
-  description = "Start free, upgrade through secure PayOS checkout, or contact us for custom scale.",
+  title,
+  description,
   compact = false,
 }: PricingSectionProps) {
+  const t = useTranslations("Pricing")
   const [plans, setPlans] = useState<BillingPlan[]>([]);
   const [interval, setInterval] = useState<BillingInterval>("MONTHLY");
 
@@ -27,10 +29,10 @@ export default function PricingSection({
       <div className="max-w-6xl mx-auto">
         <div className={compact ? "mb-8" : "mb-14 text-center"}>
           <h2 className="text-3xl font-bold text-slate-900 mb-4">
-            {title}
+            {title ?? t("title")}
           </h2>
           <p className={`text-lg text-slate-500 ${compact ? "max-w-2xl" : "mx-auto max-w-xl"}`}>
-            {description}
+            {description ?? t("description")}
           </p>
         </div>
 

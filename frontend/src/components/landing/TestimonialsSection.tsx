@@ -1,16 +1,18 @@
 import { mockTestimonials } from "@/lib/mock-data";
 import { Star } from "lucide-react";
+import { useTranslations } from "next-intl";
 
 export default function TestimonialsSection() {
+  const t = useTranslations("Landing")
   return (
     <section className="py-20 px-4 bg-slate-50">
       <div className="max-w-6xl mx-auto">
         <div className="text-center mb-14">
           <h2 className="text-3xl font-bold text-slate-900 mb-4">
-            Loved by support teams everywhere
+            {t("testimonials.title")}
           </h2>
           <p className="text-slate-500 text-lg">
-            Real results from real customers.
+            {t("testimonials.description")}
           </p>
         </div>
 

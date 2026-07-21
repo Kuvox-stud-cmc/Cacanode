@@ -24,12 +24,29 @@ type ApiErrorBody = {
   message?: string | string[];
 };
 
-function parseErrorMessage(body: unknown): string {
-  if (!body || typeof body !== "object") return "Something went wrong";
+class AuthApiFallbackError extends Error {
+  constructor() {
+    super("AUTH_API_FALLBACK");
+    this.name = "AuthApiFallbackError";
+  }
+}
+
+function parseErrorMessage(body: unknown): string | null {
+  if (!body || typeof body !== "object") return null;
   const msg = (body as ApiErrorBody).message;
   if (typeof msg === "string") return msg;
   if (Array.isArray(msg)) return msg.join(" ");
-  return "Something went wrong";
+  return null;
+}
+
+function authApiError(body: unknown): Error {
+  const message = parseErrorMessage(body);
+  return message ? new Error(message) : new AuthApiFallbackError();
+}
+
+export function authApiErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof AuthApiFallbackError) return fallback;
+  return error instanceof Error ? error.message : fallback;
 }
 
 async function parseJsonSafe(res: Response): Promise<unknown> {
@@ -53,7 +70,7 @@ export async function refreshApi(): Promise<AuthResponse> {
     });
     const body = await parseJsonSafe(res);
     if (!res.ok) {
-      throw new Error(parseErrorMessage(body));
+      throw authApiError(body);
     }
     return body as AuthResponse;
   })().finally(() => {
@@ -76,7 +93,7 @@ export async function loginApi(payload: {
   });
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(parseErrorMessage(body));
+    throw authApiError(body);
   }
   return body as LoginResponse;
 }
@@ -90,7 +107,7 @@ export async function verifyLogin2FAApi(token: string): Promise<AuthResponse> {
   });
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(parseErrorMessage(body));
+    throw authApiError(body);
   }
   return body as AuthResponse;
 }
@@ -106,7 +123,7 @@ export async function resendLogin2FAApi(
   });
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(parseErrorMessage(body));
+    throw authApiError(body);
   }
   return body as ResendVerificationResponse;
 }
@@ -125,7 +142,7 @@ export async function registerApi(payload: {
   });
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(parseErrorMessage(body));
+    throw authApiError(body);
   }
   return body as RegisterResponse;
 }
@@ -139,7 +156,7 @@ export async function verifyEmailApi(token: string): Promise<AuthResponse> {
   });
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(parseErrorMessage(body));
+    throw authApiError(body);
   }
   return body as AuthResponse;
 }
@@ -155,7 +172,7 @@ export async function resendVerificationApi(
   });
   const body = await parseJsonSafe(res);
   if (!res.ok) {
-    throw new Error(parseErrorMessage(body));
+    throw authApiError(body);
   }
   return body as ResendVerificationResponse;
 }
@@ -167,7 +184,7 @@ export async function logoutApi(): Promise<void> {
   });
   if (!res.ok && res.status !== 204) {
     const body = await parseJsonSafe(res);
-    throw new Error(parseErrorMessage(body));
+    throw authApiError(body);
   }
 }
 
@@ -177,7 +194,7 @@ export async function validateInvitationApi(token: string): Promise<InvitationVa
     credentials: "include",
   });
   const body = await parseJsonSafe(res);
-  if (!res.ok) throw new Error(parseErrorMessage(body));
+  if (!res.ok) throw authApiError(body);
   return body as InvitationValidation;
 }
 
@@ -193,6 +210,6 @@ export async function acceptInvitationApi(payload: {
     body: JSON.stringify(payload),
   });
   const body = await parseJsonSafe(res);
-  if (!res.ok) throw new Error(parseErrorMessage(body));
+  if (!res.ok) throw authApiError(body);
   return body as AuthResponse;
 }

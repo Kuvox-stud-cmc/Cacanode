@@ -8,6 +8,10 @@ type FastApiErrorBody = {
   };
 };
 
+class ApiFallback {
+  constructor(readonly status: number) {}
+}
+
 async function parseJsonSafe(res: Response): Promise<unknown> {
   try {
     return await res.json();
@@ -16,7 +20,7 @@ async function parseJsonSafe(res: Response): Promise<unknown> {
   }
 }
 
-export async function parseApiError(res: Response): Promise<Error> {
+export async function parseApiError(res: Response): Promise<Error | ApiFallback> {
   const body = await parseJsonSafe(res);
   if (body && typeof body === "object") {
     const fastApiMessage = (body as FastApiErrorBody).error?.message;
@@ -26,7 +30,7 @@ export async function parseApiError(res: Response): Promise<Error> {
     if (typeof springMessage === "string") return new Error(springMessage);
     if (Array.isArray(springMessage)) return new Error(springMessage.join(" "));
   }
-  return new Error(`Request failed with status ${res.status}`);
+  return new ApiFallback(res.status);
 }
 
 export async function readJsonOrThrow<T>(res: Response): Promise<T> {
