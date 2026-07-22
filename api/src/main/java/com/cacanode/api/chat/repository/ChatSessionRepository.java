@@ -22,6 +22,21 @@ public interface ChatSessionRepository extends JpaRepository<ChatSession, UUID> 
 
     Optional<ChatSession> findByIdAndTenantIdAndHiddenAtIsNull(UUID id, UUID tenantId);
 
+    @Query("""
+            select session from ChatSession session
+            where session.id = :sessionId
+              and session.tenantId = :tenantId
+              and session.chatbotId = :chatbotId
+              and session.integrationTokenId = :integrationTokenId
+              and session.channel in :channels
+            """)
+    Optional<ChatSession> findExternalConversation(
+            @Param("sessionId") UUID sessionId,
+            @Param("tenantId") UUID tenantId,
+            @Param("chatbotId") UUID chatbotId,
+            @Param("integrationTokenId") UUID integrationTokenId,
+            @Param("channels") List<ChatChannel> channels);
+
     List<ChatSession> findByTenantIdAndUserIdAndChannelAndHiddenAtIsNullOrderByLastActivityAtDesc(
             UUID tenantId, UUID userId, ChatChannel channel, Pageable pageable);
 

@@ -7,7 +7,9 @@ import com.cacanode.api.auth.dto.response.AuthResponse;
 import com.cacanode.api.auth.dto.response.MobileAuthResponse;
 import com.cacanode.api.auth.dto.response.RegisterResponse;
 import com.cacanode.api.auth.dto.response.ResendVerificationResponse;
-import com.cacanode.api.tenant.dto.UserAuthDto;
+import com.cacanode.api.auth.dto.response.InvitationValidationResponse;
+import com.cacanode.api.auth.dto.request.AcceptInvitationRequest;
+import com.cacanode.api.tenant.api.UserAuthDto;
 
 import jakarta.servlet.http.HttpServletResponse;
 
@@ -42,4 +44,8 @@ public interface AuthService {
     ResendVerificationResponse resendVerificationEmail(String email);
 
     AuthResponse issueAuthTokens(UserAuthDto user, HttpServletResponse response, boolean persistent);
+
+    InvitationValidationResponse validateInvitation(String token);
+
+    AuthResponse acceptInvitation(AcceptInvitationRequest request, HttpServletResponse response);
 }

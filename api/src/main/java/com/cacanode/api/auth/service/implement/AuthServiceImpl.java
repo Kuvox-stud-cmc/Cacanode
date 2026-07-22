@@ -3,12 +3,14 @@ package com.cacanode.api.auth.service.implement;
 import com.cacanode.api.auth.dto.request.LoginRequest;
 import com.cacanode.api.auth.dto.request.MobileLoginRequest;
 import com.cacanode.api.auth.dto.request.RegisterRequest;
+import com.cacanode.api.auth.dto.request.AcceptInvitationRequest;
 import com.cacanode.api.auth.dto.response.AuthResponse;
 import com.cacanode.api.auth.dto.response.LoginStep1Response;
 import com.cacanode.api.auth.dto.response.MobileAuthResponse;
 import com.cacanode.api.auth.dto.response.RegisterResponse;
 import com.cacanode.api.auth.dto.response.ResendVerificationResponse;
-import com.cacanode.api.auth.enums.Login2FAChallengeType;
+import com.cacanode.api.auth.dto.response.InvitationValidationResponse;
+import com.cacanode.api.auth.api.Login2FAChallengeType;
 import com.cacanode.api.auth.model.Login2FAState;
 import com.cacanode.api.auth.model.RefreshToken;
 import com.cacanode.api.auth.model.UserSuspensionState;
@@ -18,8 +20,9 @@ import com.cacanode.api.auth.repository.UserSuspensionStateRepository;
 import com.cacanode.api.auth.repository.VerificationResendStateRepository;
 import com.cacanode.api.common.enums.LogAction;
 import com.cacanode.api.common.event.AuditLogEvent;
-import com.cacanode.api.common.event.Login2FARequestedEvent;
-import com.cacanode.api.common.event.UserRegisteredEvent;
+import com.cacanode.api.common.event.durable.DurableEventPublisher;
+import com.cacanode.api.auth.api.event.Login2FARequestedEvent;
+import com.cacanode.api.auth.api.event.UserRegisteredEvent;
 import io.jsonwebtoken.Claims;
 import com.cacanode.api.auth.repository.RefreshTokenRepository;
 import com.cacanode.api.auth.service.AuthService;
@@ -28,14 +31,16 @@ import com.cacanode.api.common.exception.custom.ConflictException;
 import com.cacanode.api.common.exception.custom.UnauthorizedException;
 import com.cacanode.api.auth.service.JwtService;
 import com.cacanode.api.tenant.api.RegisterTenantCommand;
-import com.cacanode.api.tenant.api.TenantModuleApi;
+import com.cacanode.api.tenant.api.TenantIdentityApi;
 import com.cacanode.api.tenant.api.TenantUserResult;
-import com.cacanode.api.tenant.dto.UserAuthDto;
+import com.cacanode.api.tenant.api.UserAuthDto;
+import com.cacanode.api.tenant.api.TenantIdentityApi;
 
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.http.ResponseCookie;
 import org.springframework.http.HttpHeaders;
@@ -83,7 +88,7 @@ public class AuthServiceImpl implements AuthService {
     @Value("${app.security.login-2fa-bypass-emails:}")
     private String login2FABypassEmails;
 
-    private final TenantModuleApi tenantModuleApi;
+    private final TenantIdentityApi tenantModuleApi;
     private final RefreshTokenRepository refreshTokenRepository;
     private final UserSuspensionStateRepository userSuspensionStateRepository;
     private final Login2FAStateRepository login2FAStateRepository;
@@ -92,6 +97,29 @@ public class AuthServiceImpl implements AuthService {
     private final Login2FAAttemptService login2FAAttemptService;
     private final PasswordEncoder passwordEncoder;
     private final ApplicationEventPublisher eventPublisher;
+    @Autowired(required = false)
+    private DurableEventPublisher durableEventPublisher;
+    @Override
+    @Transactional(readOnly = true)
+    public InvitationValidationResponse validateInvitation(String token) {
+        var invitation = tenantModuleApi.validateInvitation(jwtService.hashToken(token));
+        return new InvitationValidationResponse(
+                invitation.email(), invitation.tenantName(), invitation.role(), invitation.expiresAt());
+    }
+
+    @Override
+    @Transactional
+    public AuthResponse acceptInvitation(AcceptInvitationRequest request, HttpServletResponse response) {
+        var accepted = tenantModuleApi.acceptInvitation(
+                jwtService.hashToken(request.getToken()), request.getFullName(),
+                passwordEncoder.encode(request.getPassword()));
+        UserAuthDto user = UserAuthDto.builder()
+                .userId(accepted.userId()).tenantId(accepted.tenantId()).email(accepted.email())
+                .fullName(accepted.fullName()).role(accepted.role()).status(accepted.status())
+                .plan(accepted.plan()).tenantStatus(accepted.tenantStatus())
+                .passwordHash(accepted.passwordHash()).build();
+        return issueAuthTokens(user, response, true);
+    }
 
 
     @Override
@@ -123,9 +151,10 @@ public class AuthServiceImpl implements AuthService {
 
         // 5. Publish event to trigger verification email
         // Notification module will listen and send the email
-        eventPublisher.publishEvent(
-                new UserRegisteredEvent(this, result.getUserId(), result.getTenantId(), result.getEmail(),
-                        req.getFullName(), req.getCompanyName(), verificationToken));
+        publishBusinessEvent("auth.user.registered.v1",
+                new UserRegisteredEvent(result.getUserId(), result.getTenantId(), result.getEmail(),
+                        req.getFullName(), req.getCompanyName(), verificationToken,
+                        result.getRole(), result.getStatus(), LocalDateTime.now()));
 
         // 6. Return response (no tokens - user must verify email first)
         return RegisterResponse.builder()
@@ -209,8 +238,8 @@ public class AuthServiceImpl implements AuthService {
         existingState.setVerificationAttemptCount(0);
         login2FAStateRepository.save(existingState);
 
-        eventPublisher.publishEvent(
-                new Login2FARequestedEvent(this, result.getUserId(), result.getTenantId(),
+        publishBusinessEvent("auth.login-2fa.requested.v1",
+                new Login2FARequestedEvent(result.getUserId(), result.getTenantId(),
                         result.getEmail(), result.getFullName(), verificationSecret, challengeType));
 
         Map<String, Object> metadata = new HashMap<>();
@@ -456,9 +485,10 @@ public class AuthServiceImpl implements AuthService {
         String verificationToken = jwtService.generateVerificationToken(userId, email);
 
         // 7. Publish event to send email (reuse UserRegisteredEvent with new token)
-        eventPublisher.publishEvent(
-                new UserRegisteredEvent(this, userId, tenantId, email,
-                        user.getFullName(), "Company", verificationToken));
+        publishBusinessEvent("auth.user.registered.v1",
+                new UserRegisteredEvent(userId, tenantId, email,
+                        user.getFullName(), "Company", verificationToken,
+                        user.getRole(), user.getStatus(), LocalDateTime.now()));
 
         // 8. Update or create resend state
         if (resendState == null) {
@@ -797,8 +827,8 @@ public class AuthServiceImpl implements AuthService {
         login2FAStateRepository.save(state);
 
         // 9. Publish event to send 2FA email
-        eventPublisher.publishEvent(
-                new Login2FARequestedEvent(this, userId, tenantId,
+        publishBusinessEvent("auth.login-2fa.requested.v1",
+                new Login2FARequestedEvent(userId, tenantId,
                         email, user.getFullName(), verificationSecret, challengeType));
 
         // 10. Publish audit log event
@@ -827,6 +857,14 @@ public class AuthServiceImpl implements AuthService {
     }
 
     private record LoginOutcome(LoginStep1Response challenge, UserAuthDto user) {
+    }
+
+    private void publishBusinessEvent(String stableType, Object event) {
+        if (durableEventPublisher != null) {
+            durableEventPublisher.publish(stableType, 1, event);
+        } else {
+            eventPublisher.publishEvent(event);
+        }
     }
 
     private record CredentialPair(

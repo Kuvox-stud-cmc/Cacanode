@@ -1,7 +1,7 @@
 package com.cacanode.api.chat.controller;
 
 import com.cacanode.api.chat.dto.ChatDtos;
-import com.cacanode.api.chat.service.ChatControlPlaneService;
+import com.cacanode.api.chat.query.ChatControlPlaneService;
 import com.cacanode.api.common.controller.BaseController;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;

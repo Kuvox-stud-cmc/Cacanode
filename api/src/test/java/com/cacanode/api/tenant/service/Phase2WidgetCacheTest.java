@@ -3,11 +3,11 @@ package com.cacanode.api.tenant.service;
 import com.cacanode.api.common.cache.*;
 import com.cacanode.api.common.config.CacheProperties;
 import com.cacanode.api.tenant.api.TenantEntitlements;
-import com.cacanode.api.tenant.api.TenantModuleApi;
+import com.cacanode.api.tenant.api.TenantEntitlementApi;
 import com.cacanode.api.tenant.cache.IntegrationTokenCacheInvalidationPublisher;
 import com.cacanode.api.tenant.dto.WidgetConfigDtos;
-import com.cacanode.api.tenant.enums.TenantPlan;
-import com.cacanode.api.tenant.enums.TenantStatus;
+import com.cacanode.api.tenant.api.TenantPlan;
+import com.cacanode.api.tenant.api.TenantStatus;
 import com.cacanode.api.tenant.model.Chatbot;
 import com.cacanode.api.tenant.model.Tenant;
 import com.cacanode.api.tenant.model.WidgetConfig;
@@ -37,7 +37,7 @@ class Phase2WidgetCacheTest {
                 .thenReturn(Optional.of(config(firstTenant, "First")));
         when(repository.findFirstByTenant_IdOrderByCreatedAtAsc(secondTenant))
                 .thenReturn(Optional.of(config(secondTenant, "Second")));
-        TenantModuleApi tenants = mock(TenantModuleApi.class);
+        TenantEntitlementApi tenants = mock(TenantEntitlementApi.class);
         when(tenants.getEntitlements(any())).thenAnswer(invocation -> entitlements(invocation.getArgument(0)));
         WidgetConfigService service = new WidgetConfigService(
                 repository, tenants, mock(IntegrationTokenCacheInvalidationPublisher.class));

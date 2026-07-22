@@ -1,15 +1,10 @@
 package com.cacanode.api.tenant.service;
 
-import com.cacanode.api.auth.dto.request.AcceptInvitationRequest;
-import com.cacanode.api.auth.dto.response.AuthResponse;
-import com.cacanode.api.auth.repository.RefreshTokenRepository;
-import com.cacanode.api.auth.service.AuthService;
-import com.cacanode.api.auth.service.JwtService;
 import com.cacanode.api.common.exception.custom.BadRequestException;
 import com.cacanode.api.common.exception.custom.ConflictException;
 import com.cacanode.api.tenant.enums.InvitationStatus;
-import com.cacanode.api.tenant.enums.TenantPlan;
-import com.cacanode.api.tenant.enums.TenantStatus;
+import com.cacanode.api.tenant.api.TenantPlan;
+import com.cacanode.api.tenant.api.TenantStatus;
 import com.cacanode.api.tenant.enums.UserRole;
 import com.cacanode.api.tenant.enums.UserStatus;
 import com.cacanode.api.tenant.model.Invitation;
@@ -17,11 +12,9 @@ import com.cacanode.api.tenant.model.Tenant;
 import com.cacanode.api.tenant.model.User;
 import com.cacanode.api.tenant.repository.InvitationRepository;
 import com.cacanode.api.tenant.repository.UserRepository;
-import jakarta.servlet.http.HttpServletResponse;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.ApplicationEventPublisher;
-import org.springframework.security.crypto.password.PasswordEncoder;
 
 import java.time.LocalDateTime;
 import java.util.Optional;
@@ -38,10 +31,7 @@ import static org.mockito.Mockito.when;
 class TenantUserManagementServiceTest {
     private UserRepository users;
     private InvitationRepository invitations;
-    private RefreshTokenRepository refreshTokens;
-    private JwtService jwt;
-    private PasswordEncoder passwords;
-    private AuthService auth;
+    private ApplicationEventPublisher events;
     private TenantUserManagementService service;
     private Tenant tenant;
     private User admin;
@@ -50,12 +40,8 @@ class TenantUserManagementServiceTest {
     void setUp() {
         users = mock(UserRepository.class);
         invitations = mock(InvitationRepository.class);
-        refreshTokens = mock(RefreshTokenRepository.class);
-        jwt = mock(JwtService.class);
-        passwords = mock(PasswordEncoder.class);
-        auth = mock(AuthService.class);
-        service = new TenantUserManagementService(users, invitations, refreshTokens, jwt, passwords, auth,
-                mock(ApplicationEventPublisher.class));
+        events = mock(ApplicationEventPublisher.class);
+        service = new TenantUserManagementService(users, invitations, events);
 
         tenant = new Tenant();
         tenant.setId(UUID.randomUUID());
@@ -64,7 +50,6 @@ class TenantUserManagementServiceTest {
         tenant.setStatus(TenantStatus.ACTIVE);
         admin = user(UserRole.TENANT_ADMIN, UserStatus.ACTIVE);
         when(users.findByIdAndTenant_Id(admin.getId(), tenant.getId())).thenReturn(Optional.of(admin));
-        when(jwt.hashToken(any())).thenAnswer(call -> "hash-" + call.getArgument(0));
         when(invitations.save(any())).thenAnswer(call -> {
             Invitation invitation = call.getArgument(0);
             if (invitation.getId() == null) invitation.setId(UUID.randomUUID());
@@ -128,19 +113,15 @@ class TenantUserManagementServiceTest {
         User member = user(UserRole.USER, UserStatus.ACTIVE);
         when(users.findByIdAndTenant_Id(member.getId(), tenant.getId())).thenReturn(Optional.of(member));
         service.updateStatus(tenant.getId(), admin.getId(), member.getId(), UserStatus.INACTIVE);
-        verify(refreshTokens).revokeAllByUserId(member.getId());
+        verify(events).publishEvent(new com.cacanode.api.tenant.api.event.UserDeactivatedEvent(
+                tenant.getId(), member.getId()));
 
         Invitation invitation = invitation(InvitationStatus.PENDING);
         invitation.setEmail("new@example.com");
         invitation.setExpiresAt(LocalDateTime.now().plusHours(1));
         when(invitations.findByTokenHashForUpdate("hash-secret")).thenReturn(Optional.of(invitation));
-        when(passwords.encode("password8")).thenReturn("encoded");
-        AuthResponse expected = mock(AuthResponse.class);
-        when(auth.issueAuthTokens(any(), any(), org.mockito.ArgumentMatchers.eq(true))).thenReturn(expected);
-        AcceptInvitationRequest request = new AcceptInvitationRequest();
-        request.setToken("secret"); request.setFullName("New Person"); request.setPassword("password8");
-
-        assertEquals(expected, service.acceptInvitation(request, mock(HttpServletResponse.class)));
+        var accepted = service.acceptInvitationHash("hash-secret", "New Person", "encoded");
+        assertEquals("new@example.com", accepted.email());
         assertEquals(InvitationStatus.ACCEPTED, invitation.getStatus());
         verify(users).save(org.mockito.ArgumentMatchers.argThat(user ->
                 user.getStatus() == UserStatus.ACTIVE && "encoded".equals(user.getPasswordHash())));

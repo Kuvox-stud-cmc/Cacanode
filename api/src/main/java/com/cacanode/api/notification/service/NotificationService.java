@@ -5,7 +5,7 @@ import java.util.UUID;
 
 import org.springframework.stereotype.Service;
 
-import com.cacanode.api.auth.enums.Login2FAChallengeType;
+import com.cacanode.api.auth.api.Login2FAChallengeType;
 import com.cacanode.api.notification.enums.NotificationStatus;
 import com.cacanode.api.notification.enums.NotificationType;
 import com.cacanode.api.notification.model.Notification;

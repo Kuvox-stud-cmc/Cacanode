@@ -6,7 +6,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 public class CacheProperties {
 
     private boolean enabled = false;
-    private String keyPrefix = "ccn:v1";
+    private String keyPrefix = "ccn:v2";
     private int ttlJitterPercent = 10;
     private boolean integrationTokenEnabled = false;
     private int integrationTokenTtlSeconds = 60;

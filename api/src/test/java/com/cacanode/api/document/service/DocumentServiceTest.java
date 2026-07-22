@@ -41,11 +41,9 @@ import com.cacanode.api.document.messaging.DocumentIngestionPublisher;
 import com.cacanode.api.document.messaging.DocumentStatusEvent;
 import com.cacanode.api.document.model.Document;
 import com.cacanode.api.document.repository.DocumentRepository;
-import com.cacanode.api.document.storage.DocumentStorage;
-import com.cacanode.api.document.storage.StoredDocument;
-import com.cacanode.api.tenant.enums.KnowledgeBaseStatus;
-import com.cacanode.api.tenant.model.KnowledgeBase;
-import com.cacanode.api.tenant.repository.KnowledgeBaseRepository;
+import com.cacanode.api.common.storage.DocumentStorage;
+import com.cacanode.api.common.storage.StoredDocument;
+import com.cacanode.api.tenant.api.TenantWorkspaceApi;
 
 class DocumentServiceTest {
 
@@ -58,7 +56,7 @@ class DocumentServiceTest {
     private DocumentRepository documentRepository;
 
     @Mock
-    private KnowledgeBaseRepository knowledgeBaseRepository;
+    private TenantWorkspaceApi tenantWorkspaceApi;
 
     @Mock
     private DocumentStorage documentStorage;
@@ -80,15 +78,16 @@ class DocumentServiceTest {
         mocks = MockitoAnnotations.openMocks(this);
         documentService = new DocumentService(
                 documentRepository,
-                knowledgeBaseRepository,
+                tenantWorkspaceApi,
                 documentStorage,
                 ingestionPublisher,
                 indexCleanup,
                 eventPublisher
         );
 
-        when(knowledgeBaseRepository.findByIdAndTenantId(knowledgeBaseId, tenantId))
-                .thenReturn(Optional.of(knowledgeBase(KnowledgeBaseStatus.ACTIVE)));
+        when(tenantWorkspaceApi.requireActiveKnowledgeBase(tenantId, knowledgeBaseId))
+                .thenReturn(new TenantWorkspaceApi.WorkspaceContext(
+                        tenantId, null, knowledgeBaseId, "Tenant", "Prompt", 0));
         when(documentRepository.save(any(Document.class))).thenAnswer(invocation -> {
             Document document = invocation.getArgument(0);
             document.setId(documentId);
@@ -175,8 +174,8 @@ class DocumentServiceTest {
 
     @Test
     void uploadRejectsInactiveKnowledgeBase() {
-        when(knowledgeBaseRepository.findByIdAndTenantId(knowledgeBaseId, tenantId))
-                .thenReturn(Optional.of(knowledgeBase(KnowledgeBaseStatus.INACTIVE)));
+        doThrow(new BadRequestException("inactive")).when(tenantWorkspaceApi)
+                .requireActiveKnowledgeBase(tenantId, knowledgeBaseId);
 
         assertThrows(BadRequestException.class, () -> documentService.upload(
                 tenantId,
@@ -190,8 +189,8 @@ class DocumentServiceTest {
 
     @Test
     void uploadRejectsWrongTenantKnowledgeBase() {
-        when(knowledgeBaseRepository.findByIdAndTenantId(knowledgeBaseId, tenantId))
-                .thenReturn(Optional.empty());
+        doThrow(new BadRequestException("missing")).when(tenantWorkspaceApi)
+                .requireActiveKnowledgeBase(tenantId, knowledgeBaseId);
 
         assertThrows(BadRequestException.class, () -> documentService.upload(
                 tenantId,
@@ -331,8 +330,8 @@ class DocumentServiceTest {
 
     @Test
     void listRejectsWrongTenantKnowledgeBase() {
-        when(knowledgeBaseRepository.findByIdAndTenantId(knowledgeBaseId, tenantId))
-                .thenReturn(Optional.empty());
+        doThrow(new BadRequestException("missing")).when(tenantWorkspaceApi)
+                .requireActiveKnowledgeBase(tenantId, knowledgeBaseId);
 
         assertThrows(BadRequestException.class, () -> documentService.list(tenantId, knowledgeBaseId));
     }
@@ -457,13 +456,6 @@ class DocumentServiceTest {
         assertThrows(BadRequestException.class,
                 () -> documentService.delete(tenantId, "TENANT_ADMIN", documentId));
         verify(indexCleanup, never()).delete(any(), any(), any());
-    }
-
-    private KnowledgeBase knowledgeBase(KnowledgeBaseStatus status) {
-        KnowledgeBase knowledgeBase = new KnowledgeBase();
-        knowledgeBase.setId(knowledgeBaseId);
-        knowledgeBase.setStatus(status);
-        return knowledgeBase;
     }
 
     private MockMultipartFile txtFile() {

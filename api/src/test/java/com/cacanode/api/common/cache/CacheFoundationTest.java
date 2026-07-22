@@ -57,7 +57,7 @@ class CacheFoundationTest {
         CacheProperties defaults = new CacheProperties();
 
         assertEquals(false, defaults.isEnabled());
-        assertEquals("ccn:v1", defaults.getKeyPrefix());
+        assertEquals("ccn:v2", defaults.getKeyPrefix());
         assertEquals(10, defaults.getTtlJitterPercent());
         assertEquals(false, defaults.isIntegrationTokenEnabled());
         assertEquals(60, defaults.getIntegrationTokenTtlSeconds());

@@ -1,6 +1,6 @@
 package com.cacanode.api.document.dto;
 
-import com.cacanode.api.chat.dto.ChatDtos;
+import com.cacanode.api.ai.api.AiInferenceApi;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 import java.time.Instant;
@@ -16,7 +16,7 @@ public final class PublicEvidenceDtos {
             @JsonProperty("source_name") String sourceName,
             String focus,
             @JsonProperty("expires_at") Instant expiresAt,
-            List<ChatDtos.DocumentUnitResponse> units
+            List<AiInferenceApi.DocumentUnit> units
     ) {
     }
 }

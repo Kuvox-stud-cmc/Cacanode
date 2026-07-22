@@ -1,18 +1,19 @@
 package com.cacanode.api.notification.listener;
 
-import com.cacanode.api.common.event.Login2FARequestedEvent;
-import com.cacanode.api.common.event.UserRegisteredEvent;
-import com.cacanode.api.common.event.UserInvitedEvent;
-import com.cacanode.api.common.event.TicketCreatedEvent;
+import com.cacanode.api.auth.api.event.Login2FARequestedEvent;
+import com.cacanode.api.auth.api.event.UserRegisteredEvent;
+import com.cacanode.api.tenant.api.event.UserInvitedEvent;
+import com.cacanode.api.support.api.event.TicketCreatedEvent;
 import com.cacanode.api.notification.service.NotificationService;
+import com.cacanode.api.common.event.durable.ModuleEventInboxService;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.event.EventListener;
-import org.springframework.scheduling.annotation.Async;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.event.TransactionPhase;
-import org.springframework.transaction.event.TransactionalEventListener;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 
 @Slf4j(topic = "NOTIFICATION-LISTENER")
 @Component
@@ -20,70 +21,82 @@ import org.springframework.transaction.event.TransactionalEventListener;
 public class NotificationListener {
 
     private final NotificationService notificationService;
+    @Autowired(required = false)
+    private ModuleEventInboxService inboxService;
 
-    @Async // runs in a separate thread - don't block registration
     @EventListener
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void handleUserRegistered(UserRegisteredEvent event) {
-        log.info("Sending confirmation email to: {}", event.getEmail());
+        if (!claim("notification.welcome-email")) return;
+        log.info("Sending confirmation email to: {}", event.email());
         try {
             notificationService.sendAndRecordWelcomeEmail(
-                    event.getTenantId(),
-                    event.getUserId(),
-                    event.getEmail(),
-                    event.getFullName(),
-                    event.getCompanyName(),
-                    event.getVerificationToken());
+                    event.tenantId(),
+                    event.userId(),
+                    event.email(),
+                    event.fullName(),
+                    event.companyName(),
+                    event.verificationToken());
         } catch (Exception e) {
-            // Never let email failure break registration
-            log.error("Failed to send welcome email to {}: {}", event.getEmail(), e.getMessage());
+            log.error("Failed to send welcome email to {}: {}", event.email(), e.getMessage());
+            throw new IllegalStateException("Welcome email delivery failed", e);
         }
     }
 
-    @Async
     @EventListener
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void handleLogin2FARequested(Login2FARequestedEvent event) {
-        log.info("Sending login 2FA email to: {}", event.getEmail());
+        if (!claim("notification.login-2fa-email")) return;
+        log.info("Sending login 2FA email to: {}", event.email());
         try {
             notificationService.sendAndRecordLogin2FAEmail(
-                    event.getTenantId(),
-                    event.getUserId(),
-                    event.getEmail(),
-                    event.getFullName(),
-                    event.getVerificationSecret(),
-                    event.getChallengeType());
+                    event.tenantId(),
+                    event.userId(),
+                    event.email(),
+                    event.fullName(),
+                    event.verificationSecret(),
+                    event.challengeType());
         } catch (Exception e) {
-            // Never let email failure break login
-            log.error("Failed to send login 2FA email to {}: {}", event.getEmail(), e.getMessage());
+            log.error("Failed to send login 2FA email to {}: {}", event.email(), e.getMessage());
+            throw new IllegalStateException("Login 2FA email delivery failed", e);
         }
     }
 
-    @Async
-    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT, fallbackExecution = true)
+    @EventListener
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void handleUserInvited(UserInvitedEvent event) {
-        log.info("Sending invitation email to: {}", event.getEmail());
+        if (!claim("notification.invitation-email")) return;
+        log.info("Sending invitation email to: {}", event.email());
         try {
             notificationService.sendAndRecordInvitationEmail(
-                    event.getTenantId(), event.getEmail(), event.getTenantName(), event.getRole(),
-                    event.getToken(), event.getExpiresAt());
+                    event.tenantId(), event.email(), event.tenantName(), event.role(),
+                    event.token(), event.expiresAt());
         } catch (Exception e) {
-            log.error("Failed to send invitation email to {}: {}", event.getEmail(), e.getMessage());
+            log.error("Failed to send invitation email to {}: {}", event.email(), e.getMessage());
+            throw new IllegalStateException("Invitation email delivery failed", e);
         }
     }
 
-    @Async
-    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT, fallbackExecution = true)
+    @EventListener
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void handleTicketCreated(TicketCreatedEvent event) {
+        if (!claim("notification.ticket-created-email")) return;
         log.info("Sending ticket confirmation email ticket={} to={}",
-                event.getTicketId(), event.getCustomerEmail());
+                event.ticketId(), event.customerEmail());
         try {
             notificationService.sendAndRecordTicketCreatedEmail(
-                    event.getTenantId(), event.getTicketId(), event.getCustomerEmail(),
-                    event.getCustomerName(), event.getTenantName(), event.getTitle(),
-                    event.getDescription(), event.getLocale());
+                    event.tenantId(), event.ticketId(), event.customerEmail(),
+                    event.customerName(), event.tenantName(), event.title(),
+                    event.description(), event.locale());
         } catch (Exception e) {
             log.error("Failed to send ticket confirmation email ticket={} to={}: {}",
-                    event.getTicketId(), event.getCustomerEmail(), e.getMessage());
+                    event.ticketId(), event.customerEmail(), e.getMessage());
+            throw new IllegalStateException("Ticket confirmation email delivery failed", e);
         }
+    }
+
+    private boolean claim(String consumerName) {
+        return inboxService == null || inboxService.claim(consumerName);
     }
 
 }

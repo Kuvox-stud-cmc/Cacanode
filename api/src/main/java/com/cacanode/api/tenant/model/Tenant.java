@@ -2,8 +2,8 @@ package com.cacanode.api.tenant.model;
 
 import com.cacanode.api.common.model.BaseEntity;
 import com.cacanode.api.tenant.CustomerAnswerPromptDefaults;
-import com.cacanode.api.tenant.enums.TenantPlan;
-import com.cacanode.api.tenant.enums.TenantStatus;
+import com.cacanode.api.tenant.api.TenantPlan;
+import com.cacanode.api.tenant.api.TenantStatus;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.Setter;

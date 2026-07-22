@@ -1,22 +1,20 @@
 package com.cacanode.api.tenant.service;
 
-import com.cacanode.api.auth.dto.request.AcceptInvitationRequest;
-import com.cacanode.api.auth.dto.response.AuthResponse;
-import com.cacanode.api.auth.dto.response.InvitationValidationResponse;
-import com.cacanode.api.auth.repository.RefreshTokenRepository;
-import com.cacanode.api.auth.service.AuthService;
-import com.cacanode.api.auth.service.JwtService;
 import com.cacanode.api.common.enums.LogAction;
 import com.cacanode.api.common.cache.BusinessCache;
 import com.cacanode.api.common.cache.BusinessCacheInvalidationPublisher;
 import com.cacanode.api.common.cache.CacheKeyFactory;
 import com.cacanode.api.common.cache.VersionedJsonCache;
 import com.cacanode.api.common.event.AuditLogEvent;
-import com.cacanode.api.common.event.UserInvitedEvent;
+import com.cacanode.api.common.event.durable.DurableEventPublisher;
+import com.cacanode.api.tenant.api.event.UserInvitedEvent;
+import com.cacanode.api.tenant.api.event.UserProjectionChangedEvent;
+import com.cacanode.api.tenant.api.event.InvitationProjectionChangedEvent;
+import com.cacanode.api.tenant.api.event.UserDeactivatedEvent;
+import com.cacanode.api.tenant.api.TenantIdentityApi;
 import com.cacanode.api.common.exception.custom.BadRequestException;
 import com.cacanode.api.common.exception.custom.ConflictException;
 import com.cacanode.api.common.exception.custom.ResourceNotFoundException;
-import com.cacanode.api.tenant.dto.UserAuthDto;
 import com.cacanode.api.tenant.dto.UserManagementDtos.DirectoryResponse;
 import com.cacanode.api.tenant.dto.UserManagementDtos.InvitationResponse;
 import com.cacanode.api.tenant.dto.UserManagementDtos.MemberResponse;
@@ -27,10 +25,8 @@ import com.cacanode.api.tenant.model.Invitation;
 import com.cacanode.api.tenant.model.User;
 import com.cacanode.api.tenant.repository.InvitationRepository;
 import com.cacanode.api.tenant.repository.UserRepository;
-import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ApplicationEventPublisher;
-import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -41,6 +37,10 @@ import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.HexFormat;
 
 @Service
 public class TenantUserManagementService {
@@ -50,11 +50,9 @@ public class TenantUserManagementService {
 
     private final UserRepository userRepository;
     private final InvitationRepository invitationRepository;
-    private final RefreshTokenRepository refreshTokenRepository;
-    private final JwtService jwtService;
-    private final PasswordEncoder passwordEncoder;
-    private final AuthService authService;
     private final ApplicationEventPublisher eventPublisher;
+    @Autowired(required = false)
+    private DurableEventPublisher durableEventPublisher;
     private final TenantEntitlementService entitlementService;
     @Autowired(required = false)
     private VersionedJsonCache businessCache;
@@ -67,19 +65,11 @@ public class TenantUserManagementService {
     public TenantUserManagementService(
             UserRepository userRepository,
             InvitationRepository invitationRepository,
-            RefreshTokenRepository refreshTokenRepository,
-            JwtService jwtService,
-            PasswordEncoder passwordEncoder,
-            AuthService authService,
             ApplicationEventPublisher eventPublisher,
             TenantEntitlementService entitlementService
     ) {
         this.userRepository = userRepository;
         this.invitationRepository = invitationRepository;
-        this.refreshTokenRepository = refreshTokenRepository;
-        this.jwtService = jwtService;
-        this.passwordEncoder = passwordEncoder;
-        this.authService = authService;
         this.eventPublisher = eventPublisher;
         this.entitlementService = entitlementService;
     }
@@ -87,14 +77,9 @@ public class TenantUserManagementService {
     public TenantUserManagementService(
             UserRepository userRepository,
             InvitationRepository invitationRepository,
-            RefreshTokenRepository refreshTokenRepository,
-            JwtService jwtService,
-            PasswordEncoder passwordEncoder,
-            AuthService authService,
             ApplicationEventPublisher eventPublisher
     ) {
-        this(userRepository, invitationRepository, refreshTokenRepository, jwtService, passwordEncoder,
-                authService, eventPublisher, null);
+        this(userRepository, invitationRepository, eventPublisher, null);
     }
 
     @Transactional
@@ -157,7 +142,7 @@ public class TenantUserManagementService {
         invitation.setInvitedBy(actor);
         invitation.setEmail(email);
         invitation.setRole(role);
-        invitation.setTokenHash(jwtService.hashToken(token));
+        invitation.setTokenHash(hashToken(token));
         invitation.setStatus(InvitationStatus.PENDING);
         invitation.setLastSentAt(now);
         invitation.setExpiresAt(now.plus(INVITATION_LIFETIME));
@@ -189,7 +174,7 @@ public class TenantUserManagementService {
         }
 
         String token = generateToken();
-        invitation.setTokenHash(jwtService.hashToken(token));
+        invitation.setTokenHash(hashToken(token));
         invitation.setStatus(InvitationStatus.PENDING);
         invitation.setLastSentAt(now);
         invitation.setExpiresAt(now.plus(INVITATION_LIFETIME));
@@ -210,6 +195,7 @@ public class TenantUserManagementService {
         }
         invitation.setStatus(InvitationStatus.CANCELLED);
         invitationRepository.save(invitation);
+        publishInvitationProjection(invitation);
         audit(tenantId, actorId, LogAction.USER_INVITATION_CANCELLED, "invitation", invitationId,
                 Map.of("email", invitation.getEmail()));
         invalidateMembers(tenantId);
@@ -228,6 +214,7 @@ public class TenantUserManagementService {
         }
         user.setRole(role);
         userRepository.save(user);
+        publishUserProjection(user);
         audit(tenantId, actorId, LogAction.USER_ROLE_CHANGED, "user", userId,
                 Map.of("from", previousRole.name(), "to", role.name()));
         invalidateMembers(tenantId);
@@ -251,8 +238,9 @@ public class TenantUserManagementService {
         }
         user.setStatus(status);
         userRepository.save(user);
+        publishUserProjection(user);
         if (status == UserStatus.INACTIVE) {
-            refreshTokenRepository.revokeAllByUserId(userId);
+            publishBusinessEvent("tenant.user.deactivated.v1", new UserDeactivatedEvent(tenantId, userId));
         }
         audit(tenantId, actorId,
                 status == UserStatus.ACTIVE ? LogAction.USER_REACTIVATED : LogAction.USER_DEACTIVATED,
@@ -262,17 +250,18 @@ public class TenantUserManagementService {
     }
 
     @Transactional(readOnly = true)
-    public InvitationValidationResponse validateInvitation(String token) {
-        Invitation invitation = invitationRepository.findByTokenHash(jwtService.hashToken(token))
+    public TenantIdentityApi.InvitationSnapshot validateInvitationHash(String tokenHash) {
+        Invitation invitation = invitationRepository.findByTokenHash(tokenHash)
                 .orElseThrow(() -> new ResourceNotFoundException("Invitation is invalid or no longer available"));
         validateAcceptable(invitation);
-        return new InvitationValidationResponse(invitation.getEmail(), invitation.getTenant().getName(),
-                invitation.getRole(), invitation.getExpiresAt());
+        return new TenantIdentityApi.InvitationSnapshot(invitation.getEmail(), invitation.getTenant().getName(),
+                invitation.getRole().name(), invitation.getExpiresAt());
     }
 
     @Transactional
-    public AuthResponse acceptInvitation(AcceptInvitationRequest request, HttpServletResponse response) {
-        Invitation invitation = invitationRepository.findByTokenHashForUpdate(jwtService.hashToken(request.getToken()))
+    public TenantIdentityApi.AcceptedUserSnapshot acceptInvitationHash(
+            String tokenHash, String fullName, String passwordHash) {
+        Invitation invitation = invitationRepository.findByTokenHashForUpdate(tokenHash)
                 .orElseThrow(() -> new ResourceNotFoundException("Invitation is invalid or no longer available"));
         validateAcceptable(invitation);
         if (entitlementService != null) entitlementService.assertCanAcceptInvitation(invitation.getTenant().getId());
@@ -285,8 +274,8 @@ public class TenantUserManagementService {
         user.setTenant(invitation.getTenant());
         user.setInvitedBy(invitation.getInvitedBy());
         user.setEmail(email);
-        user.setFullName(request.getFullName().trim());
-        user.setPasswordHash(passwordEncoder.encode(request.getPassword()));
+        user.setFullName(fullName.trim());
+        user.setPasswordHash(passwordHash);
         user.setRole(invitation.getRole());
         user.setStatus(UserStatus.ACTIVE);
         userRepository.save(user);
@@ -294,11 +283,16 @@ public class TenantUserManagementService {
         invitation.setStatus(InvitationStatus.ACCEPTED);
         invitation.setAcceptedAt(LocalDateTime.now());
         invitationRepository.save(invitation);
+        publishUserProjection(user);
+        publishInvitationProjection(invitation);
 
         audit(invitation.getTenant().getId(), user.getId(), LogAction.USER_INVITATION_ACCEPTED,
                 "invitation", invitation.getId(), Map.of("email", email));
         invalidateMembers(invitation.getTenant().getId());
-        return authService.issueAuthTokens(toAuthDto(user), response, true);
+        return new TenantIdentityApi.AcceptedUserSnapshot(
+                user.getId(), user.getTenant().getId(), user.getEmail(), user.getFullName(),
+                user.getRole().name(), user.getStatus().name(), user.getTenant().getPlan().name(),
+                user.getTenant().getStatus().name(), user.getPasswordHash());
     }
 
     private DirectoryResponse decorateDirectory(DirectoryResponse snapshot, UUID currentUserId, LocalDateTime now) {
@@ -369,9 +363,35 @@ public class TenantUserManagementService {
     }
 
     private void publishInvitationEmail(Invitation invitation, String token) {
-        eventPublisher.publishEvent(new UserInvitedEvent(this, invitation.getTenant().getId(),
+        publishBusinessEvent("tenant.user.invited.v1", new UserInvitedEvent(invitation.getTenant().getId(),
                 invitation.getInvitedBy().getId(), invitation.getEmail(), invitation.getTenant().getName(),
-                invitation.getRole().name(), token, invitation.getExpiresAt()));
+                invitation.getRole().name(), token, invitation.getExpiresAt(), invitation.getId(),
+                invitation.getStatus().name(), invitation.getCreatedAt() == null
+                ? LocalDateTime.now() : invitation.getCreatedAt()));
+    }
+
+    private void publishBusinessEvent(String stableType, Object event) {
+        if (durableEventPublisher != null) {
+            durableEventPublisher.publish(stableType, 1, event);
+        } else {
+            eventPublisher.publishEvent(event);
+        }
+    }
+
+    private void publishUserProjection(User user) {
+        LocalDateTime now = LocalDateTime.now();
+        publishBusinessEvent("tenant.user.projection.changed.v1", new UserProjectionChangedEvent(
+                user.getId(), user.getTenant().getId(), user.getStatus().name(), user.getRole().name(),
+                user.getCreatedAt() == null ? now : user.getCreatedAt(), now));
+    }
+
+    private void publishInvitationProjection(Invitation invitation) {
+        LocalDateTime now = LocalDateTime.now();
+        publishBusinessEvent("tenant.invitation.projection.changed.v1",
+                new InvitationProjectionChangedEvent(
+                        invitation.getId(), invitation.getTenant().getId(), invitation.getStatus().name(),
+                        invitation.getCreatedAt() == null ? now : invitation.getCreatedAt(),
+                        invitation.getExpiresAt(), now));
     }
 
     private void audit(UUID tenantId, UUID actorId, LogAction action, String resourceType,
@@ -393,11 +413,12 @@ public class TenantUserManagementService {
                 invitation.getLastSentAt());
     }
 
-    private UserAuthDto toAuthDto(User user) {
-        return UserAuthDto.builder()
-                .userId(user.getId()).tenantId(user.getTenant().getId()).email(user.getEmail())
-                .fullName(user.getFullName()).role(user.getRole().name()).status(user.getStatus().name())
-                .plan(user.getTenant().getPlan().name()).tenantStatus(user.getTenant().getStatus().name())
-                .passwordHash(user.getPasswordHash()).build();
+    private String hashToken(String token) {
+        try {
+            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
+                    .digest(token.getBytes(StandardCharsets.UTF_8)));
+        } catch (NoSuchAlgorithmException exception) {
+            throw new IllegalStateException("SHA-256 is unavailable", exception);
+        }
     }
 }

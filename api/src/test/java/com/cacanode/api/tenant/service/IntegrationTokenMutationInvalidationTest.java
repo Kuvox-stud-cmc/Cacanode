@@ -2,11 +2,11 @@ package com.cacanode.api.tenant.service;
 
 import com.cacanode.api.tenant.api.ApplyTenantEntitlementsCommand;
 import com.cacanode.api.tenant.api.TenantEntitlements;
-import com.cacanode.api.tenant.api.TenantModuleApi;
+import com.cacanode.api.tenant.api.TenantEntitlementApi;
 import com.cacanode.api.tenant.cache.IntegrationTokenCacheInvalidationPublisher;
 import com.cacanode.api.tenant.dto.WidgetConfigDtos;
-import com.cacanode.api.tenant.enums.TenantPlan;
-import com.cacanode.api.tenant.enums.TenantStatus;
+import com.cacanode.api.tenant.api.TenantPlan;
+import com.cacanode.api.tenant.api.TenantStatus;
 import com.cacanode.api.tenant.enums.WidgetPosition;
 import com.cacanode.api.tenant.enums.WidgetIconStyle;
 import com.cacanode.api.tenant.model.Chatbot;
@@ -48,7 +48,7 @@ class IntegrationTokenMutationInvalidationTest {
         WidgetConfigRepository repository = mock(WidgetConfigRepository.class);
         when(repository.findFirstByTenant_IdOrderByCreatedAtAsc(tenantId))
                 .thenReturn(Optional.of(config));
-        TenantModuleApi tenantModuleApi = mock(TenantModuleApi.class);
+        TenantEntitlementApi tenantModuleApi = mock(TenantEntitlementApi.class);
         when(tenantModuleApi.getEntitlements(tenantId)).thenReturn(entitlements(tenantId, true));
         IntegrationTokenCacheInvalidationPublisher publisher =
                 mock(IntegrationTokenCacheInvalidationPublisher.class);
@@ -78,7 +78,7 @@ class IntegrationTokenMutationInvalidationTest {
         WidgetConfigRepository repository = mock(WidgetConfigRepository.class);
         when(repository.findFirstByTenant_IdOrderByCreatedAtAsc(tenantId))
                 .thenReturn(Optional.of(config));
-        TenantModuleApi tenantModuleApi = mock(TenantModuleApi.class);
+        TenantEntitlementApi tenantModuleApi = mock(TenantEntitlementApi.class);
         when(tenantModuleApi.getEntitlements(tenantId)).thenReturn(entitlements(tenantId, true));
         IntegrationTokenCacheInvalidationPublisher publisher =
                 mock(IntegrationTokenCacheInvalidationPublisher.class);
@@ -107,6 +107,8 @@ class IntegrationTokenMutationInvalidationTest {
                 mock(PasswordEncoder.class),
                 tenantRepository,
                 mock(UserRepository.class),
+                mock(com.cacanode.api.tenant.repository.InvitationRepository.class),
+                mock(TenantUserManagementService.class),
                 mock(TenantWorkspaceService.class),
                 mock(ApplicationEventPublisher.class),
                 publisher

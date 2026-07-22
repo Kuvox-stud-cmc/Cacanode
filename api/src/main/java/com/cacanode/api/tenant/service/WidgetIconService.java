@@ -4,7 +4,7 @@ import com.cacanode.api.common.cache.BusinessCacheInvalidationPublisher;
 import com.cacanode.api.common.exception.custom.BadRequestException;
 import com.cacanode.api.common.exception.custom.InternalServerErrorException;
 import com.cacanode.api.common.exception.custom.ResourceNotFoundException;
-import com.cacanode.api.document.storage.DocumentStorage;
+import com.cacanode.api.common.storage.DocumentStorage;
 import com.cacanode.api.tenant.dto.WidgetConfigDtos;
 import com.cacanode.api.tenant.model.WidgetConfig;
 import com.cacanode.api.tenant.repository.WidgetConfigRepository;

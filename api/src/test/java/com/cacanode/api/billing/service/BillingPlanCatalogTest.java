@@ -1,8 +1,8 @@
 package com.cacanode.api.billing.service;
 
 import com.cacanode.api.billing.config.BillingProperties;
-import com.cacanode.api.billing.enums.BillingInterval;
-import com.cacanode.api.billing.enums.BillingPlanCode;
+import com.cacanode.api.billing.api.BillingInterval;
+import com.cacanode.api.billing.api.BillingPlanCode;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.*;

@@ -1,14 +1,17 @@
 package com.cacanode.api.billing.service;
 
-import com.cacanode.api.billing.enums.BillingStatus;
-import com.cacanode.api.billing.enums.PaymentOrderStatus;
+import com.cacanode.api.billing.api.BillingStatus;
+import com.cacanode.api.billing.api.PaymentOrderStatus;
+import com.cacanode.api.billing.query.BillingFacade;
 import com.cacanode.api.billing.gateway.PaymentGatewayException;
 import com.cacanode.api.billing.model.BillingPaymentOrder;
 import com.cacanode.api.billing.model.BillingSubscription;
 import com.cacanode.api.billing.repository.BillingPaymentOrderRepository;
 import com.cacanode.api.billing.repository.BillingSubscriptionRepository;
-import com.cacanode.api.notification.enums.NotificationType;
-import com.cacanode.api.notification.service.NotificationService;
+import com.cacanode.api.billing.api.event.BillingNoticeEvent;
+import com.cacanode.api.common.event.durable.DurableEventPublisher;
+import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.beans.factory.annotation.Autowired;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -32,7 +35,9 @@ public class BillingLifecycleService {
     private final BillingSubscriptionRepository subscriptionRepository;
     private final BillingPaymentOrderRepository paymentRepository;
     private final BillingFacade facade;
-    private final NotificationService notificationService;
+    private final ApplicationEventPublisher eventPublisher;
+    @Autowired(required = false)
+    private DurableEventPublisher durableEventPublisher;
 
     @Scheduled(fixedDelayString = "${app.billing.reconciliation-interval-ms:300000}")
     public void reconcilePayments() {
@@ -81,8 +86,8 @@ public class BillingLifecycleService {
             LocalDate today = now.toLocalDate();
             if (subscription.getLastGraceReminderAt() == null
                     || subscription.getLastGraceReminderAt().toLocalDate().isBefore(today)) {
-                notificationService.recordBillingNotice(subscription.getTenantId(), NotificationType.BILLING_GRACE,
-                        "Your Pro subscription is in grace", "Renew Pro before the grace period ends to keep Pro access.");
+                publishBusinessEvent(new BillingNoticeEvent(subscription.getTenantId(), "BILLING_GRACE",
+                        "Your Pro subscription is in grace", "Renew Pro before the grace period ends to keep Pro access."));
                 subscription.setLastGraceReminderAt(now);
             }
             return;
@@ -101,8 +106,16 @@ public class BillingLifecycleService {
     }
 
     private void recordRenewal(BillingSubscription subscription, LocalDateTime now, int days) {
-        notificationService.recordBillingNotice(subscription.getTenantId(), NotificationType.BILLING_RENEWAL,
+        publishBusinessEvent(new BillingNoticeEvent(subscription.getTenantId(), "BILLING_RENEWAL",
                 "Pro renewal due in " + days + (days == 1 ? " day" : " days"),
-                "Create a new PayOS checkout to renew your prepaid Pro subscription.");
+                "Create a new PayOS checkout to renew your prepaid Pro subscription."));
+    }
+
+    private void publishBusinessEvent(Object event) {
+        if (durableEventPublisher != null) {
+            durableEventPublisher.publish("billing.notice.v1", 1, event);
+        } else {
+            eventPublisher.publishEvent(event);
+        }
     }
 }

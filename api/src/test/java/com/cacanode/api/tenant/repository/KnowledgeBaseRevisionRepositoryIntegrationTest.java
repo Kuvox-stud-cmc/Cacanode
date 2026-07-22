@@ -14,8 +14,8 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import com.cacanode.api.tenant.enums.KnowledgeBaseStatus;
-import com.cacanode.api.tenant.enums.TenantPlan;
-import com.cacanode.api.tenant.enums.TenantStatus;
+import com.cacanode.api.tenant.api.TenantPlan;
+import com.cacanode.api.tenant.api.TenantStatus;
 import com.cacanode.api.tenant.model.KnowledgeBase;
 import com.cacanode.api.tenant.model.Tenant;
 

@@ -1,6 +1,6 @@
 package com.cacanode.api.chat.controller;
 
-import com.cacanode.api.chat.service.ChatControlPlaneService;
+import com.cacanode.api.chat.query.ChatControlPlaneService;
 import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.Test;
 

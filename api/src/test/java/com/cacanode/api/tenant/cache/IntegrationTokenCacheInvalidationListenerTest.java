@@ -45,8 +45,8 @@ class IntegrationTokenCacheInvalidationListenerTest {
             verifyNoInteractions(cacheStore);
         });
 
-        verify(cacheStore).delete("integration-token", "ccn:v1:integration-token:hash-a");
-        verify(cacheStore).delete("integration-token", "ccn:v1:integration-token:hash-b");
+        verify(cacheStore).delete("integration-token", "ccn:v2:integration-token:hash-a");
+        verify(cacheStore).delete("integration-token", "ccn:v2:integration-token:hash-b");
     }
 
     @Test

@@ -1,6 +1,5 @@
 package com.cacanode.api.tenant.model;
 
-import com.cacanode.api.ai.model.ModelConfigVersion;
 import com.cacanode.api.common.model.BaseEntity;
 import com.cacanode.api.tenant.enums.ChatbotStatus;
 import jakarta.persistence.Column;
@@ -44,9 +43,8 @@ public class Chatbot extends BaseEntity {
     @JoinColumn(name = "knowledge_base_id", nullable = false)
     private KnowledgeBase knowledgeBase;
 
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "model_config_version_id", nullable = false)
-    private ModelConfigVersion modelConfigVersion;
+    @Column(name = "model_config_version_id", nullable = false)
+    private java.util.UUID modelConfigVersionId;
 
     @Column(name = "display_name", nullable = false)
     private String displayName;

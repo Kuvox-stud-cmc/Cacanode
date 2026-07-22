@@ -7,7 +7,7 @@ import org.springframework.transaction.event.TransactionalEventListener;
 
 import com.cacanode.api.document.event.FailedDocumentCleanupRequestedEvent;
 import com.cacanode.api.document.service.DocumentIndexCleanup;
-import com.cacanode.api.document.storage.DocumentStorage;
+import com.cacanode.api.common.storage.DocumentStorage;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;

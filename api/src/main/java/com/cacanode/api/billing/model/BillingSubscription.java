@@ -1,8 +1,8 @@
 package com.cacanode.api.billing.model;
 
-import com.cacanode.api.billing.enums.BillingInterval;
-import com.cacanode.api.billing.enums.BillingPlanCode;
-import com.cacanode.api.billing.enums.BillingStatus;
+import com.cacanode.api.billing.api.BillingInterval;
+import com.cacanode.api.billing.api.BillingPlanCode;
+import com.cacanode.api.billing.api.BillingStatus;
 import com.cacanode.api.common.model.BaseEntity;
 import jakarta.persistence.*;
 import lombok.Getter;

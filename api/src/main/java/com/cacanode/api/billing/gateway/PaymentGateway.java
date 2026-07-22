@@ -1,6 +1,6 @@
 package com.cacanode.api.billing.gateway;
 
-import com.cacanode.api.billing.enums.PaymentOrderStatus;
+import com.cacanode.api.billing.api.PaymentOrderStatus;
 
 import java.time.LocalDateTime;
 import java.util.Map;

@@ -25,7 +25,7 @@ import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import com.cacanode.api.tenant.api.TenantModuleApi;
+import com.cacanode.api.tenant.api.TenantEntitlementApi;
 
 @Slf4j(topic = "WEBHOOK-DISPATCHER")
 @Component
@@ -38,7 +38,7 @@ public class WebhookDispatcher {
     private final WebhookDeliveryRepository deliveryRepository;
     private final WebhookCryptoService cryptoService;
     private final ObjectMapper objectMapper;
-    private final TenantModuleApi tenantModuleApi;
+    private final TenantEntitlementApi tenantModuleApi;
     private final HttpClient httpClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(5))
             .followRedirects(HttpClient.Redirect.NEVER)
@@ -65,7 +65,7 @@ public class WebhookDispatcher {
             event.setProcessedAt(LocalDateTime.now());
             return;
         }
-        List<WebhookEndpoint> endpoints = endpointRepository.findByTenant_IdAndActiveTrue(event.getTenantId())
+        List<WebhookEndpoint> endpoints = endpointRepository.findByTenantIdAndActiveTrue(event.getTenantId())
                 .stream()
                 .filter(endpoint -> event.getEventType().equals("test")
                         ? endpoint.getId().equals(event.getAggregateId())

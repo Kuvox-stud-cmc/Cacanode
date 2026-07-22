@@ -7,8 +7,7 @@ import com.cacanode.api.integration.model.WebhookEndpoint;
 import com.cacanode.api.integration.model.WebhookOutboxEvent;
 import com.cacanode.api.integration.repository.WebhookEndpointRepository;
 import com.cacanode.api.integration.repository.WebhookOutboxRepository;
-import com.cacanode.api.tenant.repository.TenantRepository;
-import com.cacanode.api.tenant.api.TenantModuleApi;
+import com.cacanode.api.tenant.api.TenantEntitlementApi;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -29,13 +28,12 @@ public class WebhookService {
 
     private final WebhookEndpointRepository endpointRepository;
     private final WebhookOutboxRepository outboxRepository;
-    private final TenantRepository tenantRepository;
     private final WebhookCryptoService cryptoService;
-    private final TenantModuleApi tenantModuleApi;
+    private final TenantEntitlementApi tenantModuleApi;
 
     @Transactional(readOnly = true)
     public List<WebhookDtos.Response> list(UUID tenantId) {
-        return endpointRepository.findByTenant_IdOrderByCreatedAtDesc(tenantId).stream()
+        return endpointRepository.findByTenantIdOrderByCreatedAtDesc(tenantId).stream()
                 .map(this::toResponse).toList();
     }
 
@@ -45,7 +43,7 @@ public class WebhookService {
         validate(request);
         String secret = cryptoService.generateSecret();
         WebhookEndpoint endpoint = new WebhookEndpoint();
-        endpoint.setTenant(tenantRepository.getReferenceById(tenantId));
+        endpoint.setTenantId(tenantId);
         apply(endpoint, request);
         endpoint.setEncryptedSecret(cryptoService.encrypt(secret));
         endpoint = endpointRepository.save(endpoint);
@@ -94,7 +92,7 @@ public class WebhookService {
     }
 
     private WebhookEndpoint find(UUID tenantId, UUID endpointId) {
-        return endpointRepository.findByIdAndTenant_Id(endpointId, tenantId)
+        return endpointRepository.findByIdAndTenantId(endpointId, tenantId)
                 .orElseThrow(() -> new ResourceNotFoundException("Webhook endpoint was not found"));
     }
 

@@ -6,7 +6,7 @@ import com.cacanode.api.auth.dto.response.AuthResponse;
 import com.cacanode.api.auth.dto.response.LoginStep1Response;
 import com.cacanode.api.auth.dto.response.MobileAuthResponse;
 import com.cacanode.api.auth.service.AuthService;
-import com.cacanode.api.common.exception.GlobalExceptionHandler;
+import com.cacanode.api.bootstrap.config.GlobalExceptionHandler;
 import com.cacanode.api.common.exception.custom.UnauthorizedException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;

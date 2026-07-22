@@ -1,10 +1,12 @@
 package com.cacanode.api.billing.service;
 
+import com.cacanode.api.billing.query.BillingFacade;
+
 import com.cacanode.api.billing.config.BillingProperties;
-import com.cacanode.api.billing.enums.BillingInterval;
-import com.cacanode.api.billing.enums.BillingPlanCode;
-import com.cacanode.api.billing.enums.BillingStatus;
-import com.cacanode.api.billing.enums.PaymentOrderStatus;
+import com.cacanode.api.billing.api.BillingInterval;
+import com.cacanode.api.billing.api.BillingPlanCode;
+import com.cacanode.api.billing.api.BillingStatus;
+import com.cacanode.api.billing.api.PaymentOrderStatus;
 import com.cacanode.api.billing.gateway.PaymentGateway;
 import com.cacanode.api.billing.gateway.PaymentGatewayException;
 import com.cacanode.api.billing.model.BillingPaymentOrder;
@@ -12,7 +14,9 @@ import com.cacanode.api.billing.model.BillingSubscription;
 import com.cacanode.api.billing.repository.BillingPaymentOrderRepository;
 import com.cacanode.api.billing.repository.BillingSubscriptionRepository;
 import com.cacanode.api.billing.repository.BillingWebhookEventRepository;
-import com.cacanode.api.tenant.api.TenantModuleApi;
+import com.cacanode.api.tenant.api.TenantEntitlementApi;
+import com.cacanode.api.tenant.api.TenantIdentityApi;
+import com.cacanode.api.document.api.DocumentApi;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -34,7 +38,8 @@ class BillingFacadeWebhookTest {
     private BillingSubscriptionRepository subscriptions;
     private BillingPaymentOrderRepository payments;
     private BillingWebhookEventRepository webhooks;
-    private TenantModuleApi tenants;
+    private TenantEntitlementApi entitlements;
+    private TenantIdentityApi tenants;
     private PaymentGateway gateway;
     private BillingFacade facade;
 
@@ -43,12 +48,14 @@ class BillingFacadeWebhookTest {
         subscriptions = mock(BillingSubscriptionRepository.class);
         payments = mock(BillingPaymentOrderRepository.class);
         webhooks = mock(BillingWebhookEventRepository.class);
-        tenants = mock(TenantModuleApi.class);
+        entitlements = mock(TenantEntitlementApi.class);
+        tenants = mock(TenantIdentityApi.class);
         gateway = mock(PaymentGateway.class);
         BillingProperties properties = new BillingProperties();
         facade = new BillingFacade(
-                mock(BillingService.class), new BillingPlanCatalog(properties), properties,
-                subscriptions, payments, webhooks, tenants, gateway, new BillingPeriods(),
+                new BillingPlanCatalog(properties), properties,
+                subscriptions, payments, webhooks, entitlements, tenants, mock(DocumentApi.class),
+                gateway, new BillingPeriods(),
                 mock(JdbcTemplate.class), new ObjectMapper(), mock(ApplicationEventPublisher.class));
         when(webhooks.findByPayloadHash(any())).thenReturn(Optional.empty());
     }
@@ -69,7 +76,7 @@ class BillingFacadeWebhookTest {
         assertEquals(PaymentOrderStatus.PAID, order.getStatus());
         assertEquals(originalPaidThrough.plusMonths(1), subscription.getPaidThroughAt());
         assertEquals(BillingStatus.ACTIVE, subscription.getStatus());
-        verify(tenants).applyEntitlements(any());
+        verify(entitlements).applyEntitlements(any());
         verify(payments).cancelOtherOpenOrders(
                 eq(tenantId), eq(order.getId()),
                 eq(Set.of(PaymentOrderStatus.PENDING, PaymentOrderStatus.PROCESSING)),
@@ -77,7 +84,7 @@ class BillingFacadeWebhookTest {
 
         facade.processPayOsWebhook(Map.of("delivery", 2));
         assertEquals(originalPaidThrough.plusMonths(1), subscription.getPaidThroughAt());
-        verify(tenants, times(1)).applyEntitlements(any());
+        verify(entitlements, times(1)).applyEntitlements(any());
     }
 
     @Test
@@ -142,7 +149,7 @@ class BillingFacadeWebhookTest {
         assertEquals(PaymentOrderStatus.PAID, response.status());
         assertEquals(BillingPlanCode.PRO, subscription.getPlanCode());
         assertEquals(BillingStatus.ACTIVE, subscription.getStatus());
-        verify(tenants).applyEntitlements(any());
+        verify(entitlements).applyEntitlements(any());
     }
 
     @Test

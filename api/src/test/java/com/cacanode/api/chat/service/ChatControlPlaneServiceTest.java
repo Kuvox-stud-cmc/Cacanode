@@ -1,5 +1,6 @@
 package com.cacanode.api.chat.service;
 
+import com.cacanode.api.chat.query.ChatControlPlaneService;
 import com.cacanode.api.chat.enums.ChatChannel;
 import org.junit.jupiter.api.Test;
 

@@ -1,12 +1,9 @@
 package com.cacanode.api.tenant.service;
 
-import com.cacanode.api.ai.enums.ModelConfigStatus;
+import com.cacanode.api.ai.api.ModelConfigurationApi;
 import com.cacanode.api.common.cache.BusinessCache;
 import com.cacanode.api.common.cache.CacheKeyFactory;
 import com.cacanode.api.common.cache.VersionedJsonCache;
-import com.cacanode.api.ai.model.ModelConfigVersion;
-import com.cacanode.api.ai.repository.ModelConfigVersionRepository;
-import com.cacanode.api.common.exception.custom.InternalServerErrorException;
 import com.cacanode.api.common.exception.custom.ResourceNotFoundException;
 import com.cacanode.api.tenant.CustomerAnswerPromptDefaults;
 import com.cacanode.api.tenant.dto.TenantWorkspaceResponse;
@@ -41,7 +38,7 @@ public class TenantWorkspaceService {
     private final KnowledgeBaseRepository knowledgeBaseRepository;
     private final ChatbotRepository chatbotRepository;
     private final WidgetConfigRepository widgetConfigRepository;
-    private final ModelConfigVersionRepository modelConfigVersionRepository;
+    private final ModelConfigurationApi modelConfigurationApi;
     @Autowired(required = false)
     private VersionedJsonCache businessCache;
     @Autowired(required = false)
@@ -106,16 +103,10 @@ public class TenantWorkspaceService {
                         ChatbotStatus.ACTIVE
                 )
                 .orElseGet(() -> {
-                    ModelConfigVersion modelConfigVersion = modelConfigVersionRepository
-                            .findFirstByStatusOrderByCreatedAtDesc(ModelConfigStatus.ACTIVE)
-                            .orElseThrow(() -> new InternalServerErrorException(
-                                    "Cannot provision tenant workspace: no active model configuration exists"
-                            ));
-
                     Chatbot chatbot = new Chatbot();
                     chatbot.setTenant(tenant);
                     chatbot.setKnowledgeBase(knowledgeBase);
-                    chatbot.setModelConfigVersion(modelConfigVersion);
+                    chatbot.setModelConfigVersionId(modelConfigurationApi.activeModelConfigurationId());
                     chatbot.setDisplayName(DEFAULT_CHATBOT_NAME);
                     chatbot.setDefaultLocale(knowledgeBase.getDefaultLocale());
                     chatbot.setWelcomeMessage(DEFAULT_WELCOME_MESSAGE);

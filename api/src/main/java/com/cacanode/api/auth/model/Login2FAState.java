@@ -1,6 +1,6 @@
 package com.cacanode.api.auth.model;
 
-import com.cacanode.api.auth.enums.Login2FAChallengeType;
+import com.cacanode.api.auth.api.Login2FAChallengeType;
 import jakarta.persistence.*;
 import lombok.AccessLevel;
 import lombok.Getter;

@@ -3,7 +3,7 @@ package com.cacanode.api.tenant.service;
 import com.cacanode.api.common.exception.custom.UnauthorizedException;
 import com.cacanode.api.tenant.enums.ChatbotStatus;
 import com.cacanode.api.tenant.enums.KnowledgeBaseStatus;
-import com.cacanode.api.tenant.enums.TenantStatus;
+import com.cacanode.api.tenant.api.TenantStatus;
 import com.cacanode.api.tenant.model.IntegrationToken;
 import com.cacanode.api.tenant.repository.IntegrationTokenRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;

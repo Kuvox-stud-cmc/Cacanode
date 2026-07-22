@@ -8,7 +8,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 public interface WebhookEndpointRepository extends JpaRepository<WebhookEndpoint, UUID> {
-    List<WebhookEndpoint> findByTenant_IdOrderByCreatedAtDesc(UUID tenantId);
-    List<WebhookEndpoint> findByTenant_IdAndActiveTrue(UUID tenantId);
-    Optional<WebhookEndpoint> findByIdAndTenant_Id(UUID id, UUID tenantId);
+    List<WebhookEndpoint> findByTenantIdOrderByCreatedAtDesc(UUID tenantId);
+    List<WebhookEndpoint> findByTenantIdAndActiveTrue(UUID tenantId);
+    Optional<WebhookEndpoint> findByIdAndTenantId(UUID id, UUID tenantId);
 }
