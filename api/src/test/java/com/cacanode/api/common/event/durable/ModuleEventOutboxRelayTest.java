@@ -1,6 +1,7 @@
 package com.cacanode.api.common.event.durable;
 
 import com.cacanode.api.billing.api.event.QuotaWarningEvent;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.ApplicationEventPublisher;
@@ -57,8 +58,9 @@ class ModuleEventOutboxRelayTest {
         event.setEventId(UUID.randomUUID());
         event.setEventType("billing.quota.warning.v1");
         event.setEventVersion(1);
-        event.setPayload(objectMapper.writeValueAsString(
-                new QuotaWarningEvent(UUID.randomUUID(), 8, 10)));
+        event.setPayload(objectMapper.convertValue(
+                new QuotaWarningEvent(UUID.randomUUID(), 8, 10),
+                new TypeReference<>() { }));
         event.setStatus(ModuleEventStatus.PENDING);
         event.setCreatedAt(now);
         event.setNextAttemptAt(now);

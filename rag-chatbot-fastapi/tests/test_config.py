@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from app.core.config import Settings
+from app.bootstrap.settings import Settings
 
 
 def test_ai_settings_have_no_postgres_or_business_auth_fields() -> None:

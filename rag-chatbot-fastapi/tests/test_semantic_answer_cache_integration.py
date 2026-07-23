@@ -8,9 +8,13 @@ import pytest
 import redis.asyncio as redis
 from qdrant_client import AsyncQdrantClient
 
-from app.core.config import Settings
-from app.rag.models import AssistantMessage, ChatSession, Citation, ModelCompletion
-from app.rag.semantic_answer_cache import SemanticAnswerCache
+from app.bootstrap.settings import Settings
+from app.modules.generation.internal.models import AssistantMessage, ChatSession, Citation
+from app.modules.generation.internal.semantic_answer_cache import SemanticAnswerCache
+from app.modules.model.api import ModelCompletion
+from app.modules.retrieval.api import RetrievalFingerprint, RetrievalPlan
+from app.modules.retrieval.internal.cache import retrieval_configuration_fingerprint
+from app.modules.retrieval.internal.retrieval import QueryRouter
 
 
 def _database_15_url(url: str) -> str:
@@ -22,6 +26,17 @@ class Revision:
     async def current_revision(self, tenant_id: str, knowledge_base_id: str) -> int:
         del tenant_id, knowledge_base_id
         return 1
+
+
+class RetrievalPlanStub:
+    def __init__(self, settings: Settings) -> None:
+        self._router = QueryRouter(settings)
+        self._fingerprint = retrieval_configuration_fingerprint(settings)
+
+    def plan(self, query_text: str) -> RetrievalPlan:
+        return RetrievalPlan(
+            RetrievalFingerprint(self._router.route(query_text), self._fingerprint)
+        )
 
     async def increment(self, tenant_id: str, knowledge_base_id: str) -> int:
         del tenant_id, knowledge_base_id
@@ -56,6 +71,7 @@ async def test_semantic_answer_cache_against_real_redis_15_and_local_qdrant() ->
     cache = SemanticAnswerCache(
         settings,
         redis_client=redis_client,
+        retrieval=RetrievalPlanStub(settings),  # type: ignore[arg-type]
         qdrant_client=qdrant_client,
         revision_store=Revision(),
     )

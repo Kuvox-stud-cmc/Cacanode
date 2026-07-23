@@ -6,13 +6,14 @@ from typing import Any
 import pytest
 from prometheus_client import REGISTRY
 
-from app.core.config import Settings
-from app.infrastructure.model_gateway import (
+from app.bootstrap.settings import Settings
+from app.modules.model.api import ModelTimeoutError as ChatModelTimeoutError
+from app.modules.model.api import ModelUnavailableError as ChatModelProviderError
+from app.modules.model.internal.chat import (
     OllamaChatModel,
     OpenAIChatModel,
     create_chat_model,
 )
-from app.rag.errors import ChatModelProviderError, ChatModelTimeoutError
 
 
 def metric_value(name: str, labels: dict[str, str]) -> float:
@@ -134,7 +135,7 @@ def test_create_chat_model_defaults_to_ollama() -> None:
 
 
 def test_create_chat_model_selects_openai(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("app.infrastructure.model_gateway.ChatOpenAI", FakeChatOpenAI)
+    monkeypatch.setattr("app.modules.model.internal.chat.ChatOpenAI", FakeChatOpenAI)
 
     model = create_chat_model(
         settings(
@@ -154,7 +155,7 @@ def test_create_chat_model_requires_openai_api_key() -> None:
 
 @pytest.mark.asyncio
 async def test_ollama_native_chat_disables_thinking(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("app.infrastructure.model_gateway.httpx.AsyncClient", FakeOllamaClient)
+    monkeypatch.setattr("app.modules.model.internal.chat.httpx.AsyncClient", FakeOllamaClient)
     gateway = OllamaChatModel(settings())
 
     response = await gateway.complete([{"role": "user", "content": "what is 2+2?"}])
@@ -168,7 +169,7 @@ async def test_ollama_native_chat_disables_thinking(monkeypatch: pytest.MonkeyPa
 
 @pytest.mark.asyncio
 async def test_ollama_preserves_composed_message_content(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("app.infrastructure.model_gateway.httpx.AsyncClient", FakeOllamaClient)
+    monkeypatch.setattr("app.modules.model.internal.chat.httpx.AsyncClient", FakeOllamaClient)
     gateway = OllamaChatModel(settings())
     messages = [
         {"role": "system", "content": "Platform rules\nTenant instructions\nPlatform priority"},
@@ -184,7 +185,7 @@ async def test_ollama_preserves_composed_message_content(monkeypatch: pytest.Mon
 async def test_ollama_complete_with_usage_extracts_native_token_counts(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr("app.infrastructure.model_gateway.httpx.AsyncClient", UsageOllamaClient)
+    monkeypatch.setattr("app.modules.model.internal.chat.httpx.AsyncClient", UsageOllamaClient)
     gateway = OllamaChatModel(settings())
 
     completion = await gateway.complete_with_usage([{"role": "user", "content": "what is 2+2?"}])
@@ -198,7 +199,7 @@ async def test_ollama_complete_with_usage_extracts_native_token_counts(
 async def test_openai_chat_model_passes_configured_client_options(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr("app.infrastructure.model_gateway.ChatOpenAI", FakeChatOpenAI)
+    monkeypatch.setattr("app.modules.model.internal.chat.ChatOpenAI", FakeChatOpenAI)
     gateway = OpenAIChatModel(
         settings(
             LLM_PROVIDER="openai",
@@ -232,7 +233,7 @@ async def test_openai_chat_model_passes_configured_client_options(
 async def test_openai_complete_with_usage_extracts_langchain_usage_metadata(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr("app.infrastructure.model_gateway.ChatOpenAI", UsageChatOpenAI)
+    monkeypatch.setattr("app.modules.model.internal.chat.ChatOpenAI", UsageChatOpenAI)
     gateway = OpenAIChatModel(
         settings(
             LLM_PROVIDER="openai",
@@ -251,7 +252,7 @@ async def test_openai_complete_with_usage_extracts_langchain_usage_metadata(
 def test_openai_chat_model_omits_temperature_for_reasoning_models(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr("app.infrastructure.model_gateway.ChatOpenAI", FakeChatOpenAI)
+    monkeypatch.setattr("app.modules.model.internal.chat.ChatOpenAI", FakeChatOpenAI)
 
     OpenAIChatModel(
         settings(
@@ -269,7 +270,7 @@ def test_openai_chat_model_omits_temperature_for_reasoning_models(
 def test_openai_chat_model_preserves_larger_reasoning_model_token_budget(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr("app.infrastructure.model_gateway.ChatOpenAI", FakeChatOpenAI)
+    monkeypatch.setattr("app.modules.model.internal.chat.ChatOpenAI", FakeChatOpenAI)
 
     OpenAIChatModel(
         settings(
@@ -286,7 +287,7 @@ def test_openai_chat_model_preserves_larger_reasoning_model_token_budget(
 def test_openai_chat_model_passes_reasoning_effort_for_reasoning_models(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr("app.infrastructure.model_gateway.ChatOpenAI", FakeChatOpenAI)
+    monkeypatch.setattr("app.modules.model.internal.chat.ChatOpenAI", FakeChatOpenAI)
 
     create_chat_model(
         settings(
@@ -303,7 +304,7 @@ def test_openai_chat_model_passes_reasoning_effort_for_reasoning_models(
 def test_openai_chat_model_ignores_reasoning_effort_for_non_reasoning_models(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr("app.infrastructure.model_gateway.ChatOpenAI", FakeChatOpenAI)
+    monkeypatch.setattr("app.modules.model.internal.chat.ChatOpenAI", FakeChatOpenAI)
 
     create_chat_model(
         settings(
@@ -321,7 +322,7 @@ def test_openai_chat_model_ignores_reasoning_effort_for_non_reasoning_models(
 async def test_openai_empty_response_is_provider_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr("app.infrastructure.model_gateway.ChatOpenAI", EmptyChatOpenAI)
+    monkeypatch.setattr("app.modules.model.internal.chat.ChatOpenAI", EmptyChatOpenAI)
     gateway = OpenAIChatModel(
         settings(
             LLM_PROVIDER="openai",
@@ -336,7 +337,7 @@ async def test_openai_empty_response_is_provider_error(
 
 @pytest.mark.asyncio
 async def test_openai_provider_errors_are_wrapped(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("app.infrastructure.model_gateway.ChatOpenAI", FailingChatOpenAI)
+    monkeypatch.setattr("app.modules.model.internal.chat.ChatOpenAI", FailingChatOpenAI)
     gateway = OpenAIChatModel(
         settings(
             LLM_PROVIDER="openai",
@@ -353,7 +354,7 @@ async def test_openai_provider_errors_are_wrapped(monkeypatch: pytest.MonkeyPatc
 async def test_ollama_timeout_records_counter_and_raises_model_timeout(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr("app.infrastructure.model_gateway.httpx.AsyncClient", SlowOllamaClient)
+    monkeypatch.setattr("app.modules.model.internal.chat.httpx.AsyncClient", SlowOllamaClient)
     labels = {"provider": "ollama", "model": "timeout-model"}
     before = metric_value("cacanode_ai_chat_model_timeouts_total", labels)
     gateway = OllamaChatModel(

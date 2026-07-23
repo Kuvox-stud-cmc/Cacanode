@@ -9,20 +9,20 @@ import pytest
 import redis.asyncio as redis
 from redis.exceptions import RedisError
 
-from app.core.cache import (
+from app.bootstrap.settings import Settings
+from app.common.cache import (
     CacheOperationStatus,
     CacheReadStatus,
     RedisCacheStore,
     TtlJitter,
 )
-from app.core.config import Settings
-from app.ingestion.embedding import (
+from app.modules.generation.internal.models import RetrievedChunk
+from app.modules.model.internal.embedding import (
     CachedEmbeddingClient,
     EmbeddingCacheKeyBuilder,
     EmbeddingVectorCodec,
 )
-from app.rag.models import RetrievedChunk
-from app.rag.retrieval_cache import CachedRetriever, RetrievalCacheKeyBuilder
+from app.modules.retrieval.internal.cache import CachedRetriever, RetrievalCacheKeyBuilder
 
 
 def _database_15_url(url: str) -> str:

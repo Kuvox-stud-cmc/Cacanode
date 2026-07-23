@@ -52,6 +52,7 @@ endif
 	dev-infra dev-down dev-reranker dev-reranker-down \
 	evaluate-retrieval compare-retrieval-cache baseline-cache baseline-cache-enabled \
 	cleanup-semantic-answer-cache \
+	recover-ingestion-checkpoints \
 	cleanup-semantic-answer-cache-dry-run test check lint typecheck clean
 
 help:
@@ -75,6 +76,7 @@ help:
 	$(info   make baseline-cache-enabled Label a cache-enabled comparison run as JSON)
 	$(info   make cleanup-semantic-answer-cache Delete expired semantic answer-cache points)
 	$(info   make cleanup-semantic-answer-cache-dry-run Preview the bounded cleanup)
+	$(info   make recover-ingestion-checkpoints Republish bounded incomplete ingestion jobs)
 	$(info   make test                 Run pytest)
 	$(info   make lint                 Run Ruff checks)
 	$(info   make typecheck            Run mypy)
@@ -154,10 +156,13 @@ baseline-cache-enabled: env
 	@BASELINE_CACHE_ENABLED=true $(PYTHON_RUN) -m app.maintenance.cache_baseline
 
 cleanup-semantic-answer-cache: env
-	$(PYTHON_RUN) -m app.maintenance.cleanup_semantic_answer_cache --apply
+	$(PYTHON_RUN) -m app.bootstrap.semantic_cache_cleanup --apply
 
 cleanup-semantic-answer-cache-dry-run: env
-	$(PYTHON_RUN) -m app.maintenance.cleanup_semantic_answer_cache
+	$(PYTHON_RUN) -m app.bootstrap.semantic_cache_cleanup
+
+recover-ingestion-checkpoints: env
+	$(PYTHON_RUN) -m app.bootstrap.recover_ingestion --limit 100
 
 test: env
 	$(PYTHON_RUN) -m pytest $(PYTEST_ARGS)

@@ -31,7 +31,7 @@ public class ModuleEventOutboxRelay {
     void deliver(ModuleEventOutbox event) {
         try {
             Class<?> type = registry.payloadType(event.getEventType(), event.getEventVersion());
-            Object payload = objectMapper.readValue(event.getPayload(), type);
+            Object payload = objectMapper.convertValue(event.getPayload(), type);
             ModuleEventDeliveryContext.set(new ModuleEventDeliveryContext.Delivery(
                     event.getEventId(), event.getEventType(), event.getEventVersion()));
             applicationEventPublisher.publishEvent(payload);

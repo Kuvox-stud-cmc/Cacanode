@@ -4,8 +4,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.core.config import Settings
-from app.document_units import QdrantDocumentUnitStore
+from app.bootstrap.settings import Settings
+from app.modules.index.internal.qdrant_queries import QdrantDocumentUnitStore
 
 
 class Qdrant:

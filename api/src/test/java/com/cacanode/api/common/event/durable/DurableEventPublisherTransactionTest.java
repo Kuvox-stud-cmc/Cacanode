@@ -18,6 +18,7 @@ import org.springframework.test.context.jdbc.Sql;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 @DataJpaTest(properties = {
@@ -64,6 +65,22 @@ class DurableEventPublisherTransactionTest {
         }));
 
         assertEquals(0, repository.count());
+    }
+
+    @Test
+    void persistsPayloadAsStructuredJson() {
+        UUID tenantId = UUID.randomUUID();
+        TransactionTemplate transaction = new TransactionTemplate(transactionManager);
+
+        UUID eventId = transaction.execute(status -> publisher.publish(
+                "billing.quota.warning.v1", 1,
+                new QuotaWarningEvent(tenantId, 8, 10)));
+
+        assertNotNull(eventId);
+        ModuleEventOutbox event = repository.findById(eventId).orElseThrow();
+        assertEquals(tenantId.toString(), event.getPayload().get("tenantId"));
+        assertEquals(8L, ((Number) event.getPayload().get("used")).longValue());
+        assertEquals(10, ((Number) event.getPayload().get("limit")).intValue());
     }
 
     @TestConfiguration

@@ -166,7 +166,7 @@ public class GlobalExceptionHandler {
     public ErrorResponse handleGenericException(
             Exception e, WebRequest request
     ) {
-        log.error("Unexpected error: {}", e.getMessage());
+        log.error("Unexpected error", e);
         return ErrorResponse.builder()
                 .timestamp(LocalDateTime.now())
                 .status(HttpStatus.INTERNAL_SERVER_ERROR.value())
