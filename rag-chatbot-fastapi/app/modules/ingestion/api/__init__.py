@@ -53,8 +53,39 @@ class IngestionCheckpointMaintenanceApi(Protocol):
     async def republish_incomplete(self, *, limit: int) -> int: ...
 
 
+@dataclass(frozen=True, slots=True)
+class ContentExtractionCommand:
+    file_bytes: bytes
+    file_name: str
+    content_type: str
+
+
+@dataclass(frozen=True, slots=True)
+class SourceSegment:
+    segment_id: str
+    text: str
+    source_location: str
+
+
+@dataclass(frozen=True, slots=True)
+class ExtractedContent:
+    normalized_text: str
+    detected_content_type: str
+    character_count: int
+    page_count: int | None = None
+    source_segments: tuple[SourceSegment, ...] = ()
+
+
+class ContentExtractionApi(Protocol):
+    async def extract(self, command: ContentExtractionCommand) -> ExtractedContent: ...
+
+
 __all__ = [
     "DocumentIndexLifecycleApi",
+    "ContentExtractionApi",
+    "ContentExtractionCommand",
+    "ExtractedContent",
+    "SourceSegment",
     "IngestDocumentCommand",
     "IngestionApi",
     "IngestionCheckpointMaintenanceApi",

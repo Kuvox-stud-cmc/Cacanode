@@ -42,11 +42,22 @@ class SeaweedS3DocumentStore:
                 f"Unable to download document from SeaweedFS: {exc}"
             ) from exc
 
-    def _download_sync(self, storage_key: str) -> bytes:
+    async def download_limited(self, storage_key: str, max_bytes: int) -> bytes:
+        try:
+            return await asyncio.to_thread(self._download_sync, storage_key, max_bytes)
+        except (BotoCoreError, ClientError, OSError) as exc:
+            raise StorageUnavailableError(
+                f"Unable to download document from SeaweedFS: {exc}"
+            ) from exc
+
+    def _download_sync(self, storage_key: str, max_bytes: int | None = None) -> bytes:
         response = self._client.get_object(Bucket=self._bucket, Key=storage_key)
         body = response["Body"]
         try:
-            return body.read()
+            data = body.read() if max_bytes is None else body.read(max_bytes + 1)
+            if max_bytes is not None and len(data) > max_bytes:
+                raise ValueError("Stored object exceeds the bounded download limit")
+            return data
         finally:
             close = getattr(body, "close", None)
             if close:

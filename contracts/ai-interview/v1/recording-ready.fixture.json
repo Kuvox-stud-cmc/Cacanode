@@ -1,0 +1,15 @@
+{
+  "schema_version": "1.0",
+  "event_id": "f3c21e35-c55c-5eb0-b01c-c6761b33ec63",
+  "event_type": "recruitment.recording.ready",
+  "occurred_at": "2026-07-23T08:30:00Z",
+  "tenant_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+  "aggregate_id": "22222222-2222-4222-8222-222222222222",
+  "session_id": "22222222-2222-4222-8222-222222222222",
+  "call_attempt_id": "55555555-5555-4555-8555-555555555555",
+  "storage_key": "recruitment/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/recordings/22222222-2222-4222-8222-222222222222.mp3",
+  "content_type": "audio/mpeg",
+  "size_bytes": 7340032,
+  "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+  "retained_until": "2026-08-22T08:30:00Z"
+}

@@ -5,6 +5,7 @@ import com.cacanode.api.chat.api.ChatApi;
 import com.cacanode.api.document.api.DocumentApi;
 import com.cacanode.api.support.api.SupportAnalyticsExportApi;
 import com.cacanode.api.tenant.api.TenantAnalyticsExportApi;
+import com.cacanode.api.recruitment.api.RecruitmentAnalyticsExportApi;
 import lombok.RequiredArgsConstructor;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
@@ -20,6 +21,7 @@ public class AnalyticsProjectionRebuildService implements AnalyticsProjectionReb
     private final DocumentApi documentApi;
     private final ChatApi chatApi;
     private final SupportAnalyticsExportApi supportExport;
+    private final RecruitmentAnalyticsExportApi recruitmentExport;
 
     @Override
     @Transactional
@@ -32,8 +34,12 @@ public class AnalyticsProjectionRebuildService implements AnalyticsProjectionReb
         long conversations = rebuildConversations();
         long messages = rebuildMessages();
         long tickets = rebuildTickets();
+        long recruitmentJobs = rebuildRecruitmentJobs();
+        long recruitmentApplications = rebuildRecruitmentApplications();
+        long recruitmentInterviews = rebuildRecruitmentInterviews();
         return new RebuildResult(tenants, users, invitations, documents,
-                conversations, messages, tickets);
+                conversations, messages, tickets, recruitmentJobs, recruitmentApplications,
+                recruitmentInterviews);
     }
 
     private void clearProjections() {
@@ -41,6 +47,9 @@ public class AnalyticsProjectionRebuildService implements AnalyticsProjectionReb
         jdbcTemplate.update("DELETE FROM analytics_conversation_projection");
         jdbcTemplate.update("DELETE FROM analytics_ticket_projection");
         jdbcTemplate.update("DELETE FROM analytics_document_projection");
+        jdbcTemplate.update("DELETE FROM analytics_recruitment_interview_projection");
+        jdbcTemplate.update("DELETE FROM analytics_recruitment_application_projection");
+        jdbcTemplate.update("DELETE FROM analytics_recruitment_job_projection");
         jdbcTemplate.update("DELETE FROM analytics_invitation_projection");
         jdbcTemplate.update("DELETE FROM analytics_user_projection");
         jdbcTemplate.update("DELETE FROM analytics_tenant_projection");
@@ -164,6 +173,81 @@ public class AnalyticsProjectionRebuildService implements AnalyticsProjectionReb
                 count++;
             }
             if (!snapshot.hasMore()) return count;
+        }
+    }
+
+    private long rebuildRecruitmentJobs() {
+        long count = 0;
+        for (var tenant : tenantIds()) {
+            String cursor = null;
+            do {
+                var page = recruitmentExport.exportJobs(tenant, cursor, PAGE_SIZE);
+                for (var item : page.items()) {
+                    jdbcTemplate.update("""
+                            INSERT INTO analytics_recruitment_job_projection
+                            (job_id,tenant_id,status,created_at,updated_at,published_at,paused_at,closed_at,archived_at)
+                            VALUES (?,?,?,?,?,?,?,?,?)
+                            """, item.jobId(), tenant, item.status(), item.createdAt(), item.updatedAt(),
+                            item.publishedAt(), item.pausedAt(), item.closedAt(), item.archivedAt());
+                    count++;
+                }
+                cursor = page.nextCursor();
+            } while (cursor != null);
+        }
+        return count;
+    }
+
+    private long rebuildRecruitmentApplications() {
+        long count = 0;
+        for (var tenant : tenantIds()) {
+            String cursor = null;
+            do {
+                var page = recruitmentExport.exportApplications(tenant, cursor, PAGE_SIZE);
+                for (var item : page.items()) {
+                    jdbcTemplate.update("""
+                            INSERT INTO analytics_recruitment_application_projection
+                            (application_id,tenant_id,job_id,status,created_at,updated_at,submitted_at,verified_at,withdrawn_at)
+                            VALUES (?,?,?,?,?,?,?,?,?)
+                            """, item.applicationId(), tenant, item.jobId(), item.status(), item.createdAt(),
+                            item.updatedAt(), item.submittedAt(), item.verifiedAt(), item.withdrawnAt());
+                    count++;
+                }
+                cursor = page.nextCursor();
+            } while (cursor != null);
+        }
+        return count;
+    }
+
+    private long rebuildRecruitmentInterviews() {
+        long count = 0;
+        for (var tenant : tenantIds()) {
+            String cursor = null;
+            do {
+                var page = recruitmentExport.exportInterviews(tenant, cursor, PAGE_SIZE);
+                for (var item : page.items()) {
+                    jdbcTemplate.update("""
+                            INSERT INTO analytics_recruitment_interview_projection
+                            (interview_id,tenant_id,application_id,job_id,status,created_at,updated_at,invited_at,
+                             scheduled_start_at,scheduled_end_at,started_at,completed_at,cancelled_at,expired_at)
+                            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                            """, item.interviewId(), tenant, item.applicationId(), item.jobId(), item.status(),
+                            item.createdAt(), item.updatedAt(), item.invitedAt(), item.scheduledStartAt(),
+                            item.scheduledEndAt(), item.startedAt(), item.completedAt(), item.cancelledAt(),
+                            item.expiredAt());
+                    count++;
+                }
+                cursor = page.nextCursor();
+            } while (cursor != null);
+        }
+        return count;
+    }
+
+    private java.util.List<java.util.UUID> tenantIds() {
+        java.util.List<java.util.UUID> result = new java.util.ArrayList<>();
+        for (int page = 0; ; page++) {
+            var snapshot = tenantExport.tenants(page, PAGE_SIZE);
+            snapshot.items().forEach(item -> result.add(item.id()));
+            if (!snapshot.hasMore()) return result;
         }
     }
 }

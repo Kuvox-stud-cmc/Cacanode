@@ -18,8 +18,8 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Clock;
 import java.time.LocalDateTime;
-import java.time.ZoneOffset;
 import java.util.UUID;
 
 @Service
@@ -30,6 +30,7 @@ public class BillingQuotaService implements BillingQuotaApi {
     private final BillingPeriods periods;
     private final BillingPlanCatalog catalog;
     private final ApplicationEventPublisher eventPublisher;
+    private final Clock clock;
     @Autowired(required = false)
     private DurableEventPublisher durableEventPublisher;
 
@@ -37,7 +38,7 @@ public class BillingQuotaService implements BillingQuotaApi {
     @Transactional
     public QuotaConsumption consumeMessageQuota(UUID tenantId) {
         BillingSubscription subscription = lockOrCreateTrial(tenantId);
-        var period = periods.currentQuotaPeriod(subscription, LocalDateTime.now(ZoneOffset.UTC));
+        var period = periods.currentQuotaPeriod(subscription, now());
         UsageMetrics usage = usageRepository.findByTenantIDAndPeriodStart(tenantId, period.start())
                 .orElseGet(() -> newUsage(tenantId, period));
         Integer limit = subscription.getEntitlementSnapshot().maxMessages();
@@ -67,7 +68,7 @@ public class BillingQuotaService implements BillingQuotaApi {
         if (subscription == null) {
             return;
         }
-        var period = periods.currentQuotaPeriod(subscription, LocalDateTime.now(ZoneOffset.UTC));
+        var period = periods.currentQuotaPeriod(subscription, now());
         usageRepository.findByTenantIDAndPeriodStart(tenantId, period.start()).ifPresent(usage -> {
             if (usage.getMessageCount() > 0) {
                 usage.setMessageCount(usage.getMessageCount() - 1);
@@ -80,7 +81,7 @@ public class BillingQuotaService implements BillingQuotaApi {
         if (existing != null) {
             return existing;
         }
-        LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC);
+        LocalDateTime now = now();
         BillingSubscription trial = new BillingSubscription();
         trial.setTenantId(tenantId);
         trial.setPlanCode(BillingPlanCode.TRIAL);
@@ -113,5 +114,9 @@ public class BillingQuotaService implements BillingQuotaApi {
         } else {
             eventPublisher.publishEvent(event);
         }
+    }
+
+    private LocalDateTime now() {
+        return LocalDateTime.now(clock);
     }
 }

@@ -10,6 +10,8 @@ service InferenceService {
   rpc GenerateAnswer(GenerateAnswerRequest) returns (GenerateAnswerResponse);
   rpc ListDocumentUnits(ListDocumentUnitsRequest) returns (ListDocumentUnitsResponse);
   rpc DeleteDocumentIndex(DeleteDocumentIndexRequest) returns (DeleteDocumentIndexResponse);
+  rpc PrepareInterviewSession(PrepareInterviewSessionRequest) returns (PrepareInterviewSessionResponse);
+  rpc CancelInterviewSession(CancelInterviewSessionRequest) returns (CancelInterviewSessionResponse);
 }
 
 enum VisibilityMode {
@@ -123,4 +125,86 @@ message DeleteDocumentIndexRequest {
 
 message DeleteDocumentIndexResponse {
   bool deleted = 1;
+}
+
+enum InterviewSectionKind {
+  INTERVIEW_SECTION_KIND_UNSPECIFIED = 0;
+  INTERVIEW_SECTION_KIND_CORE = 1;
+  INTERVIEW_SECTION_KIND_ENGLISH_SCREEN = 2;
+}
+
+enum InterviewQuestionSource {
+  INTERVIEW_QUESTION_SOURCE_UNSPECIFIED = 0;
+  INTERVIEW_QUESTION_SOURCE_TEMPLATE = 1;
+  INTERVIEW_QUESTION_SOURCE_CV_PERSONALIZED = 2;
+}
+
+message InterviewQuestionSnapshot {
+  string question_id = 1;
+  int32 position = 2;
+  string prompt = 3;
+  string competency = 4;
+  string rubric = 5;
+  int32 follow_up_limit = 6;
+  InterviewQuestionSource source = 7;
+  optional string evidence = 8;
+}
+
+message InterviewSectionSnapshot {
+  string section_id = 1;
+  int32 position = 2;
+  InterviewSectionKind kind = 3;
+  string language_tag = 4;
+  int32 duration_limit_seconds = 5;
+  string transition_text = 6;
+  repeated InterviewQuestionSnapshot questions = 7;
+}
+
+message InterviewInteractionLimits {
+  int32 repetition_limit = 1;
+  int32 clarification_limit = 2;
+  int32 silence_timeout_seconds = 3;
+  int32 silence_prompt_limit = 4;
+}
+
+message PrepareInterviewSessionRequest {
+  string session_id = 1;
+  string call_attempt_id = 2;
+  string tenant_id = 3;
+  string template_revision_id = 4;
+  string snapshot_version = 5;
+  string snapshot_sha256 = 6;
+  string company_display_name = 7;
+  string candidate_display_name = 8;
+  string introduction_text = 9;
+  string disclosure_text = 10;
+  string closing_text = 11;
+  int32 duration_limit_seconds = 12;
+  InterviewInteractionLimits interaction_limits = 13;
+  bool recording_enabled = 14;
+  bool cv_personalization_enabled = 15;
+  repeated InterviewSectionSnapshot sections = 16;
+  TraceMetadata trace = 17;
+}
+
+message PrepareInterviewSessionResponse {
+  string session_id = 1;
+  string call_attempt_id = 2;
+  string runtime_token = 3;
+  int64 expires_at_epoch_seconds = 4;
+  string accepted_snapshot_sha256 = 5;
+}
+
+message CancelInterviewSessionRequest {
+  string session_id = 1;
+  string call_attempt_id = 2;
+  string reason = 3;
+  TraceMetadata trace = 4;
+}
+
+message CancelInterviewSessionResponse {
+  string session_id = 1;
+  string call_attempt_id = 2;
+  bool cancelled = 3;
+  bool already_terminal = 4;
 }

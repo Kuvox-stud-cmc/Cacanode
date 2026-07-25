@@ -4,5 +4,7 @@ public interface AnalyticsProjectionRebuildApi {
     RebuildResult rebuild();
 
     record RebuildResult(long tenants, long users, long invitations, long documents,
-                         long conversations, long messages, long tickets) {}
+                         long conversations, long messages, long tickets,
+                         long recruitmentJobs, long recruitmentApplications,
+                         long recruitmentInterviews) {}
 }

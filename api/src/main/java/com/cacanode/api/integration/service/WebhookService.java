@@ -23,7 +23,14 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class WebhookService {
     public static final Set<String> SUPPORTED_EVENTS = Set.of(
-            "conversation.started", "conversation.closed", "ticket.created"
+            "conversation.started", "conversation.closed", "ticket.created",
+            "job.published", "job.paused", "job.closed", "job.archived",
+            "application.submitted", "application.withdrawn", "application.under_review",
+            "application.shortlisted", "application.rejected",
+            "interview.invited", "interview.scheduled", "interview.rescheduled",
+            "interview.started", "interview.completed", "interview.failed",
+            "interview.no_answer", "interview.declined", "interview.cancelled",
+            "interview.expired", "recording.ready"
     );
 
     private final WebhookEndpointRepository endpointRepository;
@@ -102,7 +109,8 @@ public class WebhookService {
         }
         try {
             URI uri = URI.create(request.url());
-            if (uri.getHost() == null || !(uri.getScheme().equals("https") || uri.getScheme().equals("http"))) {
+            if (uri.getHost() == null || uri.getUserInfo()!=null || uri.getFragment()!=null
+                    || !(uri.getScheme().equals("https") || uri.getScheme().equals("http"))) {
                 throw new IllegalArgumentException();
             }
         } catch (RuntimeException e) {

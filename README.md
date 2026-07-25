@@ -31,7 +31,7 @@ Implemented foundations include:
 
 - Next.js management-console shell and authentication client.
 - Spring Boot identity, tenant, persistence, and versioned-route compatibility.
-- Backend-authoritative Starter, Trial, Pro, and Enterprise entitlements with PayOS-hosted checkout, verified webhook activation, manual renewal, reconciliation, quota enforcement, and subscription lifecycle management.
+- Backend-authoritative Starter, Trial, Pro, Business, and Enterprise entitlements with PayOS-hosted checkout, verified webhook activation, manual renewal, reconciliation, quota enforcement, and subscription lifecycle management.
 - Spring-owned chat/session contracts, idempotency, quota accounting, citations, and conversation persistence.
 - A stateless internal FastAPI gRPC inference service with generation-result deduplication, structural ingestion, dense/sparse/graph retrieval, reranking, health checks, and worker lifecycles.
 - PostgreSQL, Redis, RabbitMQ, Qdrant, Kuzu storage, SeaweedFS, gateway, and application Compose definitions.
@@ -86,7 +86,7 @@ A subscription or trial grants access according to its plan entitlements:
 - Integration credential management.
 - Usage, quota, and operational status views.
 
-Commercial entitlements are represented by tenant subscription records and projected onto the tenant runtime. Self-service Pro purchases use server-created PayOS payment links, and activation occurs after a verified PayOS webhook or an authoritative PayOS payment-status reconciliation. Enterprise provisioning remains sales-led.
+Commercial entitlements are represented by tenant subscription records and projected onto the tenant runtime. Self-service Pro and Business purchases use server-created PayOS payment links, and activation occurs after a verified PayOS webhook or an authoritative PayOS payment-status reconciliation. Enterprise provisioning remains sales-led.
 
 ### Metered usage
 
@@ -1084,9 +1084,9 @@ Dashboard access uses JWT authentication. Integration keys are not accepted for 
 | `GET` | `/api/v1/audit-events` | Read authorized audit events |
 | `GET` | `/api/v1/public/billing/plans` | Read the public versioned plan catalog |
 | `GET` | `/api/v1/billing/account` | Read the current subscription, quota windows, usage, features, and pending payment |
-| `POST` | `/api/v1/billing/checkouts` | Create a server-priced PayOS Pro checkout; tenant administrator only |
+| `POST` | `/api/v1/billing/checkouts` | Create a server-priced PayOS Pro or Business checkout; tenant administrator only |
 | `GET` | `/api/v1/billing/payments/{paymentId}` | Poll an internal payment status after returning from PayOS |
-| `POST` | `/api/v1/billing/downgrade` | Schedule paid Pro fallback or immediately end a trial |
+| `POST` | `/api/v1/billing/downgrade` | Schedule paid-plan fallback to Starter or immediately end a trial |
 | `POST` | `/api/v1/public/billing/payos/webhook` | Receive and verify PayOS payment notifications |
 
 A newly created secret integration key is returned once. Only its prefix, fingerprint, scopes, timestamps, and one-way verification value are stored afterward.
@@ -1107,26 +1107,39 @@ The catalog is versioned backend configuration. Clients request catalog and acco
 | Pro trial | Free for 14 days | 10,000 for the trial | 50 | 5 | 10 GB | Pro technical entitlements |
 | Pro monthly | 1,199,000 VND | 10,000 per month | 50 | 5 | 10 GB | API access, webhooks, advanced analytics, custom branding |
 | Pro annual | 11,990,000 VND | 10,000 per month | 50 | 5 | 10 GB | Same entitlements as monthly Pro |
+| Business monthly | 3,499,000 VND | 50,000 per month | 250 | 15 | 50 GB | Existing paid-plan features |
+| Business annual | 34,990,000 VND | 50,000 per month | 250 | 15 | 50 GB | Same entitlements as monthly Business |
 | Enterprise | Contact sales | Custom or unlimited | Custom or unlimited | Custom or unlimited | Custom | Sales-provisioned limits and features |
 
-Enterprise numeric limits are nullable. A `null` limit means custom or unlimited and bypasses numeric quota checks.
+Hiring allowances are separate from support-platform storage and usage:
+
+| Plan | Active jobs | Verified applications | Interview time | CV analyses | Recruitment storage |
+|---|---:|---:|---:|---:|---:|
+| Starter | 1 | 25/month | 0 | 0 | 50 MB |
+| Trial | 1 | 25/trial | 20 minutes/trial | 5/trial | 100 MB |
+| Pro | 3 | 150/month | 60 minutes/month | 100/month | 1 GB |
+| Business | 10 | 1,000/month | 300 minutes/month | 500/month | 10 GB |
+| Enterprise | Contracted | Contracted | Contracted | Contracted | Contracted |
+
+Existing Enterprise platform limits may remain nullable. Enterprise hiring limits are explicit numeric values in the subscription snapshot and default to zero until contract provisioning, so missing or unprovisioned hiring allowances fail closed.
 
 ### Subscription lifecycle
 
 - Registration creates a 14-day Pro trial in the same transaction as the tenant account.
 - Trial expiration moves directly to Starter without a grace period.
 - A paid monthly term uses one calendar month from activation; an annual term uses one year.
-- Annual subscriptions retain monthly message windows anchored to the original paid activation date.
+- Annual subscriptions retain monthly message and hiring windows anchored to the original paid activation date.
 - PayOS does not provide recurring subscription mandates, so renewals use new hosted payment links.
-- Early renewal extends from the current `paidThroughAt` value and does not reset the active quota window early.
-- Paid expiration enters a three-day Pro grace period. Grace retains the final quota window and does not grant another allowance.
+- Same-plan renewal extends from the current `paidThroughAt` value and retains the quota anchor, including during grace.
+- Pro ↔ Business changes activate immediately after verified payment with a fresh term and quota anchor. Unused prepaid time is not credited or prorated.
+- Paid expiration enters a three-day grace period. Grace retains the final quota window and does not grant another allowance.
 - After grace, the tenant falls back to Starter. Existing documents, users, webhook configuration, and branding preferences remain stored.
-- Choosing Starter during paid Pro schedules fallback after prepaid access and grace. Choosing Starter during trial ends the trial immediately.
+- Choosing Starter during paid Pro or Business schedules fallback after prepaid access and grace. Choosing Starter during trial ends the trial immediately.
 - Version 1 does not provide refunds, prorating, automatic renewal, or automatic resource deletion.
 
 ### PayOS payment flow
 
-Only `TENANT_ADMIN` users may create checkouts. The server resolves the amount and entitlement snapshot from the catalog, allocates the PayOS order code from a database sequence, and creates a payment link that expires after 30 minutes. `Idempotency-Key` is supported for checkout creation.
+Only `TENANT_ADMIN` users may create Pro or Business checkouts. The server resolves the requested plan amount and entitlement snapshot from the catalog, allocates the PayOS order code from a database sequence, and creates a payment link that expires after 30 minutes. `Idempotency-Key` is supported for checkout creation.
 
 The browser return and cancel URLs control presentation only. On a PayOS return, the frontend polls CacaNode's payment-status endpoint; each open-payment read reconciles against PayOS immediately and never treats return query parameters as proof of payment.
 
@@ -1141,6 +1154,9 @@ Pending payments are also reconciled against PayOS every five minutes as a backg
 - Document uploads lock the tenant entitlement row and reject before object storage when document count or storage would exceed the limit.
 - Team-member limits count active members plus unexpired pending invitations and apply to invitations, acceptance, and reactivation.
 - Downgrades preserve existing resources but block additional messages, uploads, invitations, and reactivations while usage exceeds Starter limits.
+- Hiring application and CV charges use globally idempotent ledgers. Active jobs, recruitment storage, and interview capacity use reservation ledgers serialized by the tenant subscription lock.
+- Pending recruitment-storage and interview reservations expire after 24 hours and are reaped every five minutes. Committed storage and active-job reservations do not expire.
+- Plan changes preserve committed hiring usage and reservations. New growth is blocked when usage plus reservations exceeds the new allowance, while release and incurred interview settlement remain permitted.
 - Starter widget tokens remain usable. Creating or using `api:chat` tokens requires the API-access entitlement.
 - Webhook endpoint configuration is preserved after downgrade, while create, test, secret rotation, and delivery are disabled.
 - Starter retains dashboard summary analytics; detailed analytics require Trial, Pro, or Enterprise.
@@ -1153,6 +1169,8 @@ Quota-warning notifications are emitted once per period at 80%, and quota-exceed
 - `billing_subscriptions` stores one subscription per tenant, lifecycle timestamps, reminder state, catalog version, optimistic version, and a complete entitlement snapshot.
 - `billing_payment_orders` stores internal payment IDs, tenant and user IDs, sequence-generated PayOS order codes, server-resolved prices, provider link data, status, and purchase snapshots.
 - `billing_webhook_events` stores payload hashes and processing results without retaining unnecessary counterparty banking details.
+- `hiring_quota_consumptions` stores idempotent application and CV charges across quota-window resets.
+- `hiring_quota_reservations` stores active-job, recruitment-storage, and interview reservation lifecycles.
 - `usage_metrics` retains the legacy year and month fields while adding authoritative `period_start` and `period_end` timestamps.
 - Billing applies runtime changes through `TenantModuleApi`; it does not access the tenant repository or pass JPA tenant entities across the module boundary.
 - PayOS SDK types remain inside the payment-gateway adapter.
@@ -1710,7 +1728,9 @@ PAYOS_CHECKSUM_KEY=
 PAYOS_RETURN_URL=http://localhost:3000/settings?tab=quota&payment=return
 PAYOS_CANCEL_URL=http://localhost:3000/settings?tab=quota&payment=cancel
 BILLING_SALES_URL=mailto:sales@cacanode.com
-BILLING_CATALOG_VERSION=2026-07-15
+BILLING_CATALOG_VERSION=2026-07-23
+HIRING_RESERVATION_TTL_HOURS=24
+HIRING_RESERVATION_REAPER_MS=300000
 
 # Observability
 LOG_LEVEL=INFO

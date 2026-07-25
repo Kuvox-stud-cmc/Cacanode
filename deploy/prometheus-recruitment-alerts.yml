@@ -1,0 +1,32 @@
+groups:
+  - name: cacanode-recruitment
+    rules:
+      - alert: RecruitmentProviderFailureSpike
+        expr: sum(rate(recruitment_twilio_callback_total{result!="signature_valid"}[10m])) > 0.1
+        for: 10m
+        labels: {severity: warning}
+        annotations: {runbook: "docs/runbooks/recruitment-operations.md#provider-failures"}
+      - alert: RecruitmentQueueBacklog
+        expr: max(recruitment_queue_messages_ready) > 100
+        for: 15m
+        labels: {severity: warning}
+        annotations: {runbook: "docs/runbooks/recruitment-operations.md#queues-and-dlqs"}
+      - alert: RecruitmentDeadLetterQueueNonEmpty
+        expr: max(recruitment_queue_dlq_depth) > 0
+        for: 5m
+        labels: {severity: critical}
+        annotations: {runbook: "docs/runbooks/recruitment-operations.md#queues-and-dlqs"}
+      - alert: RecruitmentFraudRejectionSpike
+        expr: sum(rate(recruitment_call_fraud_guard_total{outcome="rejected"}[15m])) > 0.2
+        for: 15m
+        labels: {severity: warning}
+        annotations: {runbook: "docs/runbooks/recruitment-operations.md#fraud-rejections"}
+      - alert: RecruitmentPrivacyErasureExhausted
+        expr: increase(recruitment_privacy_erasure_total{outcome="exhausted"}[1h]) > 0
+        labels: {severity: critical}
+        annotations: {runbook: "docs/runbooks/recruitment-operations.md#privacy-erasure"}
+      - alert: RecruitmentTenantIsolationViolation
+        expr: recruitment_tenant_integrity_violations > 0
+        for: 1m
+        labels: {severity: critical}
+        annotations: {runbook: "docs/runbooks/recruitment-operations.md#tenant-isolation"}

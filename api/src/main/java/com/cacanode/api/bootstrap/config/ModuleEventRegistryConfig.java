@@ -20,6 +20,11 @@ import com.cacanode.api.tenant.api.event.UserInvitedEvent;
 import com.cacanode.api.tenant.api.event.TenantProjectionChangedEvent;
 import com.cacanode.api.tenant.api.event.UserProjectionChangedEvent;
 import com.cacanode.api.tenant.api.event.InvitationProjectionChangedEvent;
+import com.cacanode.api.recruitment.api.event.RecruitmentApplicationSubmittedEvent;
+import com.cacanode.api.recruitment.api.event.RecruitmentJobProjectionChangedEvent;
+import com.cacanode.api.recruitment.api.event.RecruitmentApplicationProjectionChangedEvent;
+import com.cacanode.api.recruitment.api.event.RecruitmentInterviewProjectionChangedEvent;
+import com.cacanode.api.recruitment.api.event.RecordingReadyEvent;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -48,7 +53,12 @@ public class ModuleEventRegistryConfig {
                 Map.entry("chat.conversation.projection.v1", ConversationProjectionEvent.class),
                 Map.entry("document.projection.changed.v1", DocumentProjectionEvent.class),
                 Map.entry("support.ticket.created.v1", TicketCreatedEvent.class),
-                Map.entry("support.ticket.status-changed.v1", TicketStatusChangedEvent.class)
+                Map.entry("support.ticket.status-changed.v1", TicketStatusChangedEvent.class),
+                Map.entry("recruitment.application.submitted.v1", RecruitmentApplicationSubmittedEvent.class),
+                Map.entry("recruitment.job.projection.v1", RecruitmentJobProjectionChangedEvent.class),
+                Map.entry("recruitment.application.projection.v1", RecruitmentApplicationProjectionChangedEvent.class),
+                Map.entry("recruitment.interview.projection.v1", RecruitmentInterviewProjectionChangedEvent.class),
+                Map.entry("recruitment.recording.ready", RecordingReadyEvent.class)
         );
         return (stableType, version) -> {
             Class<?> type = types.get(stableType);

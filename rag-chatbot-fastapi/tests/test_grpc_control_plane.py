@@ -73,6 +73,12 @@ class Unused:
     async def delete_document_index(self, request: object, context: object) -> object:
         raise AssertionError
 
+    async def prepare(self, request: object, context: object) -> object:
+        raise AssertionError
+
+    async def cancel(self, request: object, context: object) -> object:
+        raise AssertionError
+
 
 def service(generation: Generation, redis: Redis) -> InferenceGrpcService:
     return InferenceGrpcService(
@@ -82,6 +88,7 @@ def service(generation: Generation, redis: Redis) -> InferenceGrpcService:
                 redis, prefix="ccn:v1", ttl_seconds=600  # type: ignore[arg-type]
             ),
         ),
+        Unused(),  # type: ignore[arg-type]
         Unused(),  # type: ignore[arg-type]
         Unused(),  # type: ignore[arg-type]
     )

@@ -49,6 +49,16 @@ class InferenceServiceStub(object):
                 request_serializer=cacanode__ai__v1__pb2.DeleteDocumentIndexRequest.SerializeToString,
                 response_deserializer=cacanode__ai__v1__pb2.DeleteDocumentIndexResponse.FromString,
                 _registered_method=True)
+        self.PrepareInterviewSession = channel.unary_unary(
+                '/cacanode.ai.v1.InferenceService/PrepareInterviewSession',
+                request_serializer=cacanode__ai__v1__pb2.PrepareInterviewSessionRequest.SerializeToString,
+                response_deserializer=cacanode__ai__v1__pb2.PrepareInterviewSessionResponse.FromString,
+                _registered_method=True)
+        self.CancelInterviewSession = channel.unary_unary(
+                '/cacanode.ai.v1.InferenceService/CancelInterviewSession',
+                request_serializer=cacanode__ai__v1__pb2.CancelInterviewSessionRequest.SerializeToString,
+                response_deserializer=cacanode__ai__v1__pb2.CancelInterviewSessionResponse.FromString,
+                _registered_method=True)
 
 
 class InferenceServiceServicer(object):
@@ -72,6 +82,18 @@ class InferenceServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def PrepareInterviewSession(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def CancelInterviewSession(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_InferenceServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -89,6 +111,16 @@ def add_InferenceServiceServicer_to_server(servicer, server):
                     servicer.DeleteDocumentIndex,
                     request_deserializer=cacanode__ai__v1__pb2.DeleteDocumentIndexRequest.FromString,
                     response_serializer=cacanode__ai__v1__pb2.DeleteDocumentIndexResponse.SerializeToString,
+            ),
+            'PrepareInterviewSession': grpc.unary_unary_rpc_method_handler(
+                    servicer.PrepareInterviewSession,
+                    request_deserializer=cacanode__ai__v1__pb2.PrepareInterviewSessionRequest.FromString,
+                    response_serializer=cacanode__ai__v1__pb2.PrepareInterviewSessionResponse.SerializeToString,
+            ),
+            'CancelInterviewSession': grpc.unary_unary_rpc_method_handler(
+                    servicer.CancelInterviewSession,
+                    request_deserializer=cacanode__ai__v1__pb2.CancelInterviewSessionRequest.FromString,
+                    response_serializer=cacanode__ai__v1__pb2.CancelInterviewSessionResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -172,6 +204,60 @@ class InferenceService(object):
             '/cacanode.ai.v1.InferenceService/DeleteDocumentIndex',
             cacanode__ai__v1__pb2.DeleteDocumentIndexRequest.SerializeToString,
             cacanode__ai__v1__pb2.DeleteDocumentIndexResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def PrepareInterviewSession(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/cacanode.ai.v1.InferenceService/PrepareInterviewSession',
+            cacanode__ai__v1__pb2.PrepareInterviewSessionRequest.SerializeToString,
+            cacanode__ai__v1__pb2.PrepareInterviewSessionResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def CancelInterviewSession(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/cacanode.ai.v1.InferenceService/CancelInterviewSession',
+            cacanode__ai__v1__pb2.CancelInterviewSessionRequest.SerializeToString,
+            cacanode__ai__v1__pb2.CancelInterviewSessionResponse.FromString,
             options,
             channel_credentials,
             insecure,

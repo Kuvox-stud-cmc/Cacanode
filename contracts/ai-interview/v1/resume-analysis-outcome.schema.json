@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cacanode.local/contracts/ai-interview/v1/resume-analysis-outcome.schema.json",
+  "title": "Resume analysis outcome",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "event_id", "event_type", "occurred_at", "tenant_id", "aggregate_id", "analysis_id", "application_id", "status", "summary", "skills", "evidence", "error_code"],
+  "properties": {
+    "schema_version": {"const": "1.0"}, "event_id": {"type": "string", "format": "uuid"},
+    "event_type": {"const": "interview.resume-analysis.outcome"}, "occurred_at": {"type": "string", "format": "date-time"},
+    "tenant_id": {"type": "string", "format": "uuid"}, "aggregate_id": {"type": "string", "format": "uuid"},
+    "analysis_id": {"type": "string", "format": "uuid"}, "application_id": {"type": "string", "format": "uuid"},
+    "status": {"enum": ["COMPLETED", "FAILED"]}, "summary": {"type": "string", "maxLength": 4000},
+    "skills": {"type": "array", "maxItems": 50, "items": {"type": "string", "minLength": 1, "maxLength": 120}},
+    "evidence": {"type": "array", "maxItems": 20, "items": {"type": "object", "additionalProperties": false, "required": ["excerpt", "source_location"], "properties": {"excerpt": {"type": "string", "minLength": 1, "maxLength": 500}, "source_location": {"type": "string", "minLength": 1, "maxLength": 120}}}},
+    "error_code": {"type": ["string", "null"], "minLength": 1, "maxLength": 100}
+  }
+}

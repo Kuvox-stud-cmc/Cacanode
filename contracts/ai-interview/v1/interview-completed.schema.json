@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cacanode.local/contracts/ai-interview/v1/interview-completed.schema.json",
+  "title": "Interview completed",
+  "type": "object", "additionalProperties": false,
+  "required": ["schema_version", "event_id", "event_type", "occurred_at", "tenant_id", "aggregate_id", "session_id", "call_attempt_id", "completion_reason", "connected_seconds", "turn_count", "section_results"],
+  "properties": {
+    "schema_version": {"const": "1.0"}, "event_id": {"type": "string", "format": "uuid"}, "event_type": {"const": "interview.session.completed"},
+    "occurred_at": {"type": "string", "format": "date-time"}, "tenant_id": {"type": "string", "format": "uuid"}, "aggregate_id": {"type": "string", "format": "uuid"},
+    "session_id": {"type": "string", "format": "uuid"}, "call_attempt_id": {"type": "string", "format": "uuid"},
+    "completion_reason": {"enum": ["FINISHED", "CANDIDATE_STOPPED", "TIME_LIMIT", "PARTIAL"]}, "connected_seconds": {"type": "integer", "minimum": 0, "maximum": 14400}, "turn_count": {"type": "integer", "minimum": 0, "maximum": 500},
+    "section_results": {"type": "array", "maxItems": 10, "items": {"type": "object", "additionalProperties": false, "required": ["section_id", "kind", "status"], "properties": {"section_id": {"type": "string", "format": "uuid"}, "kind": {"enum": ["CORE", "ENGLISH_SCREEN"]}, "status": {"enum": ["COMPLETED", "PARTIAL", "SKIPPED"]}}}}
+  }
+}

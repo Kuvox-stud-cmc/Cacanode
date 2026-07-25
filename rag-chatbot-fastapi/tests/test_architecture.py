@@ -20,9 +20,15 @@ def test_fastapi_runtime_has_no_postgres_dependency_or_business_sql() -> None:
     assert "psycopg" not in project
 
 
-def test_http_surface_is_health_and_metrics_only() -> None:
+def test_http_surface_includes_stable_interview_websocket() -> None:
     paths = {route.path for route in create_app().routes}
-    assert paths == {"/health", "/health/live", "/health/ready", "/metrics"}
+    assert paths == {
+        "/health",
+        "/health/live",
+        "/health/ready",
+        "/metrics",
+        "/ws/v1/interviews/twilio/media",
+    }
 
 
 def _imports(path: Path) -> list[str]:
@@ -44,6 +50,7 @@ def test_cross_module_imports_use_api_boundaries_and_graph_is_acyclic() -> None:
         "index": set(),
         "graph": set(),
         "model": set(),
+        "interview": {"ingestion", "model"},
     }
     violations: list[str] = []
     modules = ROOT / "app" / "modules"
@@ -98,7 +105,10 @@ def test_persistent_sdk_and_generated_import_ownership() -> None:
             violations.append(f"Qdrant: {relative}")
         if "import kuzu" in source and parts[:3] != ("modules", "graph", "internal"):
             violations.append(f"Kuzu: {relative}")
-        if "aio_pika" in source and parts[:3] != ("modules", "ingestion", "transport"):
+        if "aio_pika" in source and parts[:3] not in {
+            ("modules", "ingestion", "transport"),
+            ("modules", "interview", "transport"),
+        }:
             violations.append(f"aio-pika: {relative}")
         if "import boto3" in source and parts[:2] != ("common", "storage.py"):
             violations.append(f"boto3: {relative}")

@@ -33,6 +33,51 @@ class Settings(BaseSettings):
     INGESTION_LEASE_SECONDS: int = 300
     INGESTION_HEARTBEAT_SECONDS: int = 30
 
+    INTERVIEW_ENABLED: bool = False
+    INTERVIEW_MESSAGING_ENABLED: bool = False
+    INTERVIEW_MEDIA_STREAM_ENABLED: bool = False
+    INTERVIEW_CV_ANALYSIS_ENABLED: bool = False
+    INTERVIEW_TRANSPORT_SMOKE_MODE: bool = False
+    INTERVIEW_ENGINE_ENABLED: bool = False
+    INTERVIEW_DURABLE_RESULTS_ENABLED: bool = False
+    INTERVIEW_PUBLISH_CONFIRM_MAX_ATTEMPTS: int = 3
+    INTERVIEW_RECOVERY_MAX_ATTEMPTS: int = 3
+    INTERVIEW_RECOVERY_POLL_SECONDS: int = 5
+    INTERVIEW_RECOVERY_BATCH_SIZE: int = 100
+    INTERVIEW_MODEL_TIMEOUT_SECONDS: float = 4.0
+    INTERVIEW_MODEL_MAX_OUTPUT_TOKENS: int = 384
+    INTERVIEW_MODEL_MAX_ATTEMPTS: int = 2
+    INTERVIEW_ENGINE_MAX_CONSECUTIVE_FAILURES: int = 3
+    INTERVIEW_UTTERANCE_MAX_SECONDS: int = 90
+    INTERVIEW_MIN_QUESTION_WINDOW_SECONDS: int = 10
+    INTERVIEW_CLOSING_RESERVE_SECONDS: int = 10
+    INTERVIEW_SPEECH_ENERGY_THRESHOLD: int = 500
+    INTERVIEW_RUNTIME_TOKEN_SECRET: str = ""
+    INTERVIEW_RUNTIME_TOKEN_TTL_SECONDS: int = 900
+    INTERVIEW_GLOBAL_CONCURRENCY: int = 10
+    INTERVIEW_TENANT_CONCURRENCY: int = 2
+    INTERVIEW_SESSION_LEASE_SECONDS: int = 30
+    INTERVIEW_SESSION_HEARTBEAT_SECONDS: int = 10
+    TWILIO_ACCOUNT_SID: str = ""
+    TWILIO_AUTH_TOKEN: str = ""
+    TWILIO_MEDIA_STREAM_WSS_URL: str = ""
+    CARTESIA_API_KEY: str = ""
+    CARTESIA_STT_MODEL: str = "ink-whisper-2025-06-04"
+    CARTESIA_TTS_MODEL: str = "sonic-3.5-2026-05-04"
+    CARTESIA_API_VERSION: str = "2026-03-01"
+    CARTESIA_ENGLISH_VOICE_ID: str = ""
+    CARTESIA_VIETNAMESE_VOICE_ID: str = ""
+    INTERVIEW_END_OF_UTTERANCE_SILENCE_MS: int = 800
+    INTERVIEW_SMOKE_UTTERANCE_MAX_SECONDS: int = 15
+    INTERVIEW_MEDIA_MAX_PAYLOAD_BYTES: int = 65536
+    CV_ANALYSIS_POLICY_VERSION: str = "cv-redaction-v1"
+    CV_ANALYSIS_MODEL_VERSION: str = "resume-analysis-v1"
+    CV_ANALYSIS_MAX_EXTRACTED_CHARACTERS: int = 50_000
+    CV_ANALYSIS_MAX_EVIDENCE_SEGMENTS: int = 250
+    CV_ANALYSIS_MAX_PERSONALIZED_QUESTIONS: int = 2
+    CV_ANALYSIS_MAX_PROCESSING_ATTEMPTS: int = 3
+    CV_ANALYSIS_PENDING_OUTCOME_TTL_SECONDS: int = 900
+
     CACHE_ENABLED: bool = False
     CACHE_KEY_PREFIX: str = "ccn:v1"
     CACHE_TTL_JITTER_PERCENT: int = 10
@@ -199,14 +244,127 @@ class Settings(BaseSettings):
             raise ValueError("RERANKER_TIMEOUT_SECONDS must be positive")
         if self.REDIS_CONNECT_TIMEOUT_SECONDS <= 0 or self.REDIS_OPERATION_TIMEOUT_SECONDS <= 0:
             raise ValueError("Redis timeouts must be positive")
-        if min(
-            self.INGESTION_CHECKPOINT_RETENTION_SECONDS,
-            self.INGESTION_LEASE_SECONDS,
-            self.INGESTION_HEARTBEAT_SECONDS,
-        ) <= 0:
+        if (
+            min(
+                self.INGESTION_CHECKPOINT_RETENTION_SECONDS,
+                self.INGESTION_LEASE_SECONDS,
+                self.INGESTION_HEARTBEAT_SECONDS,
+            )
+            <= 0
+        ):
             raise ValueError("Ingestion checkpoint and lease durations must be positive")
         if self.INGESTION_HEARTBEAT_SECONDS >= self.INGESTION_LEASE_SECONDS:
             raise ValueError("Ingestion heartbeat must be shorter than the lease")
+        if not self.INTERVIEW_ENABLED and any(
+            (
+                self.INTERVIEW_MESSAGING_ENABLED,
+                self.INTERVIEW_MEDIA_STREAM_ENABLED,
+                self.INTERVIEW_CV_ANALYSIS_ENABLED,
+            )
+        ):
+            raise ValueError("Interview child flags require INTERVIEW_ENABLED")
+        if (
+            self.INTERVIEW_MEDIA_STREAM_ENABLED or self.INTERVIEW_CV_ANALYSIS_ENABLED
+        ) and not self.INTERVIEW_MESSAGING_ENABLED:
+            raise ValueError("Interview media and CV analysis require messaging")
+        if self.INTERVIEW_MEDIA_STREAM_ENABLED and not all(
+            value.strip()
+            for value in (
+                self.INTERVIEW_RUNTIME_TOKEN_SECRET,
+                self.TWILIO_ACCOUNT_SID,
+                self.TWILIO_AUTH_TOKEN,
+                self.TWILIO_MEDIA_STREAM_WSS_URL,
+                self.CARTESIA_API_KEY,
+                self.CARTESIA_ENGLISH_VOICE_ID,
+                self.CARTESIA_VIETNAMESE_VOICE_ID,
+            )
+        ):
+            raise ValueError(
+                "Interview media requires complete Twilio, Cartesia, and token settings"
+            )
+        if self.INTERVIEW_MEDIA_STREAM_ENABLED and not self.TWILIO_MEDIA_STREAM_WSS_URL.startswith(
+            "wss://"
+        ):
+            raise ValueError("Twilio media stream URL must use WSS")
+        if self.INTERVIEW_TRANSPORT_SMOKE_MODE and self.APP_ENV == "production":
+            raise ValueError("Interview transport smoke mode is forbidden in production")
+        if self.INTERVIEW_TRANSPORT_SMOKE_MODE and not self.INTERVIEW_MEDIA_STREAM_ENABLED:
+            raise ValueError("Interview transport smoke mode requires media streaming")
+        if self.INTERVIEW_ENGINE_ENABLED and not self.INTERVIEW_MEDIA_STREAM_ENABLED:
+            raise ValueError("Interview engine requires media streaming")
+        if self.INTERVIEW_MEDIA_STREAM_ENABLED and (
+            self.INTERVIEW_ENGINE_ENABLED == self.INTERVIEW_TRANSPORT_SMOKE_MODE
+        ):
+            raise ValueError("Interview media requires exactly one of engine mode or smoke mode")
+        if self.APP_ENV == "production" and self.INTERVIEW_MEDIA_STREAM_ENABLED and not (
+            self.INTERVIEW_ENGINE_ENABLED
+            and self.INTERVIEW_DURABLE_RESULTS_ENABLED
+            and self.model_configured
+        ):
+            raise ValueError(
+                "Production interview media requires engine mode, durable results, and a "
+                "configured model"
+            )
+        if self.INTERVIEW_DURABLE_RESULTS_ENABLED and not (
+            self.INTERVIEW_ENGINE_ENABLED and self.INTERVIEW_MESSAGING_ENABLED
+        ):
+            raise ValueError("Durable interview results require engine mode and messaging")
+        if min(
+            self.INTERVIEW_PUBLISH_CONFIRM_MAX_ATTEMPTS,
+            self.INTERVIEW_RECOVERY_MAX_ATTEMPTS,
+        ) < 1:
+            raise ValueError("Interview durability retry limits must be positive")
+        if self.INTERVIEW_RECOVERY_POLL_SECONDS != 5:
+            raise ValueError("Interview recovery polling must be five seconds")
+        if self.INTERVIEW_RECOVERY_BATCH_SIZE != 100:
+            raise ValueError("Interview recovery batch size must be 100")
+        if not 1 <= self.INTERVIEW_RUNTIME_TOKEN_TTL_SECONDS <= 900:
+            raise ValueError("Interview runtime token TTL must be at most 900 seconds")
+        if not 1 <= self.INTERVIEW_TENANT_CONCURRENCY <= self.INTERVIEW_GLOBAL_CONCURRENCY:
+            raise ValueError("Interview concurrency limits are invalid")
+        if self.INTERVIEW_SESSION_HEARTBEAT_SECONDS >= self.INTERVIEW_SESSION_LEASE_SECONDS:
+            raise ValueError("Interview heartbeat must be shorter than its session lease")
+        if self.INTERVIEW_END_OF_UTTERANCE_SILENCE_MS != 800:
+            raise ValueError("Phase 7 end-of-utterance silence must be 800 ms")
+        if self.INTERVIEW_SMOKE_UTTERANCE_MAX_SECONDS != 15:
+            raise ValueError("Phase 7 smoke utterance maximum must be 15 seconds")
+        if self.INTERVIEW_MODEL_TIMEOUT_SECONDS <= 0:
+            raise ValueError("Interview model timeout must be positive")
+        if self.INTERVIEW_MODEL_MAX_OUTPUT_TOKENS != 384:
+            raise ValueError("Interview model output maximum must be 384 tokens")
+        if self.INTERVIEW_MODEL_MAX_ATTEMPTS != 2:
+            raise ValueError("Interview model attempts must be exactly 2")
+        if self.INTERVIEW_ENGINE_MAX_CONSECUTIVE_FAILURES != 3:
+            raise ValueError("Interview model failure limit must be exactly 3")
+        if self.INTERVIEW_UTTERANCE_MAX_SECONDS != 90:
+            raise ValueError("Interview utterance maximum must be 90 seconds")
+        if self.INTERVIEW_MIN_QUESTION_WINDOW_SECONDS != 10:
+            raise ValueError("Interview minimum question window must be 10 seconds")
+        if self.INTERVIEW_CLOSING_RESERVE_SECONDS != 10:
+            raise ValueError("Interview closing reserve must be 10 seconds")
+        if self.INTERVIEW_SPEECH_ENERGY_THRESHOLD != 500:
+            raise ValueError("Interview speech energy threshold must be 500")
+        if self.CARTESIA_STT_MODEL != "ink-whisper-2025-06-04":
+            raise ValueError("Unsupported Phase 7 Cartesia STT model")
+        if self.CARTESIA_TTS_MODEL != "sonic-3.5-2026-05-04":
+            raise ValueError("Unsupported Phase 7 Cartesia TTS model")
+        if self.CARTESIA_API_VERSION != "2026-03-01":
+            raise ValueError("Unsupported Phase 7 Cartesia API version")
+        if (
+            not self.CV_ANALYSIS_POLICY_VERSION.strip()
+            or not self.CV_ANALYSIS_MODEL_VERSION.strip()
+        ):
+            raise ValueError("CV analysis policy and model versions must not be blank")
+        if not 1 <= self.CV_ANALYSIS_MAX_EXTRACTED_CHARACTERS <= 50_000:
+            raise ValueError("CV analysis extracted-character limit must be at most 50000")
+        if not 1 <= self.CV_ANALYSIS_MAX_EVIDENCE_SEGMENTS <= 250:
+            raise ValueError("CV analysis evidence limit must be at most 250")
+        if self.CV_ANALYSIS_MAX_PERSONALIZED_QUESTIONS != 2:
+            raise ValueError("CV analysis question limit must be exactly 2")
+        if self.CV_ANALYSIS_MAX_PROCESSING_ATTEMPTS != 3:
+            raise ValueError("CV analysis processing attempts must be exactly 3")
+        if not 1 <= self.CV_ANALYSIS_PENDING_OUTCOME_TTL_SECONDS <= 900:
+            raise ValueError("CV analysis pending outcome TTL must be at most 15 minutes")
         if not 0 <= self.CACHE_TTL_JITTER_PERCENT <= 100:
             raise ValueError("CACHE_TTL_JITTER_PERCENT must be between 0 and 100")
         if self.EMBEDDING_CACHE_TTL_SECONDS <= 0:

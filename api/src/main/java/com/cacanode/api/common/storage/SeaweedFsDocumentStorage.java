@@ -1,6 +1,7 @@
 package com.cacanode.api.common.storage;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.springframework.stereotype.Component;
@@ -14,6 +15,8 @@ import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.CreateBucketRequest;
 import software.amazon.awssdk.services.s3.model.DeleteObjectRequest;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
+import software.amazon.awssdk.services.s3.model.HeadObjectRequest;
+import software.amazon.awssdk.services.s3.model.NoSuchKeyException;
 import software.amazon.awssdk.services.s3.model.HeadBucketRequest;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 import software.amazon.awssdk.services.s3.model.S3Exception;
@@ -55,6 +58,17 @@ public class SeaweedFsDocumentStorage implements DocumentStorage {
     }
 
     @Override
+    public void store(String key,InputStream content,long contentLength,String contentType) {
+        try {
+            ensureBucketExists();PutObjectRequest request=PutObjectRequest.builder().bucket(properties.bucket())
+                    .key(key).contentType(contentType).contentLength(contentLength).build();
+            seaweedFsS3Client.putObject(request,RequestBody.fromInputStream(content,contentLength));
+        } catch(RuntimeException exception) {
+            throw new InternalServerErrorException("Unable to stream stored document",exception);
+        }
+    }
+
+    @Override
     public StoredDocument load(String key) {
         try {
             ensureBucketExists();
@@ -66,6 +80,28 @@ public class SeaweedFsDocumentStorage implements DocumentStorage {
         } catch (RuntimeException e) {
             throw new InternalServerErrorException("Unable to read document from object storage", e);
         }
+    }
+
+    @Override
+    public StoredDocument loadRange(String key,long startInclusive,long endInclusive) {
+        if(startInclusive<0||endInclusive<startInclusive)throw new IllegalArgumentException("Invalid object range");
+        try {ensureBucketExists();var response=seaweedFsS3Client.getObjectAsBytes(GetObjectRequest.builder()
+                .bucket(properties.bucket()).key(key).range("bytes="+startInclusive+"-"+endInclusive).build());
+            return new StoredDocument(response.asByteArray(),response.response().contentType());
+        } catch(RuntimeException exception){throw new InternalServerErrorException("Unable to read stored object range",exception);}
+    }
+
+    @Override
+    public StoredObjectMetadata metadata(String key) {
+        try {ensureBucketExists();var value=seaweedFsS3Client.headObject(HeadObjectRequest.builder()
+                .bucket(properties.bucket()).key(key).build());return new StoredObjectMetadata(value.contentLength(),value.contentType(),value.eTag());}
+        catch(RuntimeException exception){throw new InternalServerErrorException("Unable to read stored object metadata",exception);}
+    }
+
+    @Override
+    public boolean exists(String key) {
+        try {metadata(key);return true;}catch(InternalServerErrorException exception){Throwable cause=exception.getCause();
+            if(cause instanceof NoSuchKeyException)return false;if(cause instanceof S3Exception s3&&s3.statusCode()==404)return false;throw exception;}
     }
 
     @Override

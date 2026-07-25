@@ -4,6 +4,7 @@ import {
   sessionAuthenticated,
   twoFactorRequired,
 } from '@/features/auth/store/auth-slice';
+import type { AuthUser } from '@/types/auth';
 
 const user = {
   userId: 'user-1',
@@ -12,7 +13,7 @@ const user = {
   fullName: 'Person Name',
   role: 'TENANT_ADMIN',
   plan: 'PRO',
-};
+} satisfies AuthUser;
 
 describe('auth slice', () => {
   it('tracks the authentication workflow without storing credentials', () => {

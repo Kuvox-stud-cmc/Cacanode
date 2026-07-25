@@ -4,5 +4,6 @@ public enum TenantPlan {
     STARTER,
     TRIAL,
     PRO,
+    BUSINESS,
     ENTERPRISE
 }

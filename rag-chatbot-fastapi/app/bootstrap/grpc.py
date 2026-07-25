@@ -19,6 +19,9 @@ from app.modules.index.internal.qdrant_search import QdrantKnowledgeIndexQuery
 from app.modules.index.transport.grpc import IndexGrpcHandler
 from app.modules.ingestion.internal.pipeline import DocumentIndexLifecycleService
 from app.modules.ingestion.transport.grpc import IngestionGrpcHandler
+from app.modules.interview.internal.redis_state import InterviewRedisState
+from app.modules.interview.internal.runtime import ConfiguredInterviewRuntime
+from app.modules.interview.transport.grpc import InterviewGrpcHandler
 
 logger = logging.getLogger(__name__)
 
@@ -29,10 +32,12 @@ class InferenceGrpcService(pb_grpc.InferenceServiceServicer):
         generation: GenerationGrpcHandler,
         index: IndexGrpcHandler,
         ingestion: IngestionGrpcHandler,
+        interview: InterviewGrpcHandler,
     ) -> None:
         self._generation = generation
         self._index = index
         self._ingestion = ingestion
+        self._interview = interview
 
     async def GenerateAnswer(
         self, request: pb.GenerateAnswerRequest, context: grpc.aio.ServicerContext
@@ -48,6 +53,16 @@ class InferenceGrpcService(pb_grpc.InferenceServiceServicer):
         self, request: pb.DeleteDocumentIndexRequest, context: grpc.aio.ServicerContext
     ) -> pb.DeleteDocumentIndexResponse:
         return await self._ingestion.delete_document_index(request, context)
+
+    async def PrepareInterviewSession(
+        self, request: pb.PrepareInterviewSessionRequest, context: grpc.aio.ServicerContext
+    ) -> pb.PrepareInterviewSessionResponse:
+        return await self._interview.prepare(request, context)
+
+    async def CancelInterviewSession(
+        self, request: pb.CancelInterviewSessionRequest, context: grpc.aio.ServicerContext
+    ) -> pb.CancelInterviewSessionResponse:
+        return await self._interview.cancel(request, context)
 
 
 def create_grpc_service(
@@ -67,6 +82,16 @@ def create_grpc_service(
         ),
         IndexGrpcHandler(index_queries),
         IngestionGrpcHandler(DocumentIndexLifecycleService(index_commands, graph)),
+        InterviewGrpcHandler(
+            ConfiguredInterviewRuntime(
+                enabled=settings.INTERVIEW_ENABLED,
+                state=InterviewRedisState(redis_client, prefix=settings.CACHE_KEY_PREFIX)
+                if settings.INTERVIEW_ENABLED
+                else None,
+                token_secret=settings.INTERVIEW_RUNTIME_TOKEN_SECRET,
+                token_ttl_seconds=settings.INTERVIEW_RUNTIME_TOKEN_TTL_SECONDS,
+            )
+        ),
     )
 
 

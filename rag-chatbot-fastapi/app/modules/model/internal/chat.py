@@ -188,7 +188,13 @@ class OpenAIChatModel:
 
     provider = "openai"
 
-    def __init__(self, settings: ModelConfig, *, reasoning_effort: str | None = None):
+    def __init__(
+        self,
+        settings: ModelConfig,
+        *,
+        reasoning_effort: str | None = None,
+        enforce_reasoning_minimum: bool = True,
+    ):
         if not settings.OPENAI_API_KEY:
             raise RuntimeError("OPENAI_API_KEY is required when LLM_PROVIDER=openai")
         if not settings.OPENAI_MODEL:
@@ -198,9 +204,10 @@ class OpenAIChatModel:
         client_kwargs: dict[str, Any] = {
             "api_key": SecretStr(settings.OPENAI_API_KEY),
             "model": settings.OPENAI_MODEL,
-            "max_completion_tokens": _completion_token_budget(
-                settings.OPENAI_MODEL,
-                settings.LLM_MAX_OUTPUT_TOKENS,
+            "max_completion_tokens": (
+                _completion_token_budget(settings.OPENAI_MODEL, settings.LLM_MAX_OUTPUT_TOKENS)
+                if enforce_reasoning_minimum
+                else settings.LLM_MAX_OUTPUT_TOKENS
             ),
             "timeout": settings.LLM_TIMEOUT_SECONDS,
         }
@@ -260,8 +267,15 @@ class OpenAIChatModel:
 
 
 def create_chat_model(
-    settings: ModelConfig, *, reasoning_effort: str | None = None
+    settings: ModelConfig,
+    *,
+    reasoning_effort: str | None = None,
+    enforce_reasoning_minimum: bool = True,
 ) -> OllamaChatModel | OpenAIChatModel:
     if settings.LLM_PROVIDER == "openai":
-        return OpenAIChatModel(settings, reasoning_effort=reasoning_effort)
+        return OpenAIChatModel(
+            settings,
+            reasoning_effort=reasoning_effort,
+            enforce_reasoning_minimum=enforce_reasoning_minimum,
+        )
     return OllamaChatModel(settings)

@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cacanode.local/contracts/ai-interview/v1/interview-failed.schema.json",
+  "title": "Interview failed",
+  "type": "object", "additionalProperties": false,
+  "required": ["schema_version", "event_id", "event_type", "occurred_at", "tenant_id", "aggregate_id", "session_id", "call_attempt_id", "failure_code", "retryable", "connected_seconds", "last_turn_sequence", "detail"],
+  "properties": {
+    "schema_version": {"const": "1.0"}, "event_id": {"type": "string", "format": "uuid"}, "event_type": {"const": "interview.session.failed"},
+    "occurred_at": {"type": "string", "format": "date-time"}, "tenant_id": {"type": "string", "format": "uuid"}, "aggregate_id": {"type": "string", "format": "uuid"},
+    "session_id": {"type": "string", "format": "uuid"}, "call_attempt_id": {"type": "string", "format": "uuid"},
+    "failure_code": {"type": "string", "minLength": 1, "maxLength": 100}, "retryable": {"type": "boolean"}, "connected_seconds": {"type": "integer", "minimum": 0, "maximum": 14400},
+    "last_turn_sequence": {"type": ["integer", "null"], "minimum": 0}, "detail": {"type": "string", "maxLength": 1000}
+  }
+}

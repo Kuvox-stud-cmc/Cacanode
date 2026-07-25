@@ -7,4 +7,6 @@ public interface AnalyticsReadApi {
 
     AnalyticsDtos.AnalyticsResponse analytics(
             UUID tenantId, AnalyticsDtos.AnalyticsScope scope, int days);
+
+    AnalyticsDtos.RecruitmentAnalyticsResponse recruitment(UUID tenantId, int days);
 }

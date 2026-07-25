@@ -1,8 +1,10 @@
 package com.cacanode.api.architecture;
 
 import com.tngtech.archunit.core.domain.JavaClasses;
+import com.tngtech.archunit.core.domain.JavaClass;
 import com.tngtech.archunit.core.importer.ClassFileImporter;
 import com.tngtech.archunit.core.importer.ImportOption;
+import com.tngtech.archunit.base.DescribedPredicate;
 import com.tngtech.archunit.lang.ArchRule;
 import org.junit.jupiter.api.Test;
 
@@ -15,13 +17,20 @@ import static com.tngtech.archunit.library.dependencies.SlicesRuleDefinition.sli
 class ModularMonolithArchitectureTest {
     private static final Set<String> BUSINESS_MODULES = Set.of(
             "ai", "analytics", "auth", "billing", "chat", "document",
-            "integration", "notification", "support", "tenant");
+            "integration", "notification", "recruitment", "support", "tenant");
+
+    private static final ImportOption MAIN_OUTPUT_ONLY = location -> {
+        String path = location.asURI().getPath();
+        return path == null || !path.contains("/test-classes/");
+    };
 
     private final JavaClasses classes = new ClassFileImporter()
             .withImportOption(new ImportOption.DoNotIncludeTests())
+            .withImportOption(MAIN_OUTPUT_ONLY)
             .importPackages("com.cacanode.api");
     private final JavaClasses businessClasses = new ClassFileImporter()
             .withImportOption(new ImportOption.DoNotIncludeTests())
+            .withImportOption(MAIN_OUTPUT_ONLY)
             .importPackages(
             BUSINESS_MODULES.stream().map(module -> "com.cacanode.api." + module)
                     .toArray(String[]::new));
@@ -33,20 +42,14 @@ class ModularMonolithArchitectureTest {
                 if (source.equals(target)) {
                     continue;
                 }
+                DescribedPredicate<JavaClass> targetInternals =
+                        JavaClass.Predicates.resideInAPackage(
+                                        "com.cacanode.api." + target + "..")
+                                .and(JavaClass.Predicates.resideOutsideOfPackage(
+                                        "com.cacanode.api." + target + ".api.."));
                 ArchRule rule = noClasses()
                         .that().resideInAPackage("com.cacanode.api." + source + "..")
-                        .should().dependOnClassesThat()
-                        .resideInAnyPackage(
-                                "com.cacanode.api." + target,
-                                "com.cacanode.api." + target + ".controller..",
-                                "com.cacanode.api." + target + ".service..",
-                                "com.cacanode.api." + target + ".query..",
-                                "com.cacanode.api." + target + ".repository..",
-                                "com.cacanode.api." + target + ".model..",
-                                "com.cacanode.api." + target + ".dto..",
-                                "com.cacanode.api." + target + ".config..",
-                                "com.cacanode.api." + target + ".enums..",
-                                "com.cacanode.api." + target + ".infrastructure..");
+                        .should().dependOnClassesThat(targetInternals);
                 rule.check(classes);
             }
         }

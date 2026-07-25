@@ -14,7 +14,17 @@ public final class BillingDtos {
     private BillingDtos() {
     }
 
-    public record Limits(Integer messages, Integer documents, Integer teamMembers, Integer storageMb) {
+    public record Limits(
+            Integer messages,
+            Integer documents,
+            Integer teamMembers,
+            Integer storageMb,
+            Long activeJobs,
+            Long verifiedApplications,
+            Long interviewSeconds,
+            Long cvAnalyses,
+            Long recruitmentStorageBytes
+    ) {
     }
 
     public record Features(
@@ -45,7 +55,14 @@ public final class BillingDtos {
     public record CheckoutRequest(@NotNull BillingPlanCode planCode, @NotNull BillingInterval interval) {
     }
 
-    public record CheckoutResponse(UUID paymentId, String checkoutUrl, LocalDateTime expiresAt) {
+    public record CheckoutResponse(
+            UUID paymentId,
+            BillingPlanCode planCode,
+            BillingInterval interval,
+            long amountVnd,
+            String checkoutUrl,
+            LocalDateTime expiresAt
+    ) {
     }
 
     public record PaymentResponse(
@@ -65,6 +82,9 @@ public final class BillingDtos {
     public record UsageItem(long used, Integer limit, boolean overLimit) {
     }
 
+    public record HiringUsageItem(long used, long reserved, long limit, boolean overLimit) {
+    }
+
     public record AccountResponse(
             BillingPlanCode planCode,
             BillingStatus status,
@@ -78,6 +98,11 @@ public final class BillingDtos {
             UsageItem documents,
             UsageItem teamMembers,
             UsageItem storageMb,
+            HiringUsageItem activeJobs,
+            HiringUsageItem verifiedApplications,
+            HiringUsageItem interviewSeconds,
+            HiringUsageItem cvAnalyses,
+            HiringUsageItem recruitmentStorageBytes,
             Features features,
             PaymentResponse pendingPayment,
             boolean cancelAtPeriodEnd

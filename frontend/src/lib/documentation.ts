@@ -29,6 +29,8 @@ const structure = [
   { href: "/documentation/widget", group: "integrations", sections: ["configure", "origins", "token", "embed", "security"] },
   { href: "/documentation/api", group: "integrations", sections: ["authentication", "create-session", "send-message", "history-close", "idempotency", "tickets", "citations"] },
   { href: "/documentation/support", group: "product", sections: ["conversations", "channels", "tickets", "workflow", "filters"] },
+  { href: "/documentation/recruitment", group: "product", sections: ["jobs", "applications", "roles", "scheduling", "quotas"] },
+  { href: "/documentation/ai-interviews", group: "product", sections: ["setup", "templates", "personalization", "consent-recording", "results-privacy", "troubleshooting"] },
   { href: "/documentation/webhooks", group: "integrations", sections: ["requirements", "payload", "verify", "delivery", "testing-rotation"] },
   { href: "/documentation/analytics-team", group: "administration", sections: ["dashboard", "analytics", "date-ranges", "roles", "invitations", "protections"] },
   { href: "/documentation/workspace", group: "administration", sections: ["instructions", "quotas", "billing", "features", "tokens", "admin"] },
@@ -95,6 +97,8 @@ const content: Record<AppLocale, Record<string, LocalizedPage>> = {
       keywords: ["hmac", "signature", "retry", "events", "secret"],
       sections: { requirements: { title: "Requirements and events" }, payload: { title: "Payload envelope" }, verify: { title: "Verify signatures" }, delivery: { title: "Delivery and retries" }, "testing-rotation": { title: "Testing and secret rotation" } },
     },
+    "/documentation/recruitment": { title: "Recruitment", description: "Manage jobs, applications, recruiter roles, scheduling, and hiring quotas.", keywords: ["jobs","applications","candidates","schedule","quota"], sections: { jobs:{title:"Jobs and publication"},applications:{title:"Applications and candidate evidence"},roles:{title:"Recruiter roles"},scheduling:{title:"Scheduling"},quotas:{title:"Hiring quotas"} } },
+    "/documentation/ai-interviews": { title: "AI interview setup", description: "Configure bilingual interview templates, consent, recording, advisory results, privacy, and retention.", keywords:["interview","template","Vietnamese","English","recording","privacy"], sections:{setup:{title:"Set up AI interviews"},templates:{title:"Templates and language sections"},personalization:{title:"CV personalization"},"consent-recording":{title:"Consent and recording"},"results-privacy":{title:"Advisory results, privacy, and retention"},troubleshooting:{title:"Troubleshooting"}} },
     "/documentation/analytics-team": {
       title: "Analytics and team",
       description: "Understand workspace metrics and safely manage team access.",
@@ -161,6 +165,8 @@ const content: Record<AppLocale, Record<string, LocalizedPage>> = {
       keywords: ["hmac", "chữ ký", "thử lại", "sự kiện", "bí mật"],
       sections: { requirements: { title: "Yêu cầu và sự kiện" }, payload: { title: "Cấu trúc payload" }, verify: { title: "Xác minh chữ ký" }, delivery: { title: "Phân phối và thử lại" }, "testing-rotation": { title: "Kiểm thử và xoay vòng bí mật" } },
     },
+    "/documentation/recruitment": { title: "Tuyển dụng", description: "Quản lý tin tuyển dụng, hồ sơ, vai trò, lịch phỏng vấn và hạn mức.", keywords:["tuyển dụng","hồ sơ","ứng viên","lịch","hạn mức"], sections:{jobs:{title:"Tin tuyển dụng và xuất bản"},applications:{title:"Hồ sơ và bằng chứng ứng viên"},roles:{title:"Vai trò nhà tuyển dụng"},scheduling:{title:"Lên lịch"},quotas:{title:"Hạn mức tuyển dụng"}} },
+    "/documentation/ai-interviews": { title: "Thiết lập phỏng vấn AI", description: "Cấu hình mẫu song ngữ, đồng ý, ghi âm, kết quả tham khảo, quyền riêng tư và lưu giữ.", keywords:["phỏng vấn","mẫu","tiếng Việt","tiếng Anh","ghi âm","quyền riêng tư"], sections:{setup:{title:"Thiết lập phỏng vấn AI"},templates:{title:"Mẫu và phần ngôn ngữ"},personalization:{title:"Cá nhân hóa từ CV"},"consent-recording":{title:"Đồng ý và ghi âm"},"results-privacy":{title:"Kết quả tham khảo, quyền riêng tư và lưu giữ"},troubleshooting:{title:"Khắc phục sự cố"}} },
     "/documentation/analytics-team": {
       title: "Phân tích và đội ngũ",
       description: "Hiểu các chỉ số không gian làm việc và quản lý quyền truy cập an toàn.",

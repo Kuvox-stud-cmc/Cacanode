@@ -8,6 +8,15 @@ public record BillingActivatedEvent(
         UUID userId,
         UUID paymentId,
         String interval,
-        LocalDateTime paidThroughAt
+        LocalDateTime paidThroughAt,
+        String planCode
 ) {
+    public BillingActivatedEvent(UUID tenantId, UUID userId, UUID paymentId,
+                                 String interval, LocalDateTime paidThroughAt) {
+        this(tenantId, userId, paymentId, interval, paidThroughAt, null);
+    }
+
+    public String effectivePlanCode() {
+        return planCode == null || planCode.isBlank() ? "PRO" : planCode;
+    }
 }

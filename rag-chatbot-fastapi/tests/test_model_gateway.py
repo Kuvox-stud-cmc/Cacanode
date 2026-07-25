@@ -284,6 +284,24 @@ def test_openai_chat_model_preserves_larger_reasoning_model_token_budget(
     assert FakeChatOpenAI.last_kwargs["max_completion_tokens"] == 2048
 
 
+def test_interview_model_can_enforce_exact_reasoning_output_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("app.modules.model.internal.chat.ChatOpenAI", FakeChatOpenAI)
+
+    create_chat_model(
+        settings(
+            LLM_PROVIDER="openai",
+            OPENAI_API_KEY="test-key",
+            OPENAI_MODEL="o4-mini",
+            LLM_MAX_OUTPUT_TOKENS=384,
+        ),
+        enforce_reasoning_minimum=False,
+    )
+
+    assert FakeChatOpenAI.last_kwargs["max_completion_tokens"] == 384
+
+
 def test_openai_chat_model_passes_reasoning_effort_for_reasoning_models(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -4,5 +4,6 @@ public enum BillingPlanCode {
     STARTER,
     TRIAL,
     PRO,
+    BUSINESS,
     ENTERPRISE
 }

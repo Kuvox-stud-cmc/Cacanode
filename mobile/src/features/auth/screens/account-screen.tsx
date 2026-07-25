@@ -73,6 +73,16 @@ export function AccountScreen() {
             <Detail label="Grace ends" value={formatBillingDate(billingAccount.graceEndsAt)} tone="danger" />
           ) : null}
         </Card>
+        {billingAccount ? (
+          <Card elevated style={styles.details}>
+            <AppText accessibilityRole="header" variant="heading">Hiring usage</AppText>
+            <UsageDetail label="Active jobs" used={billingAccount.activeJobs.used} reserved={billingAccount.activeJobs.reserved} limit={billingAccount.activeJobs.limit} />
+            <UsageDetail label="Verified applications" used={billingAccount.verifiedApplications.used} reserved={billingAccount.verifiedApplications.reserved} limit={billingAccount.verifiedApplications.limit} />
+            <UsageDetail label="Interview minutes" used={billingAccount.interviewSeconds.used / 60} reserved={billingAccount.interviewSeconds.reserved / 60} limit={billingAccount.interviewSeconds.limit / 60} suffix=" min" />
+            <UsageDetail label="CV analyses" used={billingAccount.cvAnalyses.used} reserved={billingAccount.cvAnalyses.reserved} limit={billingAccount.cvAnalyses.limit} />
+            <UsageDetail label="Recruitment storage" used={billingAccount.recruitmentStorageBytes.used / 1024 / 1024} reserved={billingAccount.recruitmentStorageBytes.reserved / 1024 / 1024} limit={billingAccount.recruitmentStorageBytes.limit / 1024 / 1024} suffix=" MB" />
+          </Card>
+        ) : null}
         {user?.role === 'TENANT_ADMIN' ? (
           <Button
             accessibilityLabel="Manage billing on web"
@@ -86,6 +96,29 @@ export function AccountScreen() {
           Sign out
         </Button>
     </ScrollScreen>
+  );
+}
+
+function UsageDetail({
+  label,
+  limit,
+  reserved,
+  suffix = '',
+  used,
+}: {
+  label: string;
+  limit: number;
+  reserved: number;
+  suffix?: string;
+  used: number;
+}) {
+  const value = `${used.toLocaleString()}${suffix} / ${limit.toLocaleString()}${suffix}`;
+  return (
+    <View style={styles.detailRow}>
+      <AppText muted variant="bodySmall">{label}</AppText>
+      <AppText>{value}</AppText>
+      {reserved > 0 ? <AppText muted variant="bodySmall">{reserved.toLocaleString()}{suffix} reserved</AppText> : null}
+    </View>
   );
 }
 

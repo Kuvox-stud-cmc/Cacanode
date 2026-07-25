@@ -32,12 +32,13 @@ app:
       answer-deadline-seconds: ${AI_ANSWER_DEADLINE_SECONDS:100}
       document-units-deadline-seconds: ${AI_DOCUMENT_UNITS_DEADLINE_SECONDS:10}
       deletion-deadline-seconds: ${AI_DELETION_DEADLINE_SECONDS:15}
+      interview-deadline-seconds: ${AI_INTERVIEW_DEADLINE_SECONDS:10}
   webhooks:
     encryption-key: ${WEBHOOK_ENCRYPTION_KEY:development-webhook-encryption-key}
     allow-private-networks: true
   billing:
     payos-enabled: ${PAYOS_ENABLED:false}
-    catalog-version: ${BILLING_CATALOG_VERSION:2026-07-15}
+    catalog-version: ${BILLING_CATALOG_VERSION:2026-07-23}
     frontend-return-url: ${PAYOS_RETURN_URL:http://localhost:3000/settings?tab=quota&payment=return}
     frontend-cancel-url: ${PAYOS_CANCEL_URL:http://localhost:3000/settings?tab=quota&payment=cancel}
     sales-url: ${BILLING_SALES_URL:mailto:sales@cacanode.com}

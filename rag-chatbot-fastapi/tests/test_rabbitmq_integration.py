@@ -9,6 +9,7 @@ import pytest
 from app.bootstrap.configuration import ingestion_transport_config
 from app.bootstrap.settings import Settings
 from app.modules.ingestion.transport import rabbitmq
+from app.modules.interview.transport import rabbitmq as interview_rabbitmq
 
 
 class UnusedPipeline:
@@ -51,6 +52,53 @@ async def test_document_worker_declares_durable_confirmed_topology(
             queue = await channel.get_queue(queue_name, ensure=False)
             await queue.delete(if_unused=False, if_empty=False)
         for exchange_name in (names["INGESTION_EXCHANGE"], names["DEAD_LETTER_EXCHANGE"]):
+            exchange = await channel.get_exchange(exchange_name, ensure=False)
+            await exchange.delete(if_unused=False)
+        await channel.close()
+        await connection.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(
+    not os.getenv("RABBITMQ_TEST_URL"), reason="RABBITMQ_TEST_URL is not set"
+)
+async def test_interview_declares_dormant_durable_topology(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    suffix = uuid4().hex
+    names = {
+        "INTERVIEW_EXCHANGE": f"test.cacanode.interview.{suffix}",
+        "INTERVIEW_DLX": f"test.cacanode.interview.dlx.{suffix}",
+        "RESUME_ANALYSIS_QUEUE": f"test.cacanode.interview.resume.{suffix}",
+        "RECRUITMENT_EVENTS_QUEUE": f"test.cacanode.recruitment.events.{suffix}",
+        "RESUME_ANALYSIS_DLQ": f"test.cacanode.interview.resume.dlq.{suffix}",
+        "RECRUITMENT_EVENTS_DLQ": f"test.cacanode.recruitment.events.dlq.{suffix}",
+    }
+    for name, value in names.items():
+        monkeypatch.setattr(interview_rabbitmq, name, value)
+    connection = await aio_pika.connect_robust(os.environ["RABBITMQ_TEST_URL"])
+    try:
+        await interview_rabbitmq.declare_interview_topology(connection)
+        channel = await connection.channel(publisher_confirms=True)
+        for queue_name in (
+            names["RESUME_ANALYSIS_QUEUE"],
+            names["RECRUITMENT_EVENTS_QUEUE"],
+            names["RESUME_ANALYSIS_DLQ"],
+            names["RECRUITMENT_EVENTS_DLQ"],
+        ):
+            assert await channel.get_queue(queue_name, ensure=True)
+        await channel.close()
+    finally:
+        channel = await connection.channel()
+        for queue_name in (
+            names["RESUME_ANALYSIS_QUEUE"],
+            names["RECRUITMENT_EVENTS_QUEUE"],
+            names["RESUME_ANALYSIS_DLQ"],
+            names["RECRUITMENT_EVENTS_DLQ"],
+        ):
+            queue = await channel.get_queue(queue_name, ensure=False)
+            await queue.delete(if_unused=False, if_empty=False)
+        for exchange_name in (names["INTERVIEW_EXCHANGE"], names["INTERVIEW_DLX"]):
             exchange = await channel.get_exchange(exchange_name, ensure=False)
             await exchange.delete(if_unused=False)
         await channel.close()

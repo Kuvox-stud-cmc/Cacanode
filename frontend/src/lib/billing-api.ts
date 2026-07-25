@@ -2,7 +2,7 @@ import { getApiBase } from "@/lib/auth-api";
 import { parseApiError, readJsonOrThrow } from "@/lib/api-error";
 import type { ApiRequest } from "@/lib/documents-api";
 
-export type BillingPlanCode = "STARTER" | "TRIAL" | "PRO" | "ENTERPRISE";
+export type BillingPlanCode = "STARTER" | "TRIAL" | "PRO" | "BUSINESS" | "ENTERPRISE";
 export type BillingInterval = "MONTHLY" | "ANNUAL";
 export type BillingStatus = "TRIAL" | "STARTER" | "ACTIVE" | "GRACE" | "ENTERPRISE";
 export type PaymentStatus = "PENDING" | "PROCESSING" | "PAID" | "CANCELLED" | "EXPIRED" | "FAILED" | "REVIEW";
@@ -12,6 +12,11 @@ export type BillingLimits = {
   documents: number | null;
   teamMembers: number | null;
   storageMb: number | null;
+  activeJobs: number;
+  verifiedApplications: number;
+  interviewSeconds: number;
+  cvAnalyses: number;
+  recruitmentStorageBytes: number;
 };
 
 export type BillingFeatures = {
@@ -53,6 +58,7 @@ export type BillingPayment = {
 };
 
 export type BillingUsage = { used: number; limit: number | null; overLimit: boolean };
+export type HiringBillingUsage = { used: number; reserved: number; limit: number; overLimit: boolean };
 
 export type BillingAccount = {
   planCode: BillingPlanCode;
@@ -67,6 +73,11 @@ export type BillingAccount = {
   documents: BillingUsage;
   teamMembers: BillingUsage;
   storageMb: BillingUsage;
+  activeJobs: HiringBillingUsage;
+  verifiedApplications: HiringBillingUsage;
+  interviewSeconds: HiringBillingUsage;
+  cvAnalyses: HiringBillingUsage;
+  recruitmentStorageBytes: HiringBillingUsage;
   features: BillingFeatures;
   pendingPayment: BillingPayment | null;
   cancelAtPeriodEnd: boolean;
@@ -83,12 +94,13 @@ export async function getBillingAccount(request: ApiRequest): Promise<BillingAcc
 
 export async function createBillingCheckout(
   request: ApiRequest,
+  planCode: Extract<BillingPlanCode, "PRO" | "BUSINESS">,
   interval: BillingInterval,
-): Promise<{ paymentId: string; checkoutUrl: string; expiresAt: string }> {
+): Promise<{ paymentId: string; planCode: BillingPlanCode; interval: BillingInterval; amountVnd: number; checkoutUrl: string; expiresAt: string }> {
   return readJsonOrThrow(await request(`${getApiBase()}/billing/checkouts`, {
     method: "POST",
     headers: { "Idempotency-Key": crypto.randomUUID() },
-    body: JSON.stringify({ planCode: "PRO", interval }),
+    body: JSON.stringify({ planCode, interval }),
   }));
 }
 

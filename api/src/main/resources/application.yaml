@@ -14,6 +14,11 @@ spring:
     redis:
       connect-timeout: ${REDIS_CONNECT_TIMEOUT_SECONDS:1}s
       timeout: ${REDIS_OPERATION_TIMEOUT_SECONDS:1}s
+  rabbitmq:
+    publisher-confirm-type: correlated
+    publisher-returns: true
+    template:
+      mandatory: true
 management:
   endpoints:
     web:
@@ -23,7 +28,7 @@ management:
     health:
       group:
         readiness:
-          include: readinessState,modularReadiness
+          include: readinessState,modularReadiness,recruitmentInfrastructure
 
 logging:
   level:
@@ -31,6 +36,82 @@ logging:
     web: INFO
 
 app:
+  recruitment:
+    enabled: ${RECRUITMENT_ENABLED:false}
+    activation:
+      ga-unlocked: ${RECRUITMENT_GA_UNLOCKED:false}
+    cost:
+      rate-card-version: ${RECRUITMENT_COST_RATE_CARD_VERSION:2026-07-24-v1}
+      twilio-call-usd-per-minute: ${RECRUITMENT_COST_TWILIO_CALL_USD_PER_MINUTE:0.02}
+      recording-usd-per-minute: ${RECRUITMENT_COST_RECORDING_USD_PER_MINUTE:0.0025}
+      cartesia-usd-per-million-characters: ${RECRUITMENT_COST_CARTESIA_USD_PER_MILLION_CHARACTERS:50}
+      model-usd-per-million-tokens: ${RECRUITMENT_COST_MODEL_USD_PER_MILLION_TOKENS:5}
+    messaging-enabled: ${RECRUITMENT_MESSAGING_ENABLED:false}
+    public-jobs-enabled: ${RECRUITMENT_PUBLIC_JOBS_ENABLED:false}
+    automation-enabled: ${RECRUITMENT_AUTOMATION_ENABLED:false}
+    cv-ai-enabled: ${RECRUITMENT_CV_AI_ENABLED:false}
+    cv-analysis:
+      policy-version: ${CV_ANALYSIS_POLICY_VERSION:cv-redaction-v1}
+      model-version: ${CV_ANALYSIS_MODEL_VERSION:resume-analysis-v1}
+      max-extracted-characters: ${CV_ANALYSIS_MAX_EXTRACTED_CHARACTERS:50000}
+      max-evidence-segments: ${CV_ANALYSIS_MAX_EVIDENCE_SEGMENTS:250}
+      max-personalized-questions: ${CV_ANALYSIS_MAX_PERSONALIZED_QUESTIONS:2}
+      max-processing-attempts: ${CV_ANALYSIS_MAX_PROCESSING_ATTEMPTS:3}
+      max-publication-attempts: ${CV_ANALYSIS_MAX_PUBLICATION_ATTEMPTS:10}
+      publisher-delay-ms: ${CV_ANALYSIS_PUBLISHER_DELAY_MS:1000}
+      initial-backoff-seconds: ${CV_ANALYSIS_INITIAL_BACKOFF_SECONDS:2}
+      max-backoff-seconds: ${CV_ANALYSIS_MAX_BACKOFF_SECONDS:300}
+      reconcile-delay-ms: ${CV_ANALYSIS_RECONCILE_DELAY_MS:60000}
+    calling-enabled: ${RECRUITMENT_CALLING_ENABLED:false}
+    recording-enabled: ${RECRUITMENT_RECORDING_ENABLED:false}
+    recording:
+      operation-publisher-delay-ms: ${RECRUITMENT_RECORDING_OPERATION_PUBLISHER_DELAY_MS:1000}
+      operation-recovery-delay-ms: ${RECRUITMENT_RECORDING_OPERATION_RECOVERY_DELAY_MS:30000}
+      retention-delay-ms: ${RECRUITMENT_RECORDING_RETENTION_DELAY_MS:60000}
+    calling:
+      enabled: ${RECRUITMENT_CALLING_ENABLED:false}
+      scheduler-enabled: ${RECRUITMENT_CALL_SCHEDULER_ENABLED:true}
+      claim-early-seconds: ${RECRUITMENT_CALL_CLAIM_EARLY_SECONDS:15}
+      claim-late-seconds: ${RECRUITMENT_CALL_CLAIM_LATE_SECONDS:120}
+      preparation-max-attempts: ${RECRUITMENT_CALL_PREPARATION_MAX_ATTEMPTS:3}
+      cancellation-max-attempts: ${RECRUITMENT_CALL_CANCELLATION_MAX_ATTEMPTS:3}
+      global-concurrency: ${INTERVIEW_GLOBAL_CONCURRENCY:10}
+      tenant-concurrency: ${INTERVIEW_TENANT_CONCURRENCY:2}
+      twilio-account-sid: ${TWILIO_ACCOUNT_SID:}
+      twilio-api-key-sid: ${TWILIO_API_KEY_SID:}
+      twilio-api-key-secret: ${TWILIO_API_KEY_SECRET:}
+      twilio-auth-token: ${TWILIO_AUTH_TOKEN:}
+      twilio-from-number: ${TWILIO_FROM_NUMBER:}
+      callback-base-url: ${TWILIO_CALLBACK_BASE_URL:}
+      media-stream-wss-url: ${TWILIO_MEDIA_STREAM_WSS_URL:}
+      consent-voice-english: ${TWILIO_CONSENT_VOICE_ENGLISH:Google.en-US-Standard-C}
+      consent-voice-vietnamese: ${TWILIO_CONSENT_VOICE_VIETNAMESE:Google.vi-VN-Standard-A}
+      cartesia-api-key: ${CARTESIA_API_KEY:}
+      cartesia-english-voice-id: ${CARTESIA_ENGLISH_VOICE_ID:}
+      cartesia-vietnamese-voice-id: ${CARTESIA_VIETNAMESE_VOICE_ID:}
+      runtime-token-secret: ${INTERVIEW_RUNTIME_TOKEN_SECRET:}
+      transport-smoke-mode: ${INTERVIEW_TRANSPORT_SMOKE_MODE:false}
+      interview-engine-enabled: ${INTERVIEW_ENGINE_ENABLED:false}
+      durable-results-enabled: ${INTERVIEW_DURABLE_RESULTS_ENABLED:false}
+      app-environment: ${APP_ENV:development}
+      fraud:
+        destination-attempts-per-day: ${RECRUITMENT_PHONE_DESTINATION_ATTEMPTS_PER_DAY:3}
+        tenant-attempts-per-day: ${RECRUITMENT_PHONE_TENANT_ATTEMPTS_PER_DAY:100}
+        destination-tenant-limit: ${RECRUITMENT_PHONE_DESTINATION_TENANT_LIMIT:2}
+        fingerprint-secret: ${RECRUITMENT_PHONE_FINGERPRINT_SECRET:${INTERVIEW_RUNTIME_TOKEN_SECRET:development-phone-fingerprint-secret}}
+    public:
+      token-pepper: ${RECRUITMENT_TOKEN_PEPPER:development-recruitment-token-pepper}
+      cursor-encryption-key: ${RECRUITMENT_CURSOR_ENCRYPTION_KEY:development-recruitment-cursor-key}
+      candidate-base-url: ${RECRUITMENT_CANDIDATE_BASE_URL:http://localhost:3000/applications/manage}
+      cookie-secure: ${RECRUITMENT_COOKIE_SECURE:false}
+      turnstile-enabled: ${RECRUITMENT_TURNSTILE_ENABLED:false}
+      turnstile-site-key: ${TURNSTILE_SITE_KEY:}
+      turnstile-secret-key: ${TURNSTILE_SECRET_KEY:}
+      scanner-enabled: ${RECRUITMENT_SCANNER_ENABLED:false}
+      clamav-host: ${CLAMAV_HOST:localhost}
+      clamav-port: ${CLAMAV_PORT:3310}
+      max-cv-bytes: ${RECRUITMENT_MAX_CV_BYTES:5242880}
+      cv-cleanup-ms: ${RECRUITMENT_CV_CLEANUP_MS:60000}
   cache:
     enabled: ${CACHE_ENABLED:false}
     key-prefix: ${CACHE_KEY_PREFIX:ccn:v2}
@@ -59,6 +140,8 @@ app:
   rate-limit:
     enabled: ${PUBLIC_RATE_LIMIT_ENABLED:true}
     public-requests-per-minute: ${PUBLIC_RATE_LIMIT_PER_MINUTE:120}
+  security:
+    trusted-proxy-cidrs: ${TRUSTED_PROXY_CIDRS:127.0.0.1/32,::1/128}
   public-evidence:
     signing-key: ${PUBLIC_EVIDENCE_SIGNING_KEY:${TOKEN_KEY:development-public-evidence-signing-key}}
     web-base-url: ${ADMIN_WEB_URL:http://localhost:3000}
@@ -67,12 +150,16 @@ app:
     signing-key: ${WIDGET_PREVIEW_SIGNING_KEY:${TOKEN_KEY:development-widget-preview-signing-key}}
     ttl-seconds: ${WIDGET_PREVIEW_TTL_SECONDS:900}
   billing:
-    catalog-version: ${BILLING_CATALOG_VERSION:2026-07-15}
+    catalog-version: ${BILLING_CATALOG_VERSION:2026-07-23}
     trial-days: 14
     grace-days: 3
     checkout-minutes: 30
     pro-monthly-price-vnd: 1199000
     pro-annual-price-vnd: 11990000
+    business-monthly-price-vnd: 3499000
+    business-annual-price-vnd: 34990000
+    hiring-reservation-ttl-hours: ${HIRING_RESERVATION_TTL_HOURS:24}
+    hiring-reservation-reaper-ms: ${HIRING_RESERVATION_REAPER_MS:300000}
     starter:
       max-messages: 500
       max-documents: 3
@@ -82,11 +169,49 @@ app:
       webhooks: false
       advanced-analytics: false
       custom-branding: false
+      max-active-jobs: 1
+      max-verified-applications: 25
+      max-interview-seconds: 0
+      max-cv-analyses: 0
+      max-recruitment-storage-bytes: 52428800
+    trial:
+      max-messages: 10000
+      max-documents: 50
+      max-team-members: 5
+      max-storage-mb: 10240
+      max-active-jobs: 1
+      max-verified-applications: 25
+      max-interview-seconds: 1200
+      max-cv-analyses: 5
+      max-recruitment-storage-bytes: 104857600
+      api-access: true
+      webhooks: true
+      advanced-analytics: true
+      custom-branding: true
     pro:
       max-messages: 10000
       max-documents: 50
       max-team-members: 5
       max-storage-mb: 10240
+      max-active-jobs: 3
+      max-verified-applications: 150
+      max-interview-seconds: 3600
+      max-cv-analyses: 100
+      max-recruitment-storage-bytes: 1073741824
+      api-access: true
+      webhooks: true
+      advanced-analytics: true
+      custom-branding: true
+    business:
+      max-messages: 50000
+      max-documents: 250
+      max-team-members: 15
+      max-storage-mb: 51200
+      max-active-jobs: 10
+      max-verified-applications: 1000
+      max-interview-seconds: 18000
+      max-cv-analyses: 500
+      max-recruitment-storage-bytes: 10737418240
       api-access: true
       webhooks: true
       advanced-analytics: true
@@ -96,6 +221,11 @@ app:
       max-documents:
       max-team-members:
       max-storage-mb:
+      max-active-jobs: 0
+      max-verified-applications: 0
+      max-interview-seconds: 0
+      max-cv-analyses: 0
+      max-recruitment-storage-bytes: 0
       api-access: true
       webhooks: true
       advanced-analytics: true

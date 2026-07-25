@@ -1,0 +1,8 @@
+{
+  "schema_version":"1.1","event_id":"09846216-7d80-52fa-9e82-241f59659b2c","event_type":"interview.session.failed","occurred_at":"2026-07-23T08:12:00Z",
+  "tenant_id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","aggregate_id":"22222222-2222-4222-8222-222222222222","session_id":"22222222-2222-4222-8222-222222222222","call_attempt_id":"55555555-5555-4555-8555-555555555555",
+  "expected_turn_count":2,"connected_seconds":120,"partial":true,"score_policy_version":"equal-core-questions-v1","overall_score":80.00,"english_dimensions":null,"english_band":null,
+  "section_results":[{"section_id":"77777777-7777-4777-8777-777777777777","kind":"CORE","status":"PARTIAL"}],
+  "question_results":[{"section_id":"77777777-7777-4777-8777-777777777777","question_id":"99999999-9999-4999-8999-999999999999","section_kind":"CORE","status":"PARTIAL","score":4,"evaluations":[{"candidate_turn_id":"bf3e5b84-c44b-5e3f-994d-d19bd844cf74","accepted":true,"rubric_score":4,"english_dimensions":null}]}],
+  "failure_code":"RECOVERY_EXPIRED","retryable":false,"detail":"The media connection was not restored before the execution lease expired."
+}

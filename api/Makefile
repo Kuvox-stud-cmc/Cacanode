@@ -8,6 +8,7 @@ UVICORN_ARGS ?=
 PYTEST_ARGS ?=
 PROFILE ?= dev
 ENV_FILE ?= .env
+TEST_ENV_FILE ?=
 ROOT_COMPOSE_FILE ?= ../docker-compose.yml
 DEV_SEED_FILE ?= src/main/resources/db/seed/dev/default_tenant_account.sql
 
@@ -21,6 +22,12 @@ MVNW ?= sh ./mvnw
 ENV_RUN ?= set -a; [ ! -f $(ENV_FILE) ] || . ./$(ENV_FILE); set +a;
 VENV_PYTHON := $(VENV)/bin/python
 REMOVE := rm -rf
+endif
+
+ifneq ($(strip $(TEST_ENV_FILE)),)
+TEST_ENV_RUN := set -a; [ ! -f $(TEST_ENV_FILE) ] || . ./$(TEST_ENV_FILE); set +a;
+else
+TEST_ENV_RUN :=
 endif
 
 FLYWAY_PROPS = -Dflyway.url="$${POSTGRES_URL}" -Dflyway.user="$${POSTGRES_USER}" -Dflyway.password="$${POSTGRES_PASSWORD}" -Dflyway.locations=filesystem:src/main/resources/db/migration
@@ -64,10 +71,10 @@ run-prod:
 	$(ENV_RUN) $(MVNW) -Pprod spring-boot:run $(MAVEN_ARGS)
 
 test:
-	$(ENV_RUN) $(MVNW) -Ptest -Dspring.profiles.active=test test $(MAVEN_ARGS)
+	$(TEST_ENV_RUN) $(MVNW) -Ptest -Dspring.profiles.active=test test $(MAVEN_ARGS)
 
 verify:
-	$(ENV_RUN) $(MVNW) -Ptest -Dspring.profiles.active=test verify $(MAVEN_ARGS)
+	$(TEST_ENV_RUN) $(MVNW) -Ptest -Dspring.profiles.active=test verify $(MAVEN_ARGS)
 
 package:
 	$(ENV_RUN) $(MVNW) -Pprod clean package $(MAVEN_ARGS)

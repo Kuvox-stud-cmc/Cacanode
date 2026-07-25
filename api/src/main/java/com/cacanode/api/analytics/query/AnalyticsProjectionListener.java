@@ -14,6 +14,10 @@ import com.cacanode.api.tenant.api.event.UserInvitedEvent;
 import com.cacanode.api.tenant.api.event.TenantProjectionChangedEvent;
 import com.cacanode.api.tenant.api.event.UserProjectionChangedEvent;
 import com.cacanode.api.tenant.api.event.InvitationProjectionChangedEvent;
+import com.cacanode.api.recruitment.api.event.RecruitmentJobProjectionChangedEvent;
+import com.cacanode.api.recruitment.api.event.RecruitmentApplicationProjectionChangedEvent;
+import com.cacanode.api.recruitment.api.event.RecruitmentInterviewProjectionChangedEvent;
+import com.cacanode.api.recruitment.api.event.RecruitmentErasureCompletedEvent;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.event.EventListener;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -217,5 +221,62 @@ public class AnalyticsProjectionListener {
                 SET status = ?, resolved_at = ?, updated_at = ?
                 WHERE ticket_id = ? AND tenant_id = ?
                 """, event.status(), resolvedAt, event.updatedAt(), event.ticketId(), event.tenantId());
+    }
+
+    @EventListener
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void recruitmentJobChanged(RecruitmentJobProjectionChangedEvent event) {
+        if (!inboxService.claim("analytics.recruitment-job")) return;
+        jdbcTemplate.update("""
+                INSERT INTO analytics_recruitment_job_projection
+                    (job_id,tenant_id,status,created_at,updated_at,published_at,paused_at,closed_at,archived_at)
+                VALUES (?,?,?,?,?,?,?,?,?)
+                ON CONFLICT (job_id) DO UPDATE SET status=EXCLUDED.status,updated_at=EXCLUDED.updated_at,
+                    published_at=EXCLUDED.published_at,paused_at=EXCLUDED.paused_at,
+                    closed_at=EXCLUDED.closed_at,archived_at=EXCLUDED.archived_at
+                """, event.jobId(), event.tenantId(), event.status(), event.createdAt(), event.updatedAt(),
+                event.publishedAt(), event.pausedAt(), event.closedAt(), event.archivedAt());
+    }
+
+    @EventListener
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void recruitmentApplicationChanged(RecruitmentApplicationProjectionChangedEvent event) {
+        if (!inboxService.claim("analytics.recruitment-application")) return;
+        jdbcTemplate.update("""
+                INSERT INTO analytics_recruitment_application_projection
+                    (application_id,tenant_id,job_id,status,created_at,updated_at,submitted_at,verified_at,withdrawn_at)
+                VALUES (?,?,?,?,?,?,?,?,?)
+                ON CONFLICT (application_id) DO UPDATE SET status=EXCLUDED.status,updated_at=EXCLUDED.updated_at,
+                    verified_at=EXCLUDED.verified_at,withdrawn_at=EXCLUDED.withdrawn_at
+                """, event.applicationId(), event.tenantId(), event.jobId(), event.status(),
+                event.createdAt(), event.updatedAt(), event.submittedAt(), event.verifiedAt(), event.withdrawnAt());
+    }
+
+    @EventListener
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void recruitmentErased(RecruitmentErasureCompletedEvent event) {
+        jdbcTemplate.update("DELETE FROM analytics_recruitment_interview_projection WHERE tenant_id=? AND application_id=?",
+                event.tenantId(),event.applicationId());
+        jdbcTemplate.update("DELETE FROM analytics_recruitment_application_projection WHERE tenant_id=? AND application_id=?",
+                event.tenantId(),event.applicationId());
+    }
+
+    @EventListener
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void recruitmentInterviewChanged(RecruitmentInterviewProjectionChangedEvent event) {
+        if (!inboxService.claim("analytics.recruitment-interview")) return;
+        jdbcTemplate.update("""
+                INSERT INTO analytics_recruitment_interview_projection
+                    (interview_id,tenant_id,application_id,job_id,status,created_at,updated_at,invited_at,
+                     scheduled_start_at,scheduled_end_at,started_at,completed_at,cancelled_at,expired_at)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                ON CONFLICT (interview_id) DO UPDATE SET status=EXCLUDED.status,updated_at=EXCLUDED.updated_at,
+                    invited_at=EXCLUDED.invited_at,scheduled_start_at=EXCLUDED.scheduled_start_at,
+                    scheduled_end_at=EXCLUDED.scheduled_end_at,started_at=EXCLUDED.started_at,
+                    completed_at=EXCLUDED.completed_at,cancelled_at=EXCLUDED.cancelled_at,
+                    expired_at=EXCLUDED.expired_at
+                """, event.interviewId(), event.tenantId(), event.applicationId(), event.jobId(), event.status(),
+                event.createdAt(), event.updatedAt(), event.invitedAt(), event.scheduledStartAt(),
+                event.scheduledEndAt(), event.startedAt(), event.completedAt(), event.cancelledAt(), event.expiredAt());
     }
 }

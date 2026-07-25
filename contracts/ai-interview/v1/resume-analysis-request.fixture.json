@@ -1,0 +1,16 @@
+{
+  "schema_version": "1.0",
+  "event_id": "8215c930-a860-56ac-b605-50c8827e6d95",
+  "event_type": "interview.resume-analysis.requested",
+  "occurred_at": "2026-07-23T08:00:00Z",
+  "tenant_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+  "aggregate_id": "11111111-1111-4111-8111-111111111111",
+  "analysis_id": "11111111-1111-4111-8111-111111111111",
+  "application_id": "33333333-3333-4333-8333-333333333333",
+  "document_id": "44444444-4444-4444-8444-444444444444",
+  "storage_key": "recruitment/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/cv/44444444-4444-4444-8444-444444444444.pdf",
+  "file_name": "candidate-cv.pdf",
+  "content_type": "application/pdf",
+  "file_size_bytes": 245760,
+  "requested_language_tag": "vi-VN"
+}

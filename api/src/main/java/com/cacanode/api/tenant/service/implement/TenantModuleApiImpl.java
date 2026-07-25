@@ -12,6 +12,7 @@ import com.cacanode.api.tenant.api.RegisterTenantCommand;
 import com.cacanode.api.tenant.api.TenantEntitlements;
 import com.cacanode.api.tenant.api.TenantIdentityApi;
 import com.cacanode.api.tenant.api.TenantEntitlementApi;
+import com.cacanode.api.tenant.api.TenantPublicProfileApi;
 import com.cacanode.api.tenant.api.TenantUserResult;
 import com.cacanode.api.tenant.cache.IntegrationTokenCacheInvalidationPublisher;
 import com.cacanode.api.tenant.api.UserAuthDto;
@@ -41,7 +42,7 @@ import java.util.regex.Pattern;
 @Service
 @Slf4j(topic = "TENANT-API")
 @RequiredArgsConstructor
-public class TenantModuleApiImpl implements TenantIdentityApi, TenantEntitlementApi {
+public class TenantModuleApiImpl implements TenantIdentityApi, TenantEntitlementApi, TenantPublicProfileApi {
 
         private final PasswordEncoder passwordEncoder;
         private final TenantRepository tenantRepository;
@@ -211,6 +212,15 @@ public class TenantModuleApiImpl implements TenantIdentityApi, TenantEntitlement
                 Tenant tenant = tenantRepository.findById(tenantId)
                                 .orElseThrow(() -> new ResourceNotFoundException("Tenant was not found"));
                 return new TenantSnapshot(tenant.getId(), tenant.getName());
+        }
+
+        @Override
+        @Transactional(readOnly = true)
+        public TenantPublicProfile getPublicProfile(UUID tenantId) {
+                Tenant tenant = tenantRepository.findById(tenantId)
+                                .orElseThrow(() -> new ResourceNotFoundException("Tenant was not found"));
+                return new TenantPublicProfile(
+                                tenant.getId(), tenant.getSlug(), tenant.getName(), tenant.getStatus());
         }
 
         @Override

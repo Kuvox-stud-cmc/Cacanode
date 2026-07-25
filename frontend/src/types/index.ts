@@ -102,7 +102,7 @@ export interface AuthUser {
   email: string;
   fullName: string;
   role: string;
-  plan: string;
+  plan: "STARTER" | "TRIAL" | "PRO" | "BUSINESS" | "ENTERPRISE";
 }
 
 export interface AuthResponse {
@@ -217,7 +217,7 @@ export interface TenantInfo {
   id: string;
   name: string;
   email: string;
-  plan: "trial" | "starter" | "pro" | "enterprise";
+  plan: "trial" | "starter" | "pro" | "business" | "enterprise";
   status: "active" | "suspended";
 }
 

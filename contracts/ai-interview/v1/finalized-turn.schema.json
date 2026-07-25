@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cacanode.local/contracts/ai-interview/v1/finalized-turn.schema.json",
+  "title": "Finalized interview turn",
+  "type": "object", "additionalProperties": false,
+  "required": ["schema_version", "event_id", "event_type", "occurred_at", "tenant_id", "aggregate_id", "session_id", "call_attempt_id", "turn_id", "sequence", "speaker", "language_tag", "started_at_epoch_ms", "ended_at_epoch_ms", "transcript", "interrupted"],
+  "properties": {
+    "schema_version": {"const": "1.0"}, "event_id": {"type": "string", "format": "uuid"}, "event_type": {"const": "interview.turn.finalized"},
+    "occurred_at": {"type": "string", "format": "date-time"}, "tenant_id": {"type": "string", "format": "uuid"}, "aggregate_id": {"type": "string", "format": "uuid"},
+    "session_id": {"type": "string", "format": "uuid"}, "call_attempt_id": {"type": "string", "format": "uuid"}, "turn_id": {"type": "string", "format": "uuid"},
+    "sequence": {"type": "integer", "minimum": 0}, "speaker": {"enum": ["CANDIDATE", "INTERVIEWER", "SYSTEM"]},
+    "language_tag": {"type": "string", "minLength": 2, "maxLength": 35}, "started_at_epoch_ms": {"type": "integer", "minimum": 0}, "ended_at_epoch_ms": {"type": "integer", "minimum": 0},
+    "transcript": {"type": "string", "minLength": 1, "maxLength": 8000}, "interrupted": {"type": "boolean"}
+  }
+}

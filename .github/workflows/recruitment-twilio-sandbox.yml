@@ -1,0 +1,43 @@
+name: Recruitment Twilio sandbox evidence
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test-credentials:
+    runs-on: ubuntu-latest
+    environment: recruitment-twilio-sandbox
+    timeout-minutes: 10
+    steps:
+      - name: Validate protected test credentials
+        env:
+          ACCOUNT_SID: ${{ secrets.TWILIO_TEST_ACCOUNT_SID }}
+          AUTH_TOKEN: ${{ secrets.TWILIO_TEST_AUTH_TOKEN }}
+          FROM_NUMBER: ${{ secrets.TWILIO_TEST_FROM_NUMBER }}
+        run: |
+          set -Eeuo pipefail
+          test -n "${ACCOUNT_SID}"
+          test -n "${AUTH_TOKEN}"
+          test -n "${FROM_NUMBER}"
+
+      - name: Exercise Twilio call creation with test credentials
+        env:
+          ACCOUNT_SID: ${{ secrets.TWILIO_TEST_ACCOUNT_SID }}
+          AUTH_TOKEN: ${{ secrets.TWILIO_TEST_AUTH_TOKEN }}
+          FROM_NUMBER: ${{ secrets.TWILIO_TEST_FROM_NUMBER }}
+        run: |
+          set -Eeuo pipefail
+          response="$(curl --fail --silent --show-error \
+            -u "${ACCOUNT_SID}:${AUTH_TOKEN}" \
+            -X POST "https://api.twilio.com/2010-04-01/Accounts/${ACCOUNT_SID}/Calls.json" \
+            --data-urlencode "From=${FROM_NUMBER}" \
+            --data-urlencode "To=+15005550006" \
+            --data-urlencode "Url=https://demo.twilio.com/docs/voice.xml")"
+          status="$(jq -r '.status // empty' <<<"${response}")"
+          sid="$(jq -r '.sid // empty' <<<"${response}")"
+          test -n "${status}"
+          test "${sid#CA}" != "${sid}"
+          printf 'Twilio test-credential call accepted with status `%s`.\n' "${status}" >> "${GITHUB_STEP_SUMMARY}"

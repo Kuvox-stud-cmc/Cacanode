@@ -31,9 +31,7 @@ public class AnalyticsController extends BaseController {
             @RequestParam(defaultValue = "CUSTOMER") String scope,
             @RequestParam(defaultValue = "30") int days,
             HttpServletRequest request) {
-        if (days != 7 && days != 30 && days != 90) {
-            throw new BadRequestException("days must be one of 7, 30, or 90");
-        }
+        validateDays(days);
         var tenantId = getTenantId(request);
         if (!tenantModuleApi.getEntitlements(tenantId).advancedAnalytics()) {
             throw new org.springframework.security.access.AccessDeniedException("Advanced analytics requires Pro");
@@ -43,6 +41,23 @@ public class AnalyticsController extends BaseController {
                     AnalyticsDtos.AnalyticsScope.valueOf(scope.toUpperCase(Locale.ROOT)), days);
         } catch (IllegalArgumentException exception) {
             throw new BadRequestException("scope must be one of CUSTOMER, EMPLOYEE, or ALL");
+        }
+    }
+
+    @GetMapping("/analytics/recruitment")
+    public AnalyticsDtos.RecruitmentAnalyticsResponse recruitment(
+            @RequestParam(defaultValue = "30") int days, HttpServletRequest request) {
+        validateDays(days);
+        var tenantId = getTenantId(request);
+        if (!tenantModuleApi.getEntitlements(tenantId).advancedAnalytics()) {
+            throw new org.springframework.security.access.AccessDeniedException("Advanced analytics requires Pro");
+        }
+        return analyticsReadApi.recruitment(tenantId, days);
+    }
+
+    private static void validateDays(int days) {
+        if (days != 7 && days != 30 && days != 90) {
+            throw new BadRequestException("days must be one of 7, 30, or 90");
         }
     }
 }

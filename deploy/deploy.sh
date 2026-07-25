@@ -62,6 +62,26 @@ for required_name in \
   fi
 done
 
+calling_enabled="$(env_value RECRUITMENT_CALLING_ENABLED)"
+if [[ "${calling_enabled,,}" == "true" ]]; then
+  engine_enabled="$(env_value INTERVIEW_ENGINE_ENABLED)"
+  smoke_enabled="$(env_value INTERVIEW_TRANSPORT_SMOKE_MODE)"
+  if [[ "${engine_enabled,,}" != "true" || "${smoke_enabled,,}" == "true" ]]; then
+    echo "Production calling requires INTERVIEW_ENGINE_ENABLED=true and smoke mode off" >&2
+    exit 1
+  fi
+  for interview_name in TWILIO_ACCOUNT_SID TWILIO_API_KEY_SID TWILIO_API_KEY_SECRET \
+    TWILIO_AUTH_TOKEN TWILIO_FROM_NUMBER TWILIO_CALLBACK_BASE_URL \
+    TWILIO_MEDIA_STREAM_WSS_URL CARTESIA_API_KEY CARTESIA_ENGLISH_VOICE_ID \
+    CARTESIA_VIETNAMESE_VOICE_ID INTERVIEW_RUNTIME_TOKEN_SECRET; do
+    interview_value="$(env_value "${interview_name}")"
+    if is_unconfigured "${interview_value}"; then
+      echo "${interview_name} is required when recruitment calling is enabled" >&2
+      exit 1
+    fi
+  done
+fi
+
 sendgrid_api_key="$(env_value SENDGRID_API_KEY)"
 brevo_api_key="$(env_value BREVO_API_KEY)"
 if is_unconfigured "${sendgrid_api_key}" && is_unconfigured "${brevo_api_key}"; then

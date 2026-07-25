@@ -199,6 +199,73 @@ public class AnalyticsReadService implements AnalyticsReadApi {
         );
     }
 
+    @Override
+    public AnalyticsDtos.RecruitmentAnalyticsResponse recruitment(UUID tenantId, int days) {
+        LocalDate endDate = LocalDate.now(Clock.systemUTC()).plusDays(1);
+        LocalDate startDate = endDate.minusDays(days);
+        LocalDate previousStartDate = startDate.minusDays(days);
+        LocalDateTime previousStart = previousStartDate.atStartOfDay();
+        LocalDateTime currentStart = startDate.atStartOfDay();
+        LocalDateTime end = endDate.atStartOfDay();
+
+        PeriodCounts published = timestampCounts("analytics_recruitment_job_projection", "published_at",
+                tenantId, previousStart, currentStart, end, null);
+        PeriodCounts applications = timestampCounts("analytics_recruitment_application_projection", "verified_at",
+                tenantId, previousStart, currentStart, end, null);
+        PeriodCounts completed = timestampCounts("analytics_recruitment_interview_projection", "completed_at",
+                tenantId, previousStart, currentStart, end, "status = 'COMPLETED'");
+        PeriodCounts unsuccessful = timestampCounts("analytics_recruitment_interview_projection", "updated_at",
+                tenantId, previousStart, currentStart, end,
+                "status IN ('FAILED','NO_ANSWER','DECLINED')");
+
+        Map<String, Long> jobs = statusDistribution("analytics_recruitment_job_projection", tenantId);
+        Map<String, Long> applicationStatuses = statusDistribution(
+                "analytics_recruitment_application_projection", tenantId);
+        Map<String, Long> interviews = statusDistribution("analytics_recruitment_interview_projection", tenantId);
+
+        List<AnalyticsDtos.DailyVolume> applicationVolume = dailyVolumes(
+                "analytics_recruitment_application_projection", "verified_at", tenantId, startDate, endDate,
+                "verified_at IS NOT NULL");
+        List<AnalyticsDtos.DailyVolume> completionVolume = dailyVolumes(
+                "analytics_recruitment_interview_projection", "completed_at", tenantId, startDate, endDate,
+                "status = 'COMPLETED' AND completed_at IS NOT NULL");
+
+        return new AnalyticsDtos.RecruitmentAnalyticsResponse(days, startDate, endDate.minusDays(1),
+                countMetric(published), countMetric(applications), countMetric(completed),
+                countMetric(unsuccessful), jobs, applicationStatuses, interviews,
+                applicationVolume, completionVolume);
+    }
+
+    private PeriodCounts timestampCounts(String table, String column, UUID tenantId,
+            LocalDateTime previousStart, LocalDateTime currentStart, LocalDateTime end, String extra) {
+        String suffix = extra == null ? "" : " AND " + extra;
+        List<LocalDateTime> timestamps = jdbcTemplate.query(
+                "SELECT " + column + " FROM " + table + " WHERE tenant_id=? AND " + column
+                        + ">=? AND " + column + "<?" + suffix,
+                (rs, row) -> rs.getTimestamp(1).toLocalDateTime(), tenantId, previousStart, end);
+        return periodCounts(timestamps, currentStart);
+    }
+
+    private Map<String, Long> statusDistribution(String table, UUID tenantId) {
+        Map<String, Long> result = new LinkedHashMap<>();
+        jdbcTemplate.query("SELECT status,count(*) FROM " + table
+                        + " WHERE tenant_id=? GROUP BY status ORDER BY status",
+                (org.springframework.jdbc.core.RowCallbackHandler) rs -> result.put(rs.getString(1), rs.getLong(2)), tenantId);
+        return result;
+    }
+
+    private List<AnalyticsDtos.DailyVolume> dailyVolumes(String table, String column, UUID tenantId,
+            LocalDate start, LocalDate end, String extra) {
+        Map<LocalDate, Long> values = new HashMap<>();
+        jdbcTemplate.query("SELECT CAST(" + column + " AS DATE),count(*) FROM " + table
+                        + " WHERE tenant_id=? AND " + column + ">=? AND " + column + "<? AND " + extra
+                        + " GROUP BY CAST(" + column + " AS DATE)",
+                (org.springframework.jdbc.core.RowCallbackHandler) rs -> values.put(rs.getDate(1).toLocalDate(), rs.getLong(2)),
+                tenantId, start.atStartOfDay(), end.atStartOfDay());
+        return start.datesUntil(end).map(date -> new AnalyticsDtos.DailyVolume(
+                date, values.getOrDefault(date, 0L))).toList();
+    }
+
     private AnalyticsDtos.RateMetric ticketResolution(UUID tenantId, LocalDateTime previousStart, LocalDateTime currentStart, LocalDateTime end) {
         List<TicketRow> tickets = jdbcTemplate.query(
                 "SELECT created_at, status FROM analytics_ticket_projection WHERE tenant_id = ? AND created_at >= ? AND created_at < ?",

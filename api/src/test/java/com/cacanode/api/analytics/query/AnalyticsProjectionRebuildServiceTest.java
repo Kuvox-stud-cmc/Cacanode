@@ -4,6 +4,7 @@ import com.cacanode.api.chat.api.ChatApi;
 import com.cacanode.api.document.api.DocumentApi;
 import com.cacanode.api.support.api.SupportAnalyticsExportApi;
 import com.cacanode.api.tenant.api.TenantAnalyticsExportApi;
+import com.cacanode.api.recruitment.api.RecruitmentAnalyticsExportApi;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.embedded.EmbeddedDatabaseBuilder;
@@ -27,6 +28,7 @@ class AnalyticsProjectionRebuildServiceTest {
         DocumentApi documents = mock(DocumentApi.class);
         ChatApi chats = mock(ChatApi.class);
         SupportAnalyticsExportApi support = mock(SupportAnalyticsExportApi.class);
+        RecruitmentAnalyticsExportApi recruitment = mock(RecruitmentAnalyticsExportApi.class);
         LocalDateTime now = LocalDateTime.now();
         UUID tenantId = UUID.randomUUID();
         UUID conversationId = UUID.randomUUID();
@@ -45,9 +47,12 @@ class AnalyticsProjectionRebuildServiceTest {
                         "assistant", null, 1250L, 2, now.plusNanos(1))), false));
         when(support.projectionTickets(0, 500)).thenReturn(
                 new SupportAnalyticsExportApi.TicketPage(List.of(), false));
+        when(recruitment.exportJobs(tenantId,null,500)).thenReturn(new RecruitmentAnalyticsExportApi.SnapshotPage<>(List.of(),null));
+        when(recruitment.exportApplications(tenantId,null,500)).thenReturn(new RecruitmentAnalyticsExportApi.SnapshotPage<>(List.of(),null));
+        when(recruitment.exportInterviews(tenantId,null,500)).thenReturn(new RecruitmentAnalyticsExportApi.SnapshotPage<>(List.of(),null));
 
         var result = new AnalyticsProjectionRebuildService(
-                jdbc, tenants, documents, chats, support).rebuild();
+                jdbc, tenants, documents, chats, support, recruitment).rebuild();
 
         assertThat(result.tenants()).isEqualTo(1);
         assertThat(result.messages()).isEqualTo(2);
@@ -65,5 +70,8 @@ class AnalyticsProjectionRebuildServiceTest {
         jdbc.execute("CREATE TABLE analytics_conversation_projection (conversation_id UUID PRIMARY KEY, tenant_id UUID, channel VARCHAR, status VARCHAR, created_at TIMESTAMP, closed_at TIMESTAMP, updated_at TIMESTAMP)");
         jdbc.execute("CREATE TABLE analytics_message_projection (message_id UUID PRIMARY KEY, conversation_id UUID, tenant_id UUID, channel VARCHAR, role VARCHAR, question_text VARCHAR, response_duration_ms BIGINT, sequence_number INT, created_at TIMESTAMP)");
         jdbc.execute("CREATE TABLE analytics_ticket_projection (ticket_id UUID PRIMARY KEY, tenant_id UUID, status VARCHAR, priority VARCHAR, created_at TIMESTAMP, resolved_at TIMESTAMP, updated_at TIMESTAMP)");
+        jdbc.execute("CREATE TABLE analytics_recruitment_job_projection (job_id UUID PRIMARY KEY, tenant_id UUID, status VARCHAR, created_at TIMESTAMP, updated_at TIMESTAMP, published_at TIMESTAMP, paused_at TIMESTAMP, closed_at TIMESTAMP, archived_at TIMESTAMP)");
+        jdbc.execute("CREATE TABLE analytics_recruitment_application_projection (application_id UUID PRIMARY KEY, tenant_id UUID, job_id UUID, status VARCHAR, created_at TIMESTAMP, updated_at TIMESTAMP, submitted_at TIMESTAMP, verified_at TIMESTAMP, withdrawn_at TIMESTAMP)");
+        jdbc.execute("CREATE TABLE analytics_recruitment_interview_projection (interview_id UUID PRIMARY KEY, tenant_id UUID, application_id UUID, job_id UUID, status VARCHAR, created_at TIMESTAMP, updated_at TIMESTAMP, invited_at TIMESTAMP, scheduled_start_at TIMESTAMP WITH TIME ZONE, scheduled_end_at TIMESTAMP WITH TIME ZONE, started_at TIMESTAMP, completed_at TIMESTAMP, cancelled_at TIMESTAMP, expired_at TIMESTAMP)");
     }
 }

@@ -2,6 +2,8 @@ package com.cacanode.api.ai.infrastructure;
 
 import com.cacanode.api.ai.api.AiInferenceApi;
 import com.cacanode.api.ai.api.AiInferenceException;
+import com.cacanode.api.ai.api.InterviewInferenceApi;
+import com.cacanode.api.ai.api.InterviewInferenceException;
 
 import com.cacanode.ai.v1.DeleteDocumentIndexRequest;
 import com.cacanode.ai.v1.GenerateAnswerRequest;
@@ -22,6 +24,7 @@ import org.springframework.stereotype.Component;
 
 import javax.net.ssl.SSLException;
 import java.io.File;
+import java.time.Instant;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -30,12 +33,13 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 
 @Component
-public class GrpcAiInferenceClient implements AiInferenceApi {
+public class GrpcAiInferenceClient implements AiInferenceApi, InterviewInferenceApi {
     private final ManagedChannel channel;
     private final InferenceServiceGrpc.InferenceServiceBlockingStub stub;
     private final long answerDeadlineSeconds;
     private final long unitDeadlineSeconds;
     private final long deletionDeadlineSeconds;
+    private final long interviewDeadlineSeconds;
 
     public GrpcAiInferenceClient(
             @Value("${app.ai.grpc.target:localhost:50051}") String target,
@@ -46,7 +50,8 @@ public class GrpcAiInferenceClient implements AiInferenceApi {
             @Value("${app.ai.grpc.authority-override:}") String authorityOverride,
             @Value("${app.ai.grpc.answer-deadline-seconds:100}") long answerDeadlineSeconds,
             @Value("${app.ai.grpc.document-units-deadline-seconds:10}") long unitDeadlineSeconds,
-            @Value("${app.ai.grpc.deletion-deadline-seconds:15}") long deletionDeadlineSeconds
+            @Value("${app.ai.grpc.deletion-deadline-seconds:15}") long deletionDeadlineSeconds,
+            @Value("${app.ai.grpc.interview-deadline-seconds:10}") long interviewDeadlineSeconds
     ) {
         NettyChannelBuilder builder = NettyChannelBuilder.forTarget(target);
         if (plaintext) {
@@ -72,6 +77,7 @@ public class GrpcAiInferenceClient implements AiInferenceApi {
         this.answerDeadlineSeconds = answerDeadlineSeconds;
         this.unitDeadlineSeconds = unitDeadlineSeconds;
         this.deletionDeadlineSeconds = deletionDeadlineSeconds;
+        this.interviewDeadlineSeconds = interviewDeadlineSeconds;
     }
 
     @Override
@@ -159,6 +165,153 @@ public class GrpcAiInferenceClient implements AiInferenceApi {
                 .build();
         unavailableRetry(deletionDeadlineSeconds, service -> service.deleteDocumentIndex(request),
                 "document-index deletion");
+    }
+
+    @Override
+    public PreparedInterview prepare(PrepareInterviewCommand command) {
+        var response = interviewCall(
+                service -> service.prepareInterviewSession(prepareRequest(command)),
+                "prepare interview session");
+        return preparedInterview(command, response);
+    }
+
+    @Override
+    public CancelledInterview cancel(CancelInterviewCommand command) {
+        var request = com.cacanode.ai.v1.CancelInterviewSessionRequest.newBuilder()
+                .setSessionId(command.sessionId().toString())
+                .setCallAttemptId(command.callAttemptId().toString())
+                .setReason(command.reason())
+                .setTrace(interviewTrace(command.trace()))
+                .build();
+        var response = interviewCall(
+                service -> service.cancelInterviewSession(request),
+                "cancel interview session");
+        if (!response.getSessionId().equals(command.sessionId().toString())
+                || !response.getCallAttemptId().equals(command.callAttemptId().toString())) {
+            throw new InterviewInferenceException(
+                    "INVALID_INTERVIEW_RESPONSE", "Interview runtime returned mismatched identifiers.");
+        }
+        return new CancelledInterview(
+                UUID.fromString(response.getSessionId()),
+                UUID.fromString(response.getCallAttemptId()),
+                response.getCancelled(),
+                response.getAlreadyTerminal());
+    }
+
+    static com.cacanode.ai.v1.PrepareInterviewSessionRequest prepareRequest(
+            PrepareInterviewCommand command) {
+        var limits = command.interactionLimits();
+        var builder = com.cacanode.ai.v1.PrepareInterviewSessionRequest.newBuilder()
+                .setSessionId(command.sessionId().toString())
+                .setCallAttemptId(command.callAttemptId().toString())
+                .setTenantId(command.tenantId().toString())
+                .setTemplateRevisionId(command.templateRevisionId().toString())
+                .setSnapshotVersion(command.snapshotVersion())
+                .setSnapshotSha256(command.snapshotSha256())
+                .setCompanyDisplayName(command.companyDisplayName())
+                .setCandidateDisplayName(command.candidateDisplayName())
+                .setIntroductionText(command.introductionText())
+                .setDisclosureText(command.disclosureText())
+                .setClosingText(command.closingText())
+                .setDurationLimitSeconds(command.durationLimitSeconds())
+                .setInteractionLimits(com.cacanode.ai.v1.InterviewInteractionLimits.newBuilder()
+                        .setRepetitionLimit(limits.repetitionLimit())
+                        .setClarificationLimit(limits.clarificationLimit())
+                        .setSilenceTimeoutSeconds(limits.silenceTimeoutSeconds())
+                        .setSilencePromptLimit(limits.silencePromptLimit()))
+                .setRecordingEnabled(command.recordingEnabled())
+                .setCvPersonalizationEnabled(command.cvPersonalizationEnabled())
+                .setTrace(interviewTrace(command.trace()));
+        command.sections().stream().sorted(java.util.Comparator.comparingInt(SectionSnapshot::position))
+                .map(GrpcAiInferenceClient::section).forEach(builder::addSections);
+        return builder.build();
+    }
+
+    static PreparedInterview preparedInterview(
+            PrepareInterviewCommand command,
+            com.cacanode.ai.v1.PrepareInterviewSessionResponse response) {
+        if (!response.getSessionId().equals(command.sessionId().toString())
+                || !response.getCallAttemptId().equals(command.callAttemptId().toString())
+                || !response.getAcceptedSnapshotSha256().equals(command.snapshotSha256())
+                || response.getRuntimeToken().isBlank()) {
+            throw new InterviewInferenceException(
+                    "INVALID_INTERVIEW_RESPONSE", "Interview runtime rejected the prepared snapshot context.");
+        }
+        return new PreparedInterview(
+                UUID.fromString(response.getSessionId()),
+                UUID.fromString(response.getCallAttemptId()),
+                response.getRuntimeToken(),
+                Instant.ofEpochSecond(response.getExpiresAtEpochSeconds()),
+                response.getAcceptedSnapshotSha256());
+    }
+
+    private static com.cacanode.ai.v1.InterviewSectionSnapshot section(SectionSnapshot section) {
+        var builder = com.cacanode.ai.v1.InterviewSectionSnapshot.newBuilder()
+                .setSectionId(section.sectionId().toString())
+                .setPosition(section.position())
+                .setKind(section.kind() == SectionKind.ENGLISH_SCREEN
+                        ? com.cacanode.ai.v1.InterviewSectionKind.INTERVIEW_SECTION_KIND_ENGLISH_SCREEN
+                        : com.cacanode.ai.v1.InterviewSectionKind.INTERVIEW_SECTION_KIND_CORE)
+                .setLanguageTag(section.languageTag())
+                .setDurationLimitSeconds(section.durationLimitSeconds())
+                .setTransitionText(section.transitionText());
+        section.questions().stream().sorted(java.util.Comparator.comparingInt(QuestionSnapshot::position))
+                .map(GrpcAiInferenceClient::question).forEach(builder::addQuestions);
+        return builder.build();
+    }
+
+    private static com.cacanode.ai.v1.InterviewQuestionSnapshot question(QuestionSnapshot question) {
+        var builder = com.cacanode.ai.v1.InterviewQuestionSnapshot.newBuilder()
+                .setQuestionId(question.questionId().toString())
+                .setPosition(question.position())
+                .setPrompt(question.prompt())
+                .setCompetency(question.competency())
+                .setRubric(question.rubric())
+                .setFollowUpLimit(question.followUpLimit())
+                .setSource(question.source() == QuestionSource.CV_PERSONALIZED
+                        ? com.cacanode.ai.v1.InterviewQuestionSource.INTERVIEW_QUESTION_SOURCE_CV_PERSONALIZED
+                        : com.cacanode.ai.v1.InterviewQuestionSource.INTERVIEW_QUESTION_SOURCE_TEMPLATE);
+        if (question.evidence() != null) {
+            builder.setEvidence(question.evidence());
+        }
+        return builder.build();
+    }
+
+    private static TraceMetadata interviewTrace(Trace trace) {
+        if (trace == null) {
+            return TraceMetadata.getDefaultInstance();
+        }
+        return TraceMetadata.newBuilder()
+                .setRequestId(trace.requestId() == null ? "" : trace.requestId())
+                .setTraceId(trace.traceId() == null ? "" : trace.traceId())
+                .setParentSpanId(trace.parentSpanId() == null ? "" : trace.parentSpanId())
+                .putAllBaggage(trace.baggage())
+                .build();
+    }
+
+    private <T> T interviewCall(
+            Function<InferenceServiceGrpc.InferenceServiceBlockingStub, T> operation,
+            String operationName) {
+        try {
+            return operation.apply(stub.withDeadlineAfter(interviewDeadlineSeconds, TimeUnit.SECONDS));
+        } catch (StatusRuntimeException exception) {
+            Status.Code status = exception.getStatus().getCode();
+            String details = exception.getStatus().getDescription();
+            if (status == Status.Code.FAILED_PRECONDITION && "INTERVIEW_DISABLED".equals(details)) {
+                throw new InterviewInferenceException("INTERVIEW_DISABLED", "Interview runtime is disabled.");
+            }
+            if (status == Status.Code.UNAVAILABLE
+                    && "INTERVIEW_RUNTIME_NOT_READY".equals(details)) {
+                throw new InterviewInferenceException(
+                        "INTERVIEW_RUNTIME_NOT_READY", "Interview runtime is not ready.");
+            }
+            if (status == Status.Code.DEADLINE_EXCEEDED) {
+                throw new InterviewInferenceException(
+                        "INTERVIEW_RUNTIME_TIMEOUT", "Interview runtime request timed out.");
+            }
+            throw new InterviewInferenceException(
+                    "INTERVIEW_RUNTIME_ERROR", "The inference service could not " + operationName + ".");
+        }
     }
 
     private <T> T unavailableRetry(

@@ -1,6 +1,7 @@
 package com.cacanode.api.billing.service;
 
 import com.cacanode.api.billing.api.BillingStatus;
+import com.cacanode.api.billing.api.BillingPlanCode;
 import com.cacanode.api.billing.api.PaymentOrderStatus;
 import com.cacanode.api.billing.query.BillingFacade;
 import com.cacanode.api.billing.gateway.PaymentGatewayException;
@@ -18,9 +19,9 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Clock;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Set;
@@ -29,19 +30,22 @@ import java.util.Set;
 @Service
 @RequiredArgsConstructor
 public class BillingLifecycleService {
-    private static final Set<PaymentOrderStatus> OPEN =
-            Set.of(PaymentOrderStatus.PENDING, PaymentOrderStatus.PROCESSING);
+    private static final Set<PaymentOrderStatus> RECONCILABLE =
+            Set.of(PaymentOrderStatus.PENDING, PaymentOrderStatus.PROCESSING, PaymentOrderStatus.CANCELLED);
 
     private final BillingSubscriptionRepository subscriptionRepository;
     private final BillingPaymentOrderRepository paymentRepository;
     private final BillingFacade facade;
     private final ApplicationEventPublisher eventPublisher;
+    private final Clock clock;
     @Autowired(required = false)
     private DurableEventPublisher durableEventPublisher;
 
     @Scheduled(fixedDelayString = "${app.billing.reconciliation-interval-ms:300000}")
     public void reconcilePayments() {
-        for (BillingPaymentOrder order : paymentRepository.findTop100ByStatusInOrderByCreatedAtAsc(OPEN)) {
+        LocalDateTime now = LocalDateTime.now(clock);
+        for (BillingPaymentOrder order : paymentRepository
+                .findTop100ByStatusInAndExpiresAtAfterOrderByCreatedAtAsc(RECONCILABLE, now)) {
             try {
                 facade.reconcile(order.getId());
             } catch (PaymentGatewayException exception) {
@@ -55,7 +59,7 @@ public class BillingLifecycleService {
     @Scheduled(fixedDelayString = "${app.billing.lifecycle-interval-ms:60000}")
     @Transactional
     public void advanceSubscriptions() {
-        LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC);
+        LocalDateTime now = LocalDateTime.now(clock);
         List<BillingSubscription> subscriptions = subscriptionRepository.findByStatusIn(
                 Set.of(BillingStatus.TRIAL, BillingStatus.ACTIVE, BillingStatus.GRACE));
         for (BillingSubscription subscription : subscriptions) {
@@ -86,8 +90,10 @@ public class BillingLifecycleService {
             LocalDate today = now.toLocalDate();
             if (subscription.getLastGraceReminderAt() == null
                     || subscription.getLastGraceReminderAt().toLocalDate().isBefore(today)) {
+                String plan = displayPlan(subscription.getPlanCode());
                 publishBusinessEvent(new BillingNoticeEvent(subscription.getTenantId(), "BILLING_GRACE",
-                        "Your Pro subscription is in grace", "Renew Pro before the grace period ends to keep Pro access."));
+                        "Your " + plan + " subscription is in grace",
+                        "Renew " + plan + " before the grace period ends to keep paid access."));
                 subscription.setLastGraceReminderAt(now);
             }
             return;
@@ -106,9 +112,15 @@ public class BillingLifecycleService {
     }
 
     private void recordRenewal(BillingSubscription subscription, LocalDateTime now, int days) {
+        String plan = displayPlan(subscription.getPlanCode());
         publishBusinessEvent(new BillingNoticeEvent(subscription.getTenantId(), "BILLING_RENEWAL",
-                "Pro renewal due in " + days + (days == 1 ? " day" : " days"),
-                "Create a new PayOS checkout to renew your prepaid Pro subscription."));
+                plan + " renewal due in " + days + (days == 1 ? " day" : " days"),
+                "Create a new PayOS checkout to renew your prepaid " + plan + " subscription."));
+    }
+
+    private String displayPlan(BillingPlanCode code) {
+        String value = code.name().toLowerCase();
+        return Character.toUpperCase(value.charAt(0)) + value.substring(1);
     }
 
     private void publishBusinessEvent(Object event) {

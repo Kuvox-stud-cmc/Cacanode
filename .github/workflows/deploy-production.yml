@@ -14,8 +14,53 @@ permissions:
   contents: read
 
 jobs:
-  test:
-    name: Modular monolith contract and integration tests
+  backend:
+    name: Java API verification
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+      rabbitmq:
+        image: rabbitmq:3-management-alpine
+        env:
+          RABBITMQ_DEFAULT_USER: rag_user
+          RABBITMQ_DEFAULT_PASS: rag_password
+        ports:
+          - 5672:5672
+        options: >-
+          --health-cmd "rabbitmq-diagnostics -q ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      REDIS_TEST_URL: redis://localhost:6379/0
+      RABBITMQ_TEST_URL: amqp://rag_user:rag_password@localhost:5672/
+
+    steps:
+      - name: Check out revision
+        uses: actions/checkout@v5
+
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: Run strict Java verification with Testcontainers
+        working-directory: api
+        run: make verify
+
+  python:
+    name: Python AI service checks
     runs-on: ubuntu-latest
     timeout-minutes: 30
     services:
@@ -68,16 +113,71 @@ jobs:
           .venv/bin/python -m pip install -e '.[dev]'
           make check
 
-      - name: Set up Java
-        uses: actions/setup-java@v5
-        with:
-          distribution: temurin
-          java-version: "21"
-          cache: maven
+  frontend:
+    name: Frontend checks and production build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
 
-      - name: Run Java contract tests
-        working-directory: api
-        run: sh mvnw test
+    steps:
+      - name: Check out revision
+        uses: actions/checkout@v5
+
+      - name: Set up Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Run frontend acceptance checks
+        working-directory: frontend
+        env:
+          NEXT_PUBLIC_RECRUITMENT_ENABLED: "true"
+        run: |
+          npm run lint
+          npm run typecheck
+          npm run i18n:check
+          npm test
+          npm run build
+
+      - name: Install Playwright Chromium
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+
+      - name: Run recruitment desktop and mobile acceptance flows
+        working-directory: frontend
+        run: npm run test:e2e
+
+  mobile:
+    name: Mobile checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out revision
+        uses: actions/checkout@v5
+
+      - name: Set up Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+
+      - name: Install mobile dependencies
+        working-directory: mobile
+        run: npm ci
+
+      - name: Run complete mobile checks
+        working-directory: mobile
+        run: |
+          npm run lint
+          npm run typecheck
+          npm test -- --runInBand
 
   validate:
     name: Validate deployment configuration
@@ -92,7 +192,8 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
-          bash -n deploy/bootstrap-ubuntu.sh deploy/deploy.sh deploy/smoke-test.sh
+          bash -n deploy/*.sh
+          docker compose --env-file .env.example -f docker-compose.yml config --quiet
           docker compose --env-file .env.production.example -f docker-compose.prod.yml config --quiet
           docker compose --env-file .env.production.example -f docker-compose.prod.yml \
             --profile dedicated-workers config --quiet
@@ -114,9 +215,12 @@ jobs:
             -v "${PWD}/deploy/Caddyfile:/etc/caddy/Caddyfile:ro" \
             caddy:2-alpine caddy validate --config /etc/caddy/Caddyfile
 
+      - name: Reject whitespace errors
+        run: git diff --check
+
   deploy:
     name: Deploy to DigitalOcean
-    needs: [validate, test]
+    needs: [backend, python, frontend, mobile, validate]
     runs-on: ubuntu-latest
     environment: production
     timeout-minutes: 45

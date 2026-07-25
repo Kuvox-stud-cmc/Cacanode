@@ -23,9 +23,11 @@ public class BillingNotificationListener {
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void activated(BillingActivatedEvent event) {
         if (inboxService != null && !inboxService.claim("notification.billing-activated")) return;
+        String plan = event.effectivePlanCode().charAt(0)
+                + event.effectivePlanCode().substring(1).toLowerCase();
         notificationService.recordBillingNotice(
-                event.tenantId(), NotificationType.BILLING_RENEWAL, "Pro subscription activated",
-                "Your " + event.interval().toLowerCase() + " Pro access is paid through "
+                event.tenantId(), NotificationType.BILLING_RENEWAL, plan + " subscription activated",
+                "Your " + event.interval().toLowerCase() + " " + plan + " access is paid through "
                         + event.paidThroughAt() + ".");
     }
 

@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cacanode.local/contracts/ai-interview/v1/resume-analysis-request-v1.1.schema.json",
+  "title": "Resume analysis request v1.1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version","event_id","event_type","occurred_at","tenant_id","aggregate_id","analysis_id","application_id","document_id","storage_key","file_name","content_type","file_size_bytes","requested_language_tag","cv_sha256","analysis_mode","policy_version","model_version","job_title","job_description","allowed_core_section_ids","template_questions","personalized_question_limit"],
+  "properties": {
+    "schema_version": {"const":"1.1"}, "event_id": {"type":"string","format":"uuid"},
+    "event_type": {"const":"interview.resume-analysis.requested"}, "occurred_at": {"type":"string","format":"date-time"},
+    "tenant_id": {"type":"string","format":"uuid"}, "aggregate_id": {"type":"string","format":"uuid"},
+    "analysis_id": {"type":"string","format":"uuid"}, "application_id": {"type":"string","format":"uuid"},
+    "document_id": {"type":"string","format":"uuid"},
+    "storage_key": {"type":"string","minLength":1,"maxLength":512,"pattern":"^recruitment/[0-9a-f-]{36}/applications/"},
+    "file_name": {"type":"string","minLength":1,"maxLength":255},
+    "content_type": {"enum":["application/pdf","application/vnd.openxmlformats-officedocument.wordprocessingml.document"]},
+    "file_size_bytes": {"type":"integer","minimum":1,"maximum":5242880},
+    "requested_language_tag": {"enum":["vi-VN","en-US"]},
+    "cv_sha256": {"type":"string","pattern":"^[0-9a-f]{64}$"},
+    "analysis_mode": {"enum":["SUMMARY_ONLY","PERSONALIZED_QUESTIONS"]},
+    "policy_version": {"type":"string","minLength":1,"maxLength":80},
+    "model_version": {"type":"string","minLength":1,"maxLength":120},
+    "job_title": {"type":"string","minLength":1,"maxLength":200},
+    "job_description": {"type":"string","maxLength":4000},
+    "allowed_core_section_ids": {"type":"array","minItems":1,"maxItems":10,"uniqueItems":true,"items":{"type":"string","format":"uuid"}},
+    "template_questions": {"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["question_id","section_id","prompt","competency"],"properties":{"question_id":{"type":"string","format":"uuid"},"section_id":{"type":"string","format":"uuid"},"prompt":{"type":"string","minLength":1,"maxLength":1000},"competency":{"type":"string","minLength":1,"maxLength":200}}}},
+    "personalized_question_limit": {"enum":[0,2]}
+  },
+  "allOf": [
+    {"if":{"properties":{"analysis_mode":{"const":"SUMMARY_ONLY"}}},"then":{"properties":{"personalized_question_limit":{"const":0}}}},
+    {"if":{"properties":{"analysis_mode":{"const":"PERSONALIZED_QUESTIONS"}}},"then":{"properties":{"personalized_question_limit":{"const":2}}}}
+  ]
+}

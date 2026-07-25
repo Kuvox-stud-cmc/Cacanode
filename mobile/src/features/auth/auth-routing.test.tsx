@@ -14,6 +14,7 @@ import {
 } from '@/features/auth/store/auth-slice';
 import { tokenVault } from '@/services/auth/token-vault';
 import { createAppStore } from '@/store';
+import type { AuthUser } from '@/types/auth';
 
 jest.mock('expo-router', () => ({
   Redirect: jest.fn(() => null),
@@ -36,7 +37,7 @@ const user = {
   fullName: 'Person Name',
   role: 'TENANT_ADMIN',
   plan: 'PRO',
-};
+} satisfies AuthUser;
 
 async function renderWithStore(element: React.ReactElement, store = createAppStore()) {
   const screen = await render(<Provider store={store}>{element}</Provider>);

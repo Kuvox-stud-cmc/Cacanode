@@ -7,11 +7,17 @@ import com.cacanode.api.common.exception.custom.InternalServerErrorException;
 import com.cacanode.api.common.exception.custom.ResourceNotFoundException;
 import com.cacanode.api.common.exception.custom.UnauthorizedException;
 import com.cacanode.api.billing.gateway.PaymentGatewayException;
+import com.cacanode.api.recruitment.exception.PublicRecruitmentRateLimitException;
+import com.cacanode.api.recruitment.exception.PublicRecruitmentUnavailableException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingServletRequestParameterException;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -24,13 +30,31 @@ import java.util.List;
 @Slf4j
 public class GlobalExceptionHandler {
 
+    @ExceptionHandler(PublicRecruitmentRateLimitException.class)
+    public ResponseEntity<ErrorResponse> handleRecruitmentRateLimit(
+            PublicRecruitmentRateLimitException e, WebRequest request) {
+        ErrorResponse body = ErrorResponse.builder().timestamp(LocalDateTime.now()).status(429)
+                .path(safePath(request))
+                .error("Too Many Requests").message(e.getMessage()).build();
+        return ResponseEntity.status(429).header("Retry-After", Long.toString(e.retryAfterSeconds())).body(body);
+    }
+
+    @ExceptionHandler(PublicRecruitmentUnavailableException.class)
+    @ResponseStatus(HttpStatus.SERVICE_UNAVAILABLE)
+    public ErrorResponse handleRecruitmentUnavailable(
+            PublicRecruitmentUnavailableException e, WebRequest request) {
+        return ErrorResponse.builder().timestamp(LocalDateTime.now()).status(503)
+                .path(safePath(request))
+                .error(HttpStatus.SERVICE_UNAVAILABLE.getReasonPhrase()).message(e.getMessage()).build();
+    }
+
     @ExceptionHandler(AccessDeniedException.class)
     @ResponseStatus(HttpStatus.FORBIDDEN)
     public ErrorResponse handleAccessDeniedException(AccessDeniedException e, WebRequest request) {
         return ErrorResponse.builder()
                 .timestamp(LocalDateTime.now())
                 .status(HttpStatus.FORBIDDEN.value())
-                .path(request.getDescription(false).replace("uri=", ""))
+                .path(safePath(request))
                 .error(HttpStatus.FORBIDDEN.getReasonPhrase())
                 .message("You do not have permission to perform this action")
                 .build();
@@ -47,7 +71,7 @@ public class GlobalExceptionHandler {
         return ErrorResponse.builder()
                 .timestamp(LocalDateTime.now())
                 .status(HttpStatus.NOT_FOUND.value())
-                .path(request.getDescription(false).replace("uri=", ""))
+                .path(safePath(request))
                 .error(HttpStatus.NOT_FOUND.getReasonPhrase())
                 .message(e.getMessage())
                 .build();
@@ -63,7 +87,7 @@ public class GlobalExceptionHandler {
         return ErrorResponse.builder()
                 .timestamp(LocalDateTime.now())
                 .status(HttpStatus.BAD_REQUEST.value())
-                .path(request.getDescription(false).replace("uri=", ""))
+                .path(safePath(request))
                 .error(HttpStatus.BAD_REQUEST.getReasonPhrase())
                 .message(e.getMessage())
                 .build();
@@ -87,14 +111,28 @@ public class GlobalExceptionHandler {
                 .distinct()
                 .toList();
         log.warn("Validation failed: path={}, fields={}",
-                request.getDescription(false).replace("uri=", ""), fields);
+                safePath(request), fields);
 
         return ErrorResponse.builder()
                 .timestamp(LocalDateTime.now())
                 .status(HttpStatus.BAD_REQUEST.value())
-                .path(request.getDescription(false).replace("uri=", ""))
+                .path(safePath(request))
                 .error(HttpStatus.BAD_REQUEST.getReasonPhrase())
                 .message(errors)
+                .build();
+    }
+
+    @ExceptionHandler({MethodArgumentTypeMismatchException.class,
+            HttpMessageNotReadableException.class, MissingServletRequestParameterException.class,
+            jakarta.validation.ConstraintViolationException.class})
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    public ErrorResponse handleRequestInputException(Exception e, WebRequest request) {
+        return ErrorResponse.builder()
+                .timestamp(LocalDateTime.now())
+                .status(HttpStatus.BAD_REQUEST.value())
+                .path(safePath(request))
+                .error(HttpStatus.BAD_REQUEST.getReasonPhrase())
+                .message("Invalid request input")
                 .build();
     }
 
@@ -109,7 +147,7 @@ public class GlobalExceptionHandler {
         return ErrorResponse.builder()
                 .timestamp(LocalDateTime.now())
                 .status(HttpStatus.UNAUTHORIZED.value())
-                .path(request.getDescription(false).replace("uri=", ""))
+                .path(safePath(request))
                 .error(HttpStatus.UNAUTHORIZED.getReasonPhrase())
                 .message(e.getMessage())
                 .build();
@@ -125,7 +163,7 @@ public class GlobalExceptionHandler {
         return ErrorResponse.builder()
                 .timestamp(LocalDateTime.now())
                 .status(HttpStatus.CONFLICT.value())
-                .path(request.getDescription(false).replace("uri=", ""))
+                .path(safePath(request))
                 .error(HttpStatus.CONFLICT.getReasonPhrase())
                 .message(e.getMessage())
                 .build();
@@ -141,7 +179,7 @@ public class GlobalExceptionHandler {
         return ErrorResponse.builder()
                 .timestamp(LocalDateTime.now())
                 .status(HttpStatus.INTERNAL_SERVER_ERROR.value())
-                .path(request.getDescription(false).replace("uri=", ""))
+                .path(safePath(request))
                 .error(HttpStatus.INTERNAL_SERVER_ERROR.getReasonPhrase())
                 .message(e.getMessage())
                 .build();
@@ -154,7 +192,7 @@ public class GlobalExceptionHandler {
         return ErrorResponse.builder()
                 .timestamp(LocalDateTime.now())
                 .status(HttpStatus.BAD_GATEWAY.value())
-                .path(request.getDescription(false).replace("uri=", ""))
+                .path(safePath(request))
                 .error(HttpStatus.BAD_GATEWAY.getReasonPhrase())
                 .message(e.getMessage())
                 .build();
@@ -170,9 +208,14 @@ public class GlobalExceptionHandler {
         return ErrorResponse.builder()
                 .timestamp(LocalDateTime.now())
                 .status(HttpStatus.INTERNAL_SERVER_ERROR.value())
-                .path(request.getDescription(false).replace("uri=", ""))
+                .path(safePath(request))
                 .error(HttpStatus.INTERNAL_SERVER_ERROR.getReasonPhrase())
                 .message("An unexpected error occurred")
                 .build();
+    }
+
+    private static String safePath(WebRequest request) {
+        return request.getDescription(false).replace("uri=", "")
+                .replaceAll("(/api/v1/public/interview-invitations/)[^/?]+", "$1[redacted]");
     }
 }

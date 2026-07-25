@@ -3,6 +3,7 @@ package com.cacanode.api.analytics.api;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 public final class AnalyticsDtos {
@@ -78,5 +79,28 @@ public final class AnalyticsDtos {
             List<DailyVolume> dailyMessageVolume,
             List<PopularQuestion> popularQuestions
     ) {
+    }
+
+    public record RecruitmentAnalyticsResponse(
+            int days,
+            LocalDate periodStart,
+            LocalDate periodEnd,
+            CountMetric jobsPublished,
+            CountMetric verifiedApplicationsSubmitted,
+            CountMetric completedInterviews,
+            CountMetric unsuccessfulInterviews,
+            Map<String, Long> jobStatusDistribution,
+            Map<String, Long> applicationStatusDistribution,
+            Map<String, Long> interviewStatusDistribution,
+            List<DailyVolume> dailyApplicationVolume,
+            List<DailyVolume> dailyInterviewCompletionVolume
+    ) {
+        public RecruitmentAnalyticsResponse {
+            jobStatusDistribution = Map.copyOf(jobStatusDistribution);
+            applicationStatusDistribution = Map.copyOf(applicationStatusDistribution);
+            interviewStatusDistribution = Map.copyOf(interviewStatusDistribution);
+            dailyApplicationVolume = List.copyOf(dailyApplicationVolume);
+            dailyInterviewCompletionVolume = List.copyOf(dailyInterviewCompletionVolume);
+        }
     }
 }

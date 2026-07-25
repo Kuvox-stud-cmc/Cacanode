@@ -1,0 +1,97 @@
+name: Recruitment protected GA activation
+
+on:
+  workflow_dispatch:
+    inputs:
+      tenant_id:
+        description: Tenant UUID to promote to GA
+        required: true
+        type: string
+      current_version:
+        description: Current optimistic activation version
+        required: true
+        type: number
+      approval_ticket:
+        description: Legal/privacy approval ticket reference
+        required: true
+        type: string
+      restore_drill_evidence:
+        description: Successful restore-drill evidence URL/reference
+        required: true
+        type: string
+      sandbox_evidence:
+        description: Successful Twilio sandbox workflow URL/reference
+        required: true
+        type: string
+      english_call_evidence:
+        description: Successful protected English call workflow URL/reference
+        required: true
+        type: string
+      vietnamese_call_evidence:
+        description: Successful protected Vietnamese call workflow URL/reference
+        required: true
+        type: string
+      public_discovery:
+        description: Enable public discovery after GA promotion
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    environment: recruitment-ga
+    timeout-minutes: 10
+    steps:
+      - name: Validate GA evidence and protected secrets
+        env:
+          API_BASE_URL: ${{ secrets.RECRUITMENT_GA_API_BASE_URL }}
+          PLATFORM_TOKEN: ${{ secrets.RECRUITMENT_GA_PLATFORM_ADMIN_TOKEN }}
+          TENANT_ID: ${{ inputs.tenant_id }}
+          APPROVAL_TICKET: ${{ inputs.approval_ticket }}
+          RESTORE_EVIDENCE: ${{ inputs.restore_drill_evidence }}
+          SANDBOX_EVIDENCE: ${{ inputs.sandbox_evidence }}
+          ENGLISH_EVIDENCE: ${{ inputs.english_call_evidence }}
+          VIETNAMESE_EVIDENCE: ${{ inputs.vietnamese_call_evidence }}
+        run: |
+          set -Eeuo pipefail
+          test -n "${API_BASE_URL}"
+          test -n "${PLATFORM_TOKEN}"
+          test -n "${APPROVAL_TICKET}"
+          test -n "${RESTORE_EVIDENCE}"
+          test -n "${SANDBOX_EVIDENCE}"
+          test -n "${ENGLISH_EVIDENCE}"
+          test -n "${VIETNAMESE_EVIDENCE}"
+          [[ "${TENANT_ID}" =~ ^[0-9a-fA-F-]{36}$ ]]
+
+      - name: Promote tenant through the audited platform API
+        env:
+          API_BASE_URL: ${{ secrets.RECRUITMENT_GA_API_BASE_URL }}
+          PLATFORM_TOKEN: ${{ secrets.RECRUITMENT_GA_PLATFORM_ADMIN_TOKEN }}
+          TENANT_ID: ${{ inputs.tenant_id }}
+        run: |
+          set -Eeuo pipefail
+          jq -n \
+            --argjson version '${{ inputs.current_version }}' \
+            --argjson discovery '${{ inputs.public_discovery }}' \
+            '{version:$version,rolloutStage:"GA",masterEnabled:true,automationEnabled:true,cvAiEnabled:true,callingEnabled:true,recordingEnabled:true,publicDiscoveryEnabled:$discovery}' \
+            > activation.json
+          curl --fail --silent --show-error \
+            -H "Authorization: Bearer ${PLATFORM_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -X PUT "${API_BASE_URL%/}/api/v1/platform/recruitment/tenants/${TENANT_ID}/activation" \
+            --data-binary @activation.json > activation-result.json
+          test "$(jq -r '.rolloutStage' activation-result.json)" = "GA"
+          printf 'Tenant `%s` promoted to GA. Public discovery: `%s`. Approval: `%s`.\n' \
+            '${{ inputs.tenant_id }}' '${{ inputs.public_discovery }}' '${{ inputs.approval_ticket }}' \
+            >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Retain GA activation evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: recruitment-ga-activation
+          path: activation-result.json
+          retention-days: 365

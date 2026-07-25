@@ -9,6 +9,7 @@ import com.cacanode.api.billing.api.BillingInterval;
 import com.cacanode.api.billing.api.BillingPlanCode;
 import com.cacanode.api.billing.api.BillingStatus;
 import com.cacanode.api.billing.api.PaymentOrderStatus;
+import com.cacanode.api.billing.api.HiringQuotaApi;
 import com.cacanode.api.billing.gateway.PaymentGateway;
 import com.cacanode.api.billing.gateway.PaymentGatewayException;
 import com.cacanode.api.billing.model.BillingPaymentOrder;
@@ -45,7 +46,6 @@ import org.springframework.context.event.EventListener;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.context.ApplicationEventPublisher;
-import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -53,10 +53,8 @@ import org.springframework.transaction.annotation.Transactional;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-import java.time.LocalDateTime;
-import java.time.LocalDate;
 import java.time.Clock;
-import java.time.ZoneOffset;
+import java.time.LocalDateTime;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
@@ -85,6 +83,7 @@ public class BillingFacade implements BillingModuleApi {
     private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper;
     private final ApplicationEventPublisher eventPublisher;
+    private final Clock clock;
     @Autowired(required = false)
     private VersionedJsonCache businessCache;
     @Autowired(required = false)
@@ -142,6 +141,31 @@ public class BillingFacade implements BillingModuleApi {
         long messages = longQuery(
                 "SELECT COALESCE((SELECT message_count FROM usage_metrics WHERE tenant_id = ? AND period_start = ?), 0)",
                 tenantId, period.start());
+        long verifiedApplications = longQuery(
+                "SELECT COALESCE((SELECT verified_application_count FROM usage_metrics WHERE tenant_id = ? AND period_start = ?), 0)",
+                tenantId, period.start());
+        long cvAnalyses = longQuery(
+                "SELECT COALESCE((SELECT cv_analysis_count FROM usage_metrics WHERE tenant_id = ? AND period_start = ?), 0)",
+                tenantId, period.start());
+        long interviewSeconds = longQuery(
+                "SELECT COALESCE((SELECT interview_seconds FROM usage_metrics WHERE tenant_id = ? AND period_start = ?), 0)",
+                tenantId, period.start());
+        long activeJobReservations = longQuery("""
+                SELECT COALESCE(SUM(reserved_amount), 0) FROM hiring_quota_reservations
+                WHERE tenant_id = ? AND quota_kind = 'ACTIVE_JOB' AND state = 'RESERVED'
+                """, tenantId);
+        long interviewReservations = longQuery("""
+                SELECT COALESCE(SUM(reserved_amount), 0) FROM hiring_quota_reservations
+                WHERE tenant_id = ? AND quota_kind = 'INTERVIEW_SECONDS' AND state = 'RESERVED' AND expires_at > ?
+                """, tenantId, now);
+        long recruitmentStorageUsed = longQuery("""
+                SELECT COALESCE(SUM(settled_amount), 0) FROM hiring_quota_reservations
+                WHERE tenant_id = ? AND quota_kind = 'RECRUITMENT_STORAGE' AND state = 'COMMITTED'
+                """, tenantId);
+        long recruitmentStorageReserved = longQuery("""
+                SELECT COALESCE(SUM(reserved_amount), 0) FROM hiring_quota_reservations
+                WHERE tenant_id = ? AND quota_kind = 'RECRUITMENT_STORAGE' AND state = 'RESERVED' AND expires_at > ?
+                """, tenantId, now);
         var documentUsage = documentApi.usage(tenantId);
         long documents = documentUsage.documentCount();
         long storageBytes = documentUsage.storageBytes();
@@ -155,7 +179,14 @@ public class BillingFacade implements BillingModuleApi {
                 subscription.getTrialEndsAt(), subscription.getPaidThroughAt(), subscription.getGraceEndsAt(),
                 period.start(), period.end(), usage(messages, entitlements.maxMessages()),
                 usage(documents, entitlements.maxDocuments()), usage(members, entitlements.maxTeamMembers()),
-                usage(storageMb, entitlements.maxStorageMb()), features(entitlements),
+                usage(storageMb, entitlements.maxStorageMb()),
+                hiringUsage(0, activeJobReservations, entitlements.maxActiveJobs()),
+                hiringUsage(verifiedApplications, 0, entitlements.maxVerifiedApplications()),
+                hiringUsage(interviewSeconds, interviewReservations, entitlements.maxInterviewSeconds()),
+                hiringUsage(cvAnalyses, 0, entitlements.maxCvAnalyses()),
+                hiringUsage(recruitmentStorageUsed, recruitmentStorageReserved,
+                        entitlements.maxRecruitmentStorageBytes()),
+                features(entitlements),
                 pending == null ? null : paymentResponse(pending), subscription.isCancelAtPeriodEnd());
     }
 
@@ -165,9 +196,9 @@ public class BillingFacade implements BillingModuleApi {
             UUID tenantId, UUID userId, BillingDtos.CheckoutRequest request, String idempotencyKey
     ) {
         lockOrCreateTrial(tenantId);
-        if (request.planCode() != BillingPlanCode.PRO) {
+        if (request.planCode() != BillingPlanCode.PRO && request.planCode() != BillingPlanCode.BUSINESS) {
             throw new BadRequestException(request.planCode() == BillingPlanCode.ENTERPRISE
-                    ? "Enterprise is provisioned through sales" : "Only Pro can be purchased through checkout");
+                    ? "Enterprise is provisioned through sales" : "Only Pro and Business can be purchased through checkout");
         }
         String normalizedKey = normalizeIdempotencyKey(idempotencyKey);
         if (normalizedKey != null) {
@@ -186,11 +217,11 @@ public class BillingFacade implements BillingModuleApi {
         order.setTenantId(tenantId);
         order.setUserId(userId);
         order.setOrderCode(nextOrderCode());
-        order.setRequestedPlan(BillingPlanCode.PRO);
+        order.setRequestedPlan(request.planCode());
         order.setBillingInterval(request.interval());
         order.setAmountVnd(catalog.price(request.planCode(), request.interval()));
         order.setCatalogVersion(catalog.version());
-        order.setEntitlementSnapshot(catalog.entitlements(BillingPlanCode.PRO));
+        order.setEntitlementSnapshot(catalog.entitlements(request.planCode()));
         order.setExpiresAt(expiresAt);
         order.setStatus(PaymentOrderStatus.PENDING);
         order.setClientIdempotencyKey(normalizedKey);
@@ -208,7 +239,7 @@ public class BillingFacade implements BillingModuleApi {
         try {
             PaymentGateway.CreatedPayment created = paymentGateway.createPayment(new PaymentGateway.CreatePayment(
                     order.getOrderCode(), order.getAmountVnd(), transferDescription(order.getOrderCode()),
-                    request.interval() == BillingInterval.MONTHLY ? "CacaNode Pro monthly" : "CacaNode Pro annual",
+                    "CacaNode " + displayPlan(request.planCode()) + " " + request.interval().name().toLowerCase(),
                     appendPaymentId(properties.getFrontendReturnUrl(), order.getId()),
                     appendPaymentId(properties.getFrontendCancelUrl(), order.getId()), expiresAt));
             order.setPaymentLinkId(created.paymentLinkId());
@@ -226,9 +257,13 @@ public class BillingFacade implements BillingModuleApi {
     @Override
     @Transactional
     public BillingDtos.PaymentResponse payment(UUID tenantId, UUID paymentId) {
-        BillingPaymentOrder order = paymentRepository.findByIdAndTenantIdForUpdate(paymentId, tenantId)
+        BillingPaymentOrder candidate = paymentRepository.findByIdAndTenantId(paymentId, tenantId)
                 .orElseThrow(() -> new ResourceNotFoundException("Payment was not found"));
-        reconcileOpenOrder(order);
+        BillingSubscription subscription = subscriptionRepository.findByTenantIdForUpdate(tenantId)
+                .orElseThrow(() -> new ResourceNotFoundException("Billing account was not found"));
+        BillingPaymentOrder order = paymentRepository.findByIdAndTenantIdForUpdate(candidate.getId(), tenantId)
+                .orElseThrow(() -> new ResourceNotFoundException("Payment was not found"));
+        reconcileOpenOrder(order, subscription);
         return paymentResponse(order);
     }
 
@@ -241,7 +276,8 @@ public class BillingFacade implements BillingModuleApi {
             moveToStarter(subscription, utcNow());
             return new BillingDtos.DowngradeResponse(false, utcNow(), loadAccountAuthoritative(tenantId));
         }
-        if (subscription.getPlanCode() == BillingPlanCode.PRO) {
+        if (subscription.getPlanCode() == BillingPlanCode.PRO
+                || subscription.getPlanCode() == BillingPlanCode.BUSINESS) {
             subscription.setCancelAtPeriodEnd(true);
             invalidateBilling(tenantId);
             return new BillingDtos.DowngradeResponse(true, subscription.getGraceEndsAt(),
@@ -270,12 +306,15 @@ public class BillingFacade implements BillingModuleApi {
             throw new BadRequestException("Invalid PayOS webhook signature");
         }
 
-        BillingPaymentOrder order = paymentRepository.findByOrderCodeForUpdate(verified.orderCode()).orElse(null);
-        if (order == null) {
+        BillingPaymentOrder candidate = paymentRepository.findByOrderCode(verified.orderCode()).orElse(null);
+        if (candidate == null) {
             saveWebhook(null, verified.providerReference(), payloadHash, true, "UNKNOWN_ORDER", null);
             return;
         }
-        if (webhookRepository.findByPayloadHash(payloadHash).isPresent()) {
+        BillingSubscription subscription = subscriptionRepository.findByTenantIdForUpdate(candidate.getTenantId())
+                .orElseThrow(() -> new ResourceNotFoundException("Billing account was not found"));
+        BillingPaymentOrder order = paymentRepository.findByOrderCodeForUpdate(verified.orderCode()).orElse(null);
+        if (order == null || webhookRepository.findByPayloadHash(payloadHash).isPresent()) {
             return;
         }
         invalidateBilling(order.getTenantId());
@@ -297,18 +336,23 @@ public class BillingFacade implements BillingModuleApi {
             saveWebhook(order, verified.providerReference(), payloadHash, true, "IGNORED", null);
             return;
         }
-        activatePaidOrder(order, verified.providerReference(), utcNow());
-        saveWebhook(order, verified.providerReference(), payloadHash, true, "PAID", null);
+        activatePaidOrder(order, subscription, verified.providerReference(), utcNow());
+        saveWebhook(order, verified.providerReference(), payloadHash, true,
+                order.getStatus() == PaymentOrderStatus.REVIEW ? "REVIEW" : "PAID", order.getFailureReason());
     }
 
     @Transactional
     public void reconcile(UUID paymentId) {
+        BillingPaymentOrder candidate = paymentRepository.findById(paymentId).orElse(null);
+        if (candidate == null) return;
+        BillingSubscription subscription = subscriptionRepository.findByTenantIdForUpdate(candidate.getTenantId())
+                .orElseThrow(() -> new ResourceNotFoundException("Billing account was not found"));
         BillingPaymentOrder order = paymentRepository.findByIdForUpdate(paymentId).orElse(null);
-        reconcileOpenOrder(order);
+        reconcileOpenOrder(order, subscription);
     }
 
-    private void reconcileOpenOrder(BillingPaymentOrder order) {
-        if (order == null || !OPEN_PAYMENT_STATUSES.contains(order.getStatus())) {
+    private void reconcileOpenOrder(BillingPaymentOrder order, BillingSubscription subscription) {
+        if (order == null || !isReconcilable(order)) {
             return;
         }
         invalidateBilling(order.getTenantId());
@@ -327,7 +371,7 @@ public class BillingFacade implements BillingModuleApi {
                 order.setFailureReason("Paid amount did not match the payment order");
                 return;
             }
-            activatePaidOrder(order, provider.providerReference(), utcNow());
+            activatePaidOrder(order, subscription, provider.providerReference(), utcNow());
             return;
         }
         order.setStatus(provider.status());
@@ -335,19 +379,33 @@ public class BillingFacade implements BillingModuleApi {
         order.setFailureReason(null);
     }
 
-    private void activatePaidOrder(BillingPaymentOrder order, String providerReference, LocalDateTime paidAt) {
+    private boolean isReconcilable(BillingPaymentOrder order) {
+        return OPEN_PAYMENT_STATUSES.contains(order.getStatus())
+                || (order.getStatus() == PaymentOrderStatus.CANCELLED
+                && SUPERSEDED_PAYMENT_REASON.equals(order.getFailureReason()));
+    }
+
+    private void activatePaidOrder(BillingPaymentOrder order, BillingSubscription subscription,
+                                   String providerReference, LocalDateTime paidAt) {
         if (order.getStatus() == PaymentOrderStatus.PAID) {
             return;
         }
-        BillingSubscription subscription = subscriptionRepository.findByTenantIdForUpdate(order.getTenantId())
-                .orElseThrow(() -> new ResourceNotFoundException("Billing account was not found"));
-        boolean extendsExisting = subscription.getPlanCode() == BillingPlanCode.PRO
+        if (paymentRepository.existsSupersedingPaidOrder(
+                order.getTenantId(), order.getId(), order.getCreatedAt())) {
+            order.setStatus(PaymentOrderStatus.REVIEW);
+            order.setProviderReference(providerReference);
+            order.setFailureReason("A newer payment already activated this billing account");
+            return;
+        }
+        BillingPlanCode requestedPlan = order.getRequestedPlan();
+        boolean extendsExisting = subscription.getPlanCode() == requestedPlan
+                && (requestedPlan == BillingPlanCode.PRO || requestedPlan == BillingPlanCode.BUSINESS)
                 && subscription.getPaidThroughAt() != null
                 && (subscription.getStatus() == BillingStatus.ACTIVE || subscription.getStatus() == BillingStatus.GRACE);
         LocalDateTime base = extendsExisting ? subscription.getPaidThroughAt() : paidAt;
         LocalDateTime paidThrough = order.getBillingInterval() == BillingInterval.MONTHLY
                 ? base.plusMonths(1) : base.plusYears(1);
-        subscription.setPlanCode(BillingPlanCode.PRO);
+        subscription.setPlanCode(requestedPlan);
         subscription.setStatus(BillingStatus.ACTIVE);
         subscription.setBillingInterval(order.getBillingInterval());
         subscription.setCatalogVersion(order.getCatalogVersion());
@@ -376,12 +434,13 @@ public class BillingFacade implements BillingModuleApi {
                 .action(LogAction.BILLING_PAYMENT_ACTIVATED).resourceType("billing_payment")
                 .resourceId(order.getId()).metadata(Map.of(
                         "interval", order.getBillingInterval().name(),
+                        "planCode", requestedPlan.name(),
                         "amountVnd", order.getAmountVnd(),
                         "paidThroughAt", paidThrough.toString()))
                 .build());
         publishBusinessEvent("billing.activated.v1", new BillingActivatedEvent(
                 order.getTenantId(), order.getUserId(), order.getId(),
-                order.getBillingInterval().name(), paidThrough));
+                order.getBillingInterval().name(), paidThrough, requestedPlan.name()));
         invalidateBilling(order.getTenantId());
     }
 
@@ -435,12 +494,27 @@ public class BillingFacade implements BillingModuleApi {
         return new BillingDtos.UsageItem(used, limit, limit != null && used > limit);
     }
 
+    private BillingDtos.HiringUsageItem hiringUsage(long used, long reserved, Long limit) {
+        if (limit == null || limit < 0) {
+            throw new HiringQuotaApi.HiringQuotaException(
+                    "HIRING_QUOTA_NOT_CONFIGURED", "Hiring quota is not configured");
+        }
+        long total;
+        try {
+            total = Math.addExact(used, reserved);
+        } catch (ArithmeticException overflow) {
+            total = Long.MAX_VALUE;
+        }
+        return new BillingDtos.HiringUsageItem(used, reserved, limit, total > limit);
+    }
+
     private BillingDtos.Features features(EntitlementSnapshot e) {
         return new BillingDtos.Features(e.apiAccess(), e.webhooks(), e.advancedAnalytics(), e.customBranding());
     }
 
     private BillingDtos.CheckoutResponse checkoutResponse(BillingPaymentOrder order) {
-        return new BillingDtos.CheckoutResponse(order.getId(), order.getCheckoutUrl(), order.getExpiresAt());
+        return new BillingDtos.CheckoutResponse(order.getId(), order.getRequestedPlan(), order.getBillingInterval(),
+                order.getAmountVnd(), order.getCheckoutUrl(), order.getExpiresAt());
     }
 
     private BillingDtos.PaymentResponse paymentResponse(BillingPaymentOrder order) {
@@ -476,6 +550,11 @@ public class BillingFacade implements BillingModuleApi {
         return "CCN" + suffix;
     }
 
+    private String displayPlan(BillingPlanCode planCode) {
+        String value = planCode.name().toLowerCase();
+        return Character.toUpperCase(value.charAt(0)) + value.substring(1);
+    }
+
     private String appendPaymentId(String base, UUID paymentId) {
         return base + (base.contains("?") ? "&" : "?") + "paymentId=" + paymentId;
     }
@@ -490,7 +569,7 @@ public class BillingFacade implements BillingModuleApi {
     }
 
     private LocalDateTime utcNow() {
-        return LocalDateTime.now(ZoneOffset.UTC);
+        return LocalDateTime.now(clock);
     }
 
     private void publishBusinessEvent(String stableType, Object event) {
