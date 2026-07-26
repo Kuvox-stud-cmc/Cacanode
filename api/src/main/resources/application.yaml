@@ -38,6 +38,7 @@ logging:
 app:
   recruitment:
     enabled: ${RECRUITMENT_ENABLED:false}
+    auto-activate-new-tenants: ${RECRUITMENT_AUTO_ACTIVATE_NEW_TENANTS:false}
     activation:
       ga-unlocked: ${RECRUITMENT_GA_UNLOCKED:false}
     cost:

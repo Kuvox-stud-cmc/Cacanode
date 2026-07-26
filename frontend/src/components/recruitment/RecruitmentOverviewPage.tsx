@@ -29,7 +29,7 @@ export function RecruitmentOverviewPage() {
   return <div className="space-y-5" aria-live="polite">
     <div className="flex flex-wrap items-center justify-between gap-3">
       <div><h3 className="text-lg font-semibold">{t("overview.title")}</h3><p className="text-sm text-slate-500">{t("overview.description")}</p></div>
-      <div className="flex gap-2"><Button render={<Link href="/recruitment/jobs" />}>{t("overview.manageJobs")}</Button><Button variant="outline" render={<Link href="/recruitment/applications" />}>{t("overview.reviewApplications")}</Button></div>
+      <div className="flex gap-2"><Button nativeButton={false} render={<Link href="/recruitment/jobs" />}>{t("overview.manageJobs")}</Button><Button nativeButton={false} variant="outline" render={<Link href="/recruitment/applications" />}>{t("overview.reviewApplications")}</Button></div>
     </div>
     {error && <p role="alert" className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</p>}
     <div className="grid gap-4 md:grid-cols-3">{countGroups.map((name, index) => <Card key={name}><CardHeader><CardTitle className="text-base">{t(`nav.${name}`)}</CardTitle></CardHeader><CardContent className="space-y-2">{Object.entries(groups[index] ?? {}).map(([itemStatus, count]) => <div key={itemStatus} className="flex justify-between text-sm"><span>{itemStatus.replaceAll("_", " ")}</span><strong>{format.number(count)}</strong></div>)}{!data && <p className="text-sm text-slate-400">{t("loading")}</p>}</CardContent></Card>)}</div>

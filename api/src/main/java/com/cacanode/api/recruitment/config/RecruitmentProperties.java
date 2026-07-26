@@ -8,6 +8,7 @@ import org.springframework.validation.annotation.Validated;
 @ConfigurationProperties(prefix = "app.recruitment")
 public record RecruitmentProperties(
         boolean enabled,
+        boolean autoActivateNewTenants,
         boolean messagingEnabled,
         boolean publicJobsEnabled,
         boolean automationEnabled,
@@ -17,7 +18,7 @@ public record RecruitmentProperties(
 
     @AssertTrue(message = "Recruitment child flags require RECRUITMENT_ENABLED")
     public boolean isMasterFlagValid() {
-        return enabled || !(messagingEnabled || publicJobsEnabled || automationEnabled
+        return enabled || !(autoActivateNewTenants || messagingEnabled || publicJobsEnabled || automationEnabled
                 || cvAiEnabled || callingEnabled || recordingEnabled);
     }
 

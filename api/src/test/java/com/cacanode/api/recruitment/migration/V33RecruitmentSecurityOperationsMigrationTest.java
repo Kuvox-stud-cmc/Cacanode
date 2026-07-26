@@ -28,6 +28,9 @@ class V33RecruitmentSecurityOperationsMigrationTest {
 
     @Test void enforcesSingleInternalPilotPlanAndGaDiscovery() throws Exception {
         try(Connection connection=connect();Statement statement=connection.createStatement()) {
+            UUID automaticA=tenant(statement,"automatic-a"),automaticB=tenant(statement,"automatic-b");
+            statement.executeUpdate("UPDATE recruitment_tenant_activation SET rollout_stage='AUTO',master_enabled=true WHERE tenant_id='"+automaticA+"'");
+            statement.executeUpdate("UPDATE recruitment_tenant_activation SET rollout_stage='AUTO',master_enabled=true WHERE tenant_id='"+automaticB+"'");
             UUID first=tenant(statement,"internal-a"),second=tenant(statement,"internal-b");
             statement.executeUpdate("UPDATE recruitment_tenant_activation SET rollout_stage='INTERNAL',master_enabled=true WHERE tenant_id='"+first+"'");
             assertThrows(SQLException.class,()->statement.executeUpdate("UPDATE recruitment_tenant_activation SET rollout_stage='INTERNAL',master_enabled=true WHERE tenant_id='"+second+"'"));

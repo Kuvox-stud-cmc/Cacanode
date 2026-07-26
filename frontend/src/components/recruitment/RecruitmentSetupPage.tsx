@@ -18,8 +18,12 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
+import { useLocale } from "next-intl";
+import { formatEnumLabel, TIMEZONE_OPTIONS } from "@/lib/recruitment-formatters";
+
 export function RecruitmentSetupPage() {
   const t = useTranslations("Recruitment");
+  const locale = useLocale();
   const role = useAuthStore((state) => state.user?.role);
   const { request } = useApiClient();
   const [settings, setSettings] = useState<RecruitmentSettings | null>(null);
@@ -69,18 +73,29 @@ export function RecruitmentSetupPage() {
       <CardContent className="grid gap-4 sm:grid-cols-2">
         <Field label={t("setup.defaultAutomation")}>
           <Select value={settings.defaultAutomationMode} onValueChange={(value) => setSettings({ ...settings, defaultAutomationMode: value ?? settings.defaultAutomationMode })}>
-            <SelectTrigger aria-label={t("setup.defaultAutomation")}><SelectValue /></SelectTrigger>
-            <SelectContent>{["MANUAL", "AUTO_INVITE_ALL", "AUTO_INVITE_MATCHING"].map((value) => <SelectItem key={value} value={value}>{value.replaceAll("_", " ")}</SelectItem>)}</SelectContent>
+            <SelectTrigger aria-label={t("setup.defaultAutomation")}><SelectValue>{formatEnumLabel(settings.defaultAutomationMode, locale)}</SelectValue></SelectTrigger>
+            <SelectContent>{["MANUAL", "AUTO_INVITE_ALL", "AUTO_INVITE_MATCHING"].map((value) => <SelectItem key={value} value={value}>{formatEnumLabel(value, locale)}</SelectItem>)}</SelectContent>
           </Select>
         </Field>
         <Field label={t("setup.cvAiMode")}>
           <Select value={settings.cvAiMode} onValueChange={(value) => setSettings({ ...settings, cvAiMode: value ?? settings.cvAiMode })}>
-            <SelectTrigger aria-label={t("setup.cvAiMode")}><SelectValue /></SelectTrigger>
-            <SelectContent>{["OFF", "SUMMARY_ONLY", "PERSONALIZED_QUESTIONS"].map((value) => <SelectItem key={value} value={value}>{value.replaceAll("_", " ")}</SelectItem>)}</SelectContent>
+            <SelectTrigger aria-label={t("setup.cvAiMode")}><SelectValue>{formatEnumLabel(settings.cvAiMode, locale)}</SelectValue></SelectTrigger>
+            <SelectContent>{["OFF", "SUMMARY_ONLY", "PERSONALIZED_QUESTIONS"].map((value) => <SelectItem key={value} value={value}>{formatEnumLabel(value, locale)}</SelectItem>)}</SelectContent>
           </Select>
         </Field>
         <Field label={t("setup.timezone")}>
-          <Input aria-label={t("setup.timezone")} value={settings.schedulingTimezone} onChange={(event) => setSettings({ ...settings, schedulingTimezone: event.target.value })} />
+          <select
+            className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm"
+            aria-label={t("setup.timezone")}
+            value={settings.schedulingTimezone}
+            onChange={(event) => setSettings({ ...settings, schedulingTimezone: event.target.value })}
+          >
+            {TIMEZONE_OPTIONS.map((tz) => (
+              <option key={tz.value} value={tz.value}>
+                {tz.label}
+              </option>
+            ))}
+          </select>
         </Field>
         <NumberField label={t("setup.notice")} value={settings.minimumNoticeMinutes} onChange={(value) => setSettings({ ...settings, minimumNoticeMinutes: value })} />
         <NumberField label={t("setup.horizon")} value={settings.bookingHorizonDays} onChange={(value) => setSettings({ ...settings, bookingHorizonDays: value })} />
@@ -93,12 +108,39 @@ export function RecruitmentSetupPage() {
       </CardContent>
     </Card>}
     {availability && <Card>
-      <CardHeader><CardTitle className="text-base">{t("setup.availability")}</CardTitle></CardHeader>
+      <CardHeader className="flex flex-row items-center justify-between">
+        <CardTitle className="text-base">{t("setup.availability")}</CardTitle>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() =>
+            setAvailability({
+              ...availability,
+              weeklyWindows: [...availability.weeklyWindows, { dayOfWeek: 1, startLocal: "09:00", endLocal: "17:00" }],
+            })
+          }
+        >
+          + Add Window
+        </Button>
+      </CardHeader>
       <CardContent className="space-y-2">
-        {availability.weeklyWindows.map((window, index) => <div key={`${window.dayOfWeek}-${index}`} className="grid grid-cols-3 gap-2">
+        {availability.weeklyWindows.map((window, index) => <div key={`${window.dayOfWeek}-${index}`} className="grid grid-cols-4 gap-2 items-center">
           <Input aria-label={`${t("setup.dayOfWeek")} ${index + 1}`} type="number" min={1} max={7} value={window.dayOfWeek} onChange={(event) => setAvailability({ ...availability, weeklyWindows: availability.weeklyWindows.map((item, itemIndex) => itemIndex === index ? { ...item, dayOfWeek: Number(event.target.value) } : item) })} />
           <Input aria-label={`${t("setup.startTime")} ${index + 1}`} type="time" value={window.startLocal} onChange={(event) => setAvailability({ ...availability, weeklyWindows: availability.weeklyWindows.map((item, itemIndex) => itemIndex === index ? { ...item, startLocal: event.target.value } : item) })} />
           <Input aria-label={`${t("setup.endTime")} ${index + 1}`} type="time" value={window.endLocal} onChange={(event) => setAvailability({ ...availability, weeklyWindows: availability.weeklyWindows.map((item, itemIndex) => itemIndex === index ? { ...item, endLocal: event.target.value } : item) })} />
+          <Button
+            size="sm"
+            variant="ghost"
+            className="text-red-600 hover:bg-red-50"
+            onClick={() =>
+              setAvailability({
+                ...availability,
+                weeklyWindows: availability.weeklyWindows.filter((_, itemIndex) => itemIndex !== index),
+              })
+            }
+          >
+            Remove
+          </Button>
         </div>)}
       </CardContent>
     </Card>}

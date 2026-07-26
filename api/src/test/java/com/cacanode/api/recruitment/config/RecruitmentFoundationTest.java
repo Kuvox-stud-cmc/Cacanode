@@ -15,19 +15,21 @@ class RecruitmentFoundationTest {
     @Test
     void flagsDefaultOffAndInvalidCombinationsAreRejected() {
         RecruitmentProperties defaults = new RecruitmentProperties(
-                false, false, false, false, false, false, false);
+                false, false, false, false, false, false, false, false);
         assertTrue(defaults.isMasterFlagValid());
         assertTrue(defaults.isMessagingDependencyValid());
         assertTrue(defaults.isRecordingDependencyValid());
         assertTrue(defaults.isAutomationDependencyValid());
         assertFalse(new RecruitmentProperties(
-                false, true, false, false, false, false, false).isMasterFlagValid());
+                false, false, true, false, false, false, false, false).isMasterFlagValid());
         assertFalse(new RecruitmentProperties(
-                true, false, false, false, true, false, false).isMessagingDependencyValid());
+                false, true, false, false, false, false, false, false).isMasterFlagValid());
         assertFalse(new RecruitmentProperties(
-                true, true, false, false, false, false, true).isRecordingDependencyValid());
+                true, false, false, false, false, true, false, false).isMessagingDependencyValid());
         assertFalse(new RecruitmentProperties(
-                true, false, false, true, false, false, false).isAutomationDependencyValid());
+                true, false, true, false, false, false, false, true).isRecordingDependencyValid());
+        assertFalse(new RecruitmentProperties(
+                true, false, false, false, true, false, false, false).isAutomationDependencyValid());
     }
 
     @Test

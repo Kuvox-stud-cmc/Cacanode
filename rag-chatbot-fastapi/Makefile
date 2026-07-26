@@ -1,6 +1,18 @@
 .DEFAULT_GOAL := help
 
 PYTHON_MODE ?= venv
+
+# Automatically use the active Conda environment if one is activated
+ifdef CONDA_DEFAULT_ENV
+ifeq ($(PYTHON_MODE),venv)
+PYTHON_MODE = system
+endif
+# Fix for Conda on Windows: prevent httpx from crashing due to a missing SSL_CERT_FILE path
+ifeq ($(OS),Windows_NT)
+unexport SSL_CERT_FILE
+endif
+endif
+
 PYTHON ?= python
 CONDA ?= conda
 CONDA_ENV ?= rag-chatbot
@@ -44,6 +56,8 @@ endif
 
 ifeq ($(PYTHON_MODE),conda)
 PYTHON_RUN := $(CONDA) run --no-capture-output -n $(CONDA_ENV) python
+else ifeq ($(PYTHON_MODE),system)
+PYTHON_RUN := $(PYTHON)
 else
 PYTHON_RUN := $(VENV_PYTHON)
 endif
@@ -88,7 +102,9 @@ help:
 
 env:
 ifeq ($(PYTHON_MODE),conda)
-	@$(PYTHON_RUN) --version 1>&2
+	$(PYTHON_RUN) --version
+else ifeq ($(PYTHON_MODE),system)
+	$(PYTHON_RUN) --version
 else
 	@$(PYTHON) -m venv $(VENV)
 	@$(PYTHON_RUN) --version 1>&2

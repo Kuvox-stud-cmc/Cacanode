@@ -1,1 +1,5 @@
-import { RecruitmentListPage } from "@/components/recruitment/RecruitmentListPage";export default function Page(){return <RecruitmentListPage kind="schedule"/>}
+import { SchedulePage } from "@/components/recruitment/SchedulePage";
+
+export default function Page() {
+  return <SchedulePage />;
+}

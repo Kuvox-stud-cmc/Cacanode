@@ -10,7 +10,7 @@ public final class RecruitmentEnums {
     public enum WorkMode { ONSITE, REMOTE, HYBRID }
     public enum ExperienceLevel { ENTRY, JUNIOR, MID, SENIOR, LEAD, EXECUTIVE }
     public enum EmailTokenPurpose { VERIFICATION, MANAGEMENT, DELETION_CONFIRMATION }
-    public enum RolloutStage { OFF, INTERNAL, PILOT, GA }
+    public enum RolloutStage { OFF, AUTO, INTERNAL, PILOT, GA }
     public enum PrivacyDeletionRequesterKind { CANDIDATE, TENANT_ADMIN }
     public enum PrivacyDeletionStatus {
         PENDING_CONFIRMATION, PENDING, PROCESSING, RETRY, COMPLETED, EXHAUSTED, CANCELLED

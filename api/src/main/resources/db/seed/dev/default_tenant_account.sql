@@ -53,6 +53,44 @@ SET
     custom_branding_enabled = EXCLUDED.custom_branding_enabled,
     updated_at = NOW();
 
+-- The local development tenant always has Recruitment and AI Interview access.
+-- This deliberately overrides an OFF state whenever the development seed is rerun.
+INSERT INTO recruitment_tenant_activation (
+    tenant_id,
+    rollout_stage,
+    master_enabled,
+    automation_enabled,
+    cv_ai_enabled,
+    calling_enabled,
+    recording_enabled,
+    public_discovery_enabled,
+    created_at,
+    updated_at
+)
+VALUES (
+    (SELECT id FROM tenants WHERE slug = 'cacanode-demo'),
+    'AUTO',
+    TRUE,
+    TRUE,
+    TRUE,
+    TRUE,
+    TRUE,
+    FALSE,
+    NOW(),
+    NOW()
+)
+ON CONFLICT (tenant_id) DO UPDATE
+SET
+    rollout_stage = EXCLUDED.rollout_stage,
+    master_enabled = EXCLUDED.master_enabled,
+    automation_enabled = EXCLUDED.automation_enabled,
+    cv_ai_enabled = EXCLUDED.cv_ai_enabled,
+    calling_enabled = EXCLUDED.calling_enabled,
+    recording_enabled = EXCLUDED.recording_enabled,
+    public_discovery_enabled = EXCLUDED.public_discovery_enabled,
+    version = recruitment_tenant_activation.version + 1,
+    updated_at = NOW();
+
 INSERT INTO users (
     id,
     tenant_id,

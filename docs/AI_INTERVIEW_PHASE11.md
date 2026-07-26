@@ -12,6 +12,8 @@ Phase 11 adds a second, operator-owned rollout boundary around the existing depl
 
 Platform admins manage gates through `GET|PUT /api/v1/platform/recruitment/tenants/{tenantId}/activation`. Updates are optimistic, audited, and reconcile public projections. Only one tenant may be `INTERNAL`; `PILOT` is restricted to Pro and Business; `GA` is refused unless `RECRUITMENT_GA_UNLOCKED=true`. Public discovery additionally requires a GA tenant and the tenant discovery gate. Internal and pilot jobs remain available only by direct public job ID.
 
+Set `RECRUITMENT_AUTO_ACTIVATE_NEW_TENANTS=true` to grant newly created tenants the deployment-enabled recruitment capabilities immediately. These tenants use the `AUTO` rollout stage, which supports multiple tenants and never enables public discovery. The setting defaults to `false`, does not change existing tenants, and does not overwrite later platform-admin activation decisions.
+
 Recommended rollout:
 
 1. Deploy with all global and tenant gates off.

@@ -12,8 +12,14 @@ TEST_ENV_FILE ?=
 ROOT_COMPOSE_FILE ?= ../docker-compose.yml
 DEV_SEED_FILE ?= src/main/resources/db/seed/dev/default_tenant_account.sql
 
+ifneq (,$(wildcard $(ENV_FILE)))
+include $(ENV_FILE)
+export
+endif
+
 ifeq ($(OS),Windows_NT)
-MVNW ?= ./mvnw.cmd
+SHELL := cmd.exe
+MVNW ?= mvnw.cmd
 ENV_RUN ?=
 VENV_PYTHON := $(VENV)/Scripts/python.exe
 REMOVE := powershell -NoProfile -Command Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
@@ -30,7 +36,7 @@ else
 TEST_ENV_RUN :=
 endif
 
-FLYWAY_PROPS = -Dflyway.url="$${POSTGRES_URL}" -Dflyway.user="$${POSTGRES_USER}" -Dflyway.password="$${POSTGRES_PASSWORD}" -Dflyway.locations=filesystem:src/main/resources/db/migration
+FLYWAY_PROPS = -Dflyway.url="$(POSTGRES_URL)" -Dflyway.user="$(POSTGRES_USER)" -Dflyway.password="$(POSTGRES_PASSWORD)" -Dflyway.locations=filesystem:src/main/resources/db/migration
 
 .PHONY: help deps run dev run-dev run-prod test verify package clean migrate migrate-info migrate-validate migrate-repair migrate-baseline db-reset db-seed db-reset-seed baseline-credentials
 
@@ -103,7 +109,7 @@ db-reset:
 	$(MAKE) migrate ENV_FILE=$(ENV_FILE)
 
 db-seed:
-	$(ENV_RUN) docker compose --env-file $(ENV_FILE) -f $(ROOT_COMPOSE_FILE) exec -T postgres psql -v ON_ERROR_STOP=1 -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}" < $(DEV_SEED_FILE)
+	$(ENV_RUN) docker compose --env-file $(ENV_FILE) -f $(ROOT_COMPOSE_FILE) exec -T postgres psql -v ON_ERROR_STOP=1 -U "$(POSTGRES_USER)" -d "$(POSTGRES_DB)" < $(DEV_SEED_FILE)
 
 db-reset-seed: db-reset db-seed
 
