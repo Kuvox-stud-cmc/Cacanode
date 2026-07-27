@@ -52,8 +52,8 @@ app:
     automation-enabled: ${RECRUITMENT_AUTOMATION_ENABLED:false}
     cv-ai-enabled: ${RECRUITMENT_CV_AI_ENABLED:false}
     cv-analysis:
-      policy-version: ${CV_ANALYSIS_POLICY_VERSION:cv-redaction-v1}
-      model-version: ${CV_ANALYSIS_MODEL_VERSION:resume-analysis-v1}
+      policy-version: ${CV_ANALYSIS_POLICY_VERSION:cv-redaction-fit-v2}
+      model-version: ${CV_ANALYSIS_MODEL_VERSION:resume-analysis-v2}
       max-extracted-characters: ${CV_ANALYSIS_MAX_EXTRACTED_CHARACTERS:50000}
       max-evidence-segments: ${CV_ANALYSIS_MAX_EVIDENCE_SEGMENTS:250}
       max-personalized-questions: ${CV_ANALYSIS_MAX_PERSONALIZED_QUESTIONS:2}

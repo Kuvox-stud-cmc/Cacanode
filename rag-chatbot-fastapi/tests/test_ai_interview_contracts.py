@@ -29,7 +29,7 @@ SEMANTIC_KEYS = {
 
 def test_all_ai_interview_fixtures_validate_parse_and_use_uuidv5() -> None:
     fixtures = sorted(CONTRACTS.glob("*.fixture.json"))
-    assert len(fixtures) == 17
+    assert len(fixtures) == 19
     for fixture_path in fixtures:
         schema_path = fixture_path.with_name(
             fixture_path.name.replace(".fixture.json", ".schema.json")
@@ -47,6 +47,15 @@ def test_all_ai_interview_fixtures_validate_parse_and_use_uuidv5() -> None:
                     f"{payload['provider'].lower()}:{payload['capability'].lower()}:"
                     f"v{event.schema_version}"
                 )
+            elif event.event_type.startswith("interview.resume-analysis."):
+                semantic_key = (
+                    f"requested:v1.2:revision:{payload['analysis_revision']}"
+                    if event.event_type == "interview.resume-analysis.requested"
+                    else f"outcome:v1.2:revision:{payload['analysis_revision']}"
+                ) if event.schema_version == "1.2" else {
+                    "interview.resume-analysis.requested": "requested:v1.1",
+                    "interview.resume-analysis.outcome": "outcome:v1.1",
+                }[event.event_type]
             else:
                 semantic_key = {
                     "interview.resume-analysis.requested": "requested:v1.1",
@@ -62,6 +71,7 @@ def test_all_ai_interview_fixtures_validate_parse_and_use_uuidv5() -> None:
                 semantic_key,
             )
             if event.schema_version == "1.2"
+            and not event.event_type.startswith("interview.resume-analysis.")
             else interview_event_id(event.event_type, event.aggregate_id, semantic_key)
         )
         assert event.event_id == expected

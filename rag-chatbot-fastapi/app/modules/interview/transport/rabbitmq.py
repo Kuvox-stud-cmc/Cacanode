@@ -15,10 +15,14 @@ from app.common.errors import StorageUnavailableError
 from app.common.storage import ObjectStorageReader
 from app.contracts.ai_interview_v1 import (
     ResumeAnalysisOutcome,
+    ResumeAnalysisOutcomeV12,
     ResumeAnalysisRequest,
+    ResumeAnalysisRequestV12,
+    current_resume_analysis_id,
     interview_event_id,
     parse_interview_event,
     resume_analysis_id,
+    resume_analysis_id_v12,
 )
 from app.modules.ingestion.api import PermanentIngestionFailure
 from app.modules.interview.internal.redis_state import (
@@ -239,7 +243,7 @@ class ResumeAnalysisWorker:
     async def _handle(self, message: AbstractIncomingMessage) -> None:
         try:
             parsed = parse_interview_event(message.body)
-            if not isinstance(parsed, ResumeAnalysisRequest):
+            if not isinstance(parsed, (ResumeAnalysisRequest, ResumeAnalysisRequestV12)):
                 await message.reject(requeue=False)
                 return
             request = parsed
@@ -250,7 +254,12 @@ class ResumeAnalysisWorker:
             await message.reject(requeue=False)
             return
 
-        event_id = interview_event_id(RESUME_ANALYSIS_OUTCOME, request.analysis_id, "outcome:v1.1")
+        semantic = (
+            f"outcome:v1.2:revision:{request.analysis_revision}"
+            if isinstance(request, ResumeAnalysisRequestV12)
+            else "outcome:v1.1"
+        )
+        event_id = interview_event_id(RESUME_ANALYSIS_OUTCOME, request.analysis_id, semantic)
         if await self._state.publication_confirmed(str(event_id)):
             await self._state.delete_pending_outcome(str(request.analysis_id))
             await message.ack()
@@ -293,7 +302,9 @@ class ResumeAnalysisWorker:
         finally:
             await self._state.release_lease(str(request.analysis_id), lease)
 
-    async def _produce_outcome(self, request: ResumeAnalysisRequest, event_id: Any) -> bytes:
+    async def _produce_outcome(
+        self, request: ResumeAnalysisRequest | ResumeAnalysisRequestV12, event_id: Any
+    ) -> bytes:
         limited = getattr(self._store, "download_limited", None)
         try:
             file_bytes = (
@@ -308,8 +319,8 @@ class ResumeAnalysisWorker:
         if hashlib.sha256(file_bytes).hexdigest() != request.cv_sha256:
             raise ResumeAnalysisRejectedError("CV_ANALYSIS_CONTENT_HASH_MISMATCH")
         completed = await self._processor.process(request, file_bytes)
-        outcome = ResumeAnalysisOutcome(
-            schema_version="1.1",
+        common = dict(
+            schema_version=request.schema_version,
             event_id=event_id,
             event_type="interview.resume-analysis.outcome",
             occurred_at=datetime.now(UTC),
@@ -328,15 +339,31 @@ class ResumeAnalysisWorker:
             personalized_questions=list(completed.personalized_questions),
             error_code=None,
         )
+        outcome = (
+            ResumeAnalysisOutcomeV12(
+                **common,
+                analysis_revision=request.analysis_revision,
+                fit_score_percent=completed.fit_score_percent,
+                fit_confidence=completed.fit_confidence,
+                fit_explanation=completed.fit_explanation,
+                strengths=list(completed.strengths),
+                gaps=list(completed.gaps),
+            )
+            if isinstance(request, ResumeAnalysisRequestV12)
+            else ResumeAnalysisOutcome(**common)
+        )
         return _canonical_model(outcome)
 
     async def _publish_failed(
-        self, request: ResumeAnalysisRequest, event_id: Any, error_code: str
+        self,
+        request: ResumeAnalysisRequest | ResumeAnalysisRequestV12,
+        event_id: Any,
+        error_code: str,
     ) -> None:
         pending = await self._state.pending_outcome(str(request.analysis_id))
         if pending is None:
-            failed = ResumeAnalysisOutcome(
-                schema_version="1.1",
+            common = dict(
+                schema_version=request.schema_version,
                 event_id=event_id,
                 event_type="interview.resume-analysis.outcome",
                 occurred_at=datetime.now(UTC),
@@ -355,6 +382,19 @@ class ResumeAnalysisWorker:
                 personalized_questions=[],
                 error_code=error_code,
             )
+            failed = (
+                ResumeAnalysisOutcomeV12(
+                    **common,
+                    analysis_revision=request.analysis_revision,
+                    fit_score_percent=None,
+                    fit_confidence=None,
+                    fit_explanation=None,
+                    strengths=[],
+                    gaps=[],
+                )
+                if isinstance(request, ResumeAnalysisRequestV12)
+                else ResumeAnalysisOutcome(**common)
+            )
             pending = _canonical_model(failed)
             await self._state.store_pending_outcome(
                 str(request.analysis_id),
@@ -366,31 +406,72 @@ class ResumeAnalysisWorker:
         )
         await self._state.delete_pending_outcome(str(request.analysis_id))
 
-    def _validate_request(self, request: ResumeAnalysisRequest) -> None:
-        expected = resume_analysis_id(
-            request.tenant_id,
-            request.application_id,
-            request.cv_sha256,
-            request.analysis_mode,
-            request.policy_version,
-            request.model_version,
-        )
-        event_id = interview_event_id(
-            RESUME_ANALYSIS_REQUESTED, request.analysis_id, "requested:v1.1"
-        )
+    def _validate_request(self, request: ResumeAnalysisRequest | ResumeAnalysisRequestV12) -> None:
+        accepted_identities: tuple[Any, ...]
+        if isinstance(request, ResumeAnalysisRequestV12):
+            expected = resume_analysis_id_v12(
+                request.tenant_id,
+                request.application_id,
+                request.document_id,
+                request.cv_sha256,
+                request.analysis_mode,
+                request.policy_version,
+                request.model_version,
+                request.analysis_revision,
+            )
+            event_id = interview_event_id(
+                RESUME_ANALYSIS_REQUESTED,
+                request.analysis_id,
+                f"requested:v1.2:revision:{request.analysis_revision}",
+            )
+            accepted_versions = (
+                request.policy_version == self._policy_version
+                and request.model_version == self._model_version
+            )
+            accepted_identities = (expected,)
+        else:
+            expected = current_resume_analysis_id(
+                request.tenant_id,
+                request.application_id,
+                request.document_id,
+                request.cv_sha256,
+                request.analysis_mode,
+                request.policy_version,
+                request.model_version,
+            )
+            event_id = interview_event_id(
+                RESUME_ANALYSIS_REQUESTED, request.analysis_id, "requested:v1.1"
+            )
+            accepted_versions = request.policy_version in {
+                self._policy_version,
+                "cv-redaction-v1",
+            } and request.model_version in {
+                self._model_version,
+                f"{self._model_version}+pipeline-v2",
+                "resume-analysis-v1",
+                "resume-analysis-v1+pipeline-v2",
+            }
+            legacy_expected = resume_analysis_id(
+                request.tenant_id,
+                request.application_id,
+                request.cv_sha256,
+                request.analysis_mode,
+                request.policy_version,
+                request.model_version,
+            )
+            accepted_identities = (expected, legacy_expected)
         prefix = f"recruitment/{request.tenant_id}/applications/{request.application_id}/"
         if (
-            request.analysis_id != expected
+            request.analysis_id not in accepted_identities
             or request.event_id != event_id
             or request.aggregate_id != request.analysis_id
             or not request.storage_key.startswith(prefix)
-            or request.policy_version != self._policy_version
-            or request.model_version != self._model_version
+            or not accepted_versions
         ):
             raise ValueError("Invalid resume-analysis identity")
 
 
-def _canonical_model(model: ResumeAnalysisOutcome) -> bytes:
+def _canonical_model(model: ResumeAnalysisOutcome | ResumeAnalysisOutcomeV12) -> bytes:
     return json.dumps(
         model.model_dump(mode="json"),
         ensure_ascii=False,

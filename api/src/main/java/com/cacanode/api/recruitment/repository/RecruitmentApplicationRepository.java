@@ -33,4 +33,21 @@ public interface RecruitmentApplicationRepository extends JpaRepository<Recruitm
             ORDER BY a.submitted_at,a.id FOR UPDATE OF a SKIP LOCKED LIMIT 100
             """,nativeQuery=true)
     List<RecruitmentApplication> lockCvAnalysisCandidates();
+
+    @Query(value="""
+            SELECT a.* FROM recruitment_applications a
+            JOIN recruitment_cv_analyses analysis
+              ON analysis.tenant_id=a.tenant_id AND analysis.id=a.active_cv_analysis_id
+            JOIN recruitment_application_cvs cv ON cv.tenant_id=a.tenant_id AND cv.application_id=a.id
+                AND cv.active AND cv.storage_state='PROMOTED'
+            WHERE analysis.status='FAILED' AND analysis.failure_code IN (
+                'CV_ANALYSIS_INVALID_MODEL_OUTPUT','CV_ANALYSIS_UNGROUNDED_EVIDENCE',
+                'CV_ANALYSIS_INVALID_SKILL_EVIDENCE','CV_ANALYSIS_INVALID_QUESTION',
+                'CV_ANALYSIS_TOO_MANY_QUESTIONS','CV_ANALYSIS_QUESTIONS_NOT_ALLOWED',
+                'CV_ANALYSIS_PROTECTED_DATA_LEAKAGE','CV_ANALYSIS_RETRY_EXHAUSTED')
+              AND a.cv_ai_mode_snapshot<>'OFF' AND a.cv_ai_consent_at IS NOT NULL
+              AND a.status NOT IN ('INTERVIEW_COMPLETED','SHORTLISTED','REJECTED','WITHDRAWN')
+            ORDER BY a.submitted_at,a.id FOR UPDATE OF a SKIP LOCKED LIMIT 100
+            """,nativeQuery=true)
+    List<RecruitmentApplication> lockRetryableLegacyCvAnalysisFailures();
 }

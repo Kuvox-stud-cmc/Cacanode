@@ -11,6 +11,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   getApplicationDetail,
   getCvAnalysis,
+  refreshCvAnalysis,
   cvUrl,
   deleteRecruitmentCv,
   inviteApplication,
@@ -20,7 +21,7 @@ import {
   type ApplicationDetail,
   type CvAnalysisResponse,
 } from "@/lib/recruitment-admin-api";
-import { ArrowLeft, Download, FileText, Send, Trash2, User, CheckCircle, Clock, Sparkles } from "lucide-react";
+import { ArrowLeft, Download, FileText, RefreshCw, Send, Trash2, User, CheckCircle, Clock, Sparkles } from "lucide-react";
 
 import { formatEnumLabel } from "@/lib/recruitment-formatters";
 import { useRecruitmentConfirmation } from "@/components/recruitment/useRecruitmentConfirmation";
@@ -78,6 +79,12 @@ export function ApplicationDetailPage({ applicationId }: { applicationId: string
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    if(cvAnalysis?.status!=="PENDING"&&cvAnalysis?.refreshStatus!=="PENDING")return;
+    const timer=window.setInterval(()=>{void getCvAnalysis(request,applicationId).then(setCvAnalysis).catch(()=>undefined);},2000);
+    return ()=>window.clearInterval(timer);
+  },[applicationId,cvAnalysis?.refreshStatus,cvAnalysis?.status,request]);
 
   const handleTransition = async (targetStatus: string) => {
     setActing(true);
@@ -149,13 +156,25 @@ export function ApplicationDetailPage({ applicationId }: { applicationId: string
     }
   };
 
+  const handleRefreshAnalysis = async () => {
+    if(!cvAnalysis?.refreshAvailable||cvAnalysis.refreshStatus==="PENDING"||acting)return;
+    if(!await confirm({title:a("refreshTitle"),description:a("refreshConfirmation"),confirmLabel:a("refreshAction")}))return;
+    setActing(true);setError("");setActionSuccess("");
+    try{
+      const refreshed=await refreshCvAnalysis(request,applicationId,crypto.randomUUID());
+      setCvAnalysis(refreshed);setActionSuccess(a("refreshRequested"));
+    }catch(cause){setError(cause instanceof Error?cause.message:t("loadError"));}
+    finally{setActing(false);}
+  };
+
   if (loading) return <p className="p-6 text-sm text-muted-foreground">{t("loading")}</p>;
   if (!detail) return <p className="p-6 text-sm text-red-600">{error || t("loadError")}</p>;
 
   const { application: app, candidate, screeningQuestions, screeningAnswers } = detail;
   const answerMap = new Map(screeningAnswers.map((a) => [a.questionId, a.optionId]));
   const cvAnalysisStatus=cvAnalysis?.status??app.cvAnalysisStatus;
-  const cvAnalysisHasContent=Boolean(cvAnalysis?.summary||cvAnalysis?.skills?.length||cvAnalysis?.personalizedQuestions?.length||cvAnalysis?.evidence?.length);
+  const cvAnalysisHasContent=Boolean(cvAnalysis?.summary||cvAnalysis?.skills?.length||cvAnalysis?.personalizedQuestions?.length||cvAnalysis?.evidence?.length||cvAnalysis?.fitScorePercent!==null&&cvAnalysis?.fitScorePercent!==undefined);
+  const evidenceById=new Map((cvAnalysis?.evidence??[]).map(item=>[item.anchorId,item]));
 
   return (
     <div className="space-y-6 max-w-5xl mx-auto">
@@ -352,14 +371,27 @@ export function ApplicationDetailPage({ applicationId }: { applicationId: string
             <TabsContent value="ai" className="mt-4 space-y-4">
               <Card>
                 <CardHeader>
-                  <div className="flex flex-wrap items-center justify-between gap-2"><CardTitle className="text-base flex items-center gap-2"><Sparkles className="h-4 w-4 text-indigo-600" /> {a("aiTitle")}</CardTitle><Badge variant="outline">{formatEnumLabel(cvAnalysisStatus,locale)}</Badge></div>
+                  <div className="flex flex-wrap items-center justify-between gap-2"><CardTitle className="text-base flex items-center gap-2"><Sparkles className="h-4 w-4 text-indigo-600" /> {a("aiTitle")}</CardTitle><div className="flex items-center gap-2"><Badge variant="outline">{formatEnumLabel(cvAnalysisStatus,locale)}</Badge>{cvAnalysis?.analysisRevision&&<Badge variant="secondary">{a("revision",{revision:cvAnalysis.analysisRevision})}</Badge>}</div></div>
                   <CardDescription>{a("aiDescription")}</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
                   {!cvAnalysis || !cvAnalysisHasContent ? (
-                    <div className="space-y-3"><p className="text-sm text-muted-foreground">{a(cvAnalysisStateKey({cvPresent:app.cvPresent,applicationStatus:app.status,analysisStatus:cvAnalysisStatus,mode:cvAnalysis?.mode}))}</p>{cvAnalysis&&<dl className="grid gap-3 rounded-md border bg-muted/20 p-3 text-xs sm:grid-cols-2"><div><dt className="text-muted-foreground">{a("cvAnalysisStatus")}</dt><dd className="font-medium">{formatEnumLabel(cvAnalysis.status,locale)}</dd></div><div><dt className="text-muted-foreground">{a("cvMode")}</dt><dd className="font-medium">{formatEnumLabel(cvAnalysis.mode,locale)}</dd></div>{cvAnalysis.failureCode&&<div className="sm:col-span-2"><dt className="text-muted-foreground">{a("failureCode")}</dt><dd className="font-mono">{cvAnalysis.failureCode}</dd></div>}</dl>}</div>
+                    <div className="space-y-3"><p className="text-sm text-muted-foreground">{a(cvAnalysisStateKey({cvPresent:app.cvPresent,applicationStatus:app.status,analysisStatus:cvAnalysisStatus,mode:cvAnalysis?.mode}))}</p>{cvAnalysis&&<dl className="grid gap-3 rounded-md border bg-muted/20 p-3 text-xs sm:grid-cols-2"><div><dt className="text-muted-foreground">{a("cvAnalysisStatus")}</dt><dd className="font-medium">{formatEnumLabel(cvAnalysis.status,locale)}</dd></div><div><dt className="text-muted-foreground">{a("cvMode")}</dt><dd className="font-medium">{formatEnumLabel(cvAnalysis.mode,locale)}</dd></div>{cvAnalysis.failureCode&&<div className="sm:col-span-2"><dt className="text-muted-foreground">{a("failureCode")}</dt><dd className="font-mono">{cvAnalysis.failureCode}</dd></div>}</dl>}{cvAnalysis?.refreshAvailable&&<div className="flex items-center justify-between gap-3 border-t pt-3"><p className="text-xs text-muted-foreground">{a("refreshQuotaNotice")}</p><Button variant="outline" size="sm" disabled={acting} onClick={()=>void handleRefreshAnalysis()}><RefreshCw className="mr-1 h-3.5 w-3.5" />{a("refreshAction")}</Button></div>}</div>
                   ) : (
                     <>
+                      {cvAnalysis.fitScorePercent!==null&&cvAnalysis.fitScorePercent!==undefined&&(
+                        <div className="rounded-lg border border-indigo-200 bg-indigo-50/50 p-4">
+                          <div className="flex flex-wrap items-end justify-between gap-3"><div><p className="text-xs font-medium uppercase tracking-wide text-indigo-700">{a("jobFitScore")}</p><p className="text-4xl font-bold text-indigo-950">{cvAnalysis.fitScorePercent}%</p></div>{cvAnalysis.fitConfidence&&<div className="text-right"><p className="text-xs text-muted-foreground">{a("confidence")}</p><Badge>{a(`confidence${cvAnalysis.fitConfidence}` as "confidenceLOW"|"confidenceMEDIUM"|"confidenceHIGH")}</Badge></div>}</div>
+                          {cvAnalysis.fitExplanation&&<p className="mt-3 text-sm text-slate-700">{cvAnalysis.fitExplanation}</p>}
+                          <p className="mt-3 rounded bg-white/80 p-2 text-xs text-amber-900">{a("fitAdvisory")}</p>
+                        </div>
+                      )}
+
+                      {([...[cvAnalysis.strengths??[]].map(item=>({item,kind:"strength" as const})),...[cvAnalysis.gaps??[]].map(item=>({item,kind:"gap" as const}))].length>0)&&(
+                        <div className="grid gap-4 sm:grid-cols-2">
+                          {(["strength","gap"] as const).map(kind=><div key={kind}><h4 className="mb-2 text-sm font-semibold">{a(kind==="strength"?"strengths":"gaps")}</h4><div className="space-y-2">{(kind==="strength"?cvAnalysis.strengths??[]:cvAnalysis.gaps??[]).map((finding,idx)=><div key={`${kind}-${idx}`} className="rounded-md border p-3 text-sm"><div className="flex justify-between gap-2"><Badge variant={kind==="strength"?"secondary":"outline"}>{finding.matchPercent}%</Badge><span className="text-xs text-muted-foreground">{a("weight",{weight:finding.weightPercent})}</span></div><p className="mt-2">{finding.explanation}</p><div className="mt-2 rounded bg-slate-50 p-2 text-xs"><span className="font-medium">{a("jobEvidence")}:</span> “{finding.jobExcerpt}”</div><div className="mt-2 text-xs text-muted-foreground"><span className="font-medium">{a("cvEvidence")}:</span> {finding.evidenceStatus==="NOT_EVIDENCED"?a("notEvidenced"):(finding.cvEvidenceAnchorIds.map(id=>evidenceById.get(id)?.excerpt).filter(Boolean).join(" · ")||a("evidenceUnavailable"))}</div></div>)}</div></div>)}
+                        </div>
+                      )}
                       {/* Summary */}
                       {cvAnalysis.summary && (
                         <div className="rounded-md bg-slate-50 p-4 border">
@@ -413,6 +445,10 @@ export function ApplicationDetailPage({ applicationId }: { applicationId: string
                           </div>
                         </div>
                       )}
+                      {cvAnalysis.refreshStatus==="FAILED"&&<p className="rounded-md border border-red-200 bg-red-50 p-3 text-xs text-red-800">{a("refreshFailed")}{cvAnalysis.refreshFailureCode?` (${cvAnalysis.refreshFailureCode})`:""}</p>}
+                      {cvAnalysis.refreshStatus==="QUOTA_EXHAUSTED"&&<p className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">{a("refreshQuota")}</p>}
+                      {cvAnalysis.refreshStatus==="PENDING"&&<p className="text-xs text-muted-foreground">{a("refreshPending")}</p>}
+                      <div className="flex items-center justify-between gap-3 border-t pt-3"><p className="text-xs text-muted-foreground">{a("refreshQuotaNotice")}</p><Button variant="outline" size="sm" disabled={!cvAnalysis.refreshAvailable||cvAnalysis.refreshStatus==="PENDING"||acting} onClick={()=>void handleRefreshAnalysis()}><RefreshCw className={`mr-1 h-3.5 w-3.5 ${cvAnalysis.refreshStatus==="PENDING"?"animate-spin":""}`} />{a("refreshAction")}</Button></div>
                     </>
                   )}
                 </CardContent>

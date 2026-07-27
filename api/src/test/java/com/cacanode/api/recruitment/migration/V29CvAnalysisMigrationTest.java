@@ -31,7 +31,7 @@ class V29CvAnalysisMigrationTest {
         assertTrue(names("SELECT tablename FROM pg_tables WHERE schemaname='public'").containsAll(Set.of(
                 "recruitment_cv_analyses","recruitment_cv_analysis_inbox")));
         assertTrue(names("SELECT indexname FROM pg_indexes").containsAll(Set.of(
-                "uq_recruitment_cv_analysis_application_identity","idx_recruitment_cv_analysis_due")));
+                "uq_recruitment_cv_analysis_revision","idx_recruitment_cv_analysis_due")));
     }
 
     @Test void enforcesSemanticIdentityJsonBoundsCompositeBindingsAndImmutableSnapshots() throws Exception {

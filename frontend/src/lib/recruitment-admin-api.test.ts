@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { getRecordingBlob, getRecruitmentJobPreview, listRecruitmentApplications } from "@/lib/recruitment-admin-api";
+import { getRecordingBlob, getRecruitmentJobPreview, listRecruitmentApplications, refreshCvAnalysis } from "@/lib/recruitment-admin-api";
 
 describe("recruitment admin api", () => {
   it("keeps exact candidate filtering and stable pagination metadata", async () => {
@@ -33,5 +33,20 @@ describe("recruitment admin api", () => {
       "http://localhost/api/v1/recruitment/interviews/interview-1/recordings/recording-1/playback", { cache: "no-store" });
     expect(request).toHaveBeenNthCalledWith(2,
       "http://localhost/api/v1/recruitment/interviews/interview-1/recordings/recording-1/download", { cache: "no-store" });
+  });
+
+  it("sends the stable refresh request id for server-side idempotency", async () => {
+    vi.stubEnv("NEXT_PUBLIC_API_BASE_URL", "http://localhost/api/v1");
+    const request = vi.fn(async () => new Response(JSON.stringify({ status: "COMPLETED" }), { status: 200 }));
+
+    await refreshCvAnalysis(request, "application-1", "11111111-1111-4111-8111-111111111111");
+
+    expect(request).toHaveBeenCalledWith(
+      "http://localhost/api/v1/recruitment/applications/application-1/cv-analysis/refresh",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ requestId: "11111111-1111-4111-8111-111111111111" }),
+      }),
+    );
   });
 });

@@ -19,11 +19,17 @@ public record ResumeAnalysisOutcomeEvent(
         @JsonProperty("analysis_mode") String analysisMode,
         @JsonProperty("policy_version") String policyVersion,
         @JsonProperty("model_version") String modelVersion,
+        @JsonProperty("analysis_revision") Integer analysisRevision,
         String status,
         String summary,
         List<Evidence> evidence,
         List<Skill> skills,
         @JsonProperty("personalized_questions") List<PersonalizedQuestion> personalizedQuestions,
+        @JsonProperty("fit_score_percent") Integer fitScorePercent,
+        @JsonProperty("fit_confidence") String fitConfidence,
+        @JsonProperty("fit_explanation") String fitExplanation,
+        List<FitFinding> strengths,
+        List<FitFinding> gaps,
         @JsonProperty("error_code") String errorCode) {
     public record Evidence(@JsonProperty("anchor_id") String anchorId,String excerpt,
             @JsonProperty("source_location") String sourceLocation) {}
@@ -33,4 +39,12 @@ public record ResumeAnalysisOutcomeEvent(
             @JsonProperty("target_section_id") UUID targetSectionId,
             String prompt,String competency,String rubric,
             @JsonProperty("evidence_anchor_ids") List<String> evidenceAnchorIds) {}
+    public record FitFinding(
+            @JsonProperty("weight_percent") int weightPercent,
+            @JsonProperty("match_percent") int matchPercent,
+            @JsonProperty("evidence_status") String evidenceStatus,
+            String explanation,
+            @JsonProperty("job_excerpt") String jobExcerpt,
+            @JsonProperty("job_anchor_id") String jobAnchorId,
+            @JsonProperty("cv_evidence_anchor_ids") List<String> cvEvidenceAnchorIds) {}
 }

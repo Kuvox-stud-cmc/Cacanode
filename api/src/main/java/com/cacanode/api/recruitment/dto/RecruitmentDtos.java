@@ -136,10 +136,15 @@ public final class RecruitmentDtos {
     public record CvAnalysisSkill(String name,List<String> evidenceAnchorIds) {}
     public record CvAnalysisQuestion(UUID questionId,UUID targetSectionId,String prompt,String competency,
             String rubric,List<String> evidenceAnchorIds) {}
+    public record CvAnalysisFitFinding(int weightPercent,int matchPercent,String evidenceStatus,
+            String explanation,String jobExcerpt,String jobAnchorId,List<String> cvEvidenceAnchorIds) {}
+    public record CvAnalysisRefreshRequest(@NotNull UUID requestId) {}
     public record CvAnalysisResponse(CvAiMode mode,CvAnalysisStatus status,String policyVersion,
             String modelVersion,LocalDateTime generatedAt,String summary,List<CvAnalysisEvidence> evidence,
             List<CvAnalysisSkill> skills,List<CvAnalysisQuestion> personalizedQuestions,String failureCode,
-            boolean advisoryOnly) {}
+            boolean advisoryOnly,Integer fitScorePercent,String fitConfidence,String fitExplanation,
+            List<CvAnalysisFitFinding> strengths,List<CvAnalysisFitFinding> gaps,Integer analysisRevision,
+            boolean refreshAvailable,String refreshStatus,String refreshFailureCode) {}
     public record InterviewResponse(UUID id, UUID applicationId, UUID jobId, String jobTitle,
             UUID candidateId, String candidateName, InterviewStatus status, UUID templateRevisionId,
             String templateSnapshotSha256, String templateSnapshotVersion, LocalDateTime scheduledAt,

@@ -12,6 +12,11 @@ import java.util.UUID;
 public interface RecruitmentCvAnalysisRepository extends JpaRepository<RecruitmentCvAnalysis,UUID> {
     Optional<RecruitmentCvAnalysis> findByIdAndTenantId(UUID id,UUID tenantId);
     Optional<RecruitmentCvAnalysis> findFirstByTenantIdAndApplicationIdOrderByCreatedAtDesc(UUID tenantId,UUID applicationId);
+    Optional<RecruitmentCvAnalysis> findByTenantIdAndApplicationIdAndRefreshRequestId(
+            UUID tenantId,UUID applicationId,UUID refreshRequestId);
+
+    @Query("select coalesce(max(a.analysisRevision),0) from RecruitmentCvAnalysis a where a.tenantId=:tenantId and a.applicationId=:applicationId")
+    int maxRevision(@Param("tenantId") UUID tenantId,@Param("applicationId") UUID applicationId);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select a from RecruitmentCvAnalysis a where a.id=:id and a.tenantId=:tenantId")
@@ -28,6 +33,7 @@ public interface RecruitmentCvAnalysisRepository extends JpaRepository<Recruitme
     @Query(value="""
             UPDATE recruitment_cv_analyses SET status='CANCELLED',completed_at=NOW(),next_publish_at=NULL,
                 summary=NULL,evidence='[]'::jsonb,skills='[]'::jsonb,personalized_questions='[]'::jsonb,
+                fit_score_percent=NULL,fit_confidence=NULL,fit_explanation=NULL,strengths='[]'::jsonb,gaps='[]'::jsonb,
                 failure_code='APPLICATION_CANCELLED',updated_at=NOW(),version=version+1
             WHERE tenant_id=:tenantId AND application_id=:applicationId AND status IN ('QUEUED','PUBLISHED')
             """,nativeQuery=true)

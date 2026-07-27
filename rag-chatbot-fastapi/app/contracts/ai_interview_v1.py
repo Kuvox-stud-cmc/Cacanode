@@ -62,6 +62,60 @@ def resume_analysis_id(
     )
 
 
+def current_resume_analysis_id(
+    tenant_id: UUID,
+    application_id: UUID,
+    document_id: UUID,
+    cv_sha256: str,
+    analysis_mode: str,
+    policy_version: str,
+    model_version: str,
+) -> UUID:
+    return uuid5(
+        INTERVIEW_EVENT_NAMESPACE,
+        "|".join(
+            (
+                "cv-analysis-v2",
+                str(tenant_id),
+                str(application_id),
+                str(document_id),
+                cv_sha256,
+                analysis_mode,
+                policy_version,
+                model_version,
+            )
+        ),
+    )
+
+
+def resume_analysis_id_v12(
+    tenant_id: UUID,
+    application_id: UUID,
+    document_id: UUID,
+    cv_sha256: str,
+    analysis_mode: str,
+    policy_version: str,
+    model_version: str,
+    analysis_revision: int,
+) -> UUID:
+    return uuid5(
+        INTERVIEW_EVENT_NAMESPACE,
+        "|".join(
+            (
+                "cv-analysis-v1.2",
+                str(tenant_id),
+                str(application_id),
+                str(document_id),
+                cv_sha256,
+                analysis_mode,
+                policy_version,
+                model_version,
+                str(analysis_revision),
+            )
+        ),
+    )
+
+
 class InterviewEvent(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -115,7 +169,7 @@ class TemplateQuestion(BaseModel):
 
 class ResumeAnalysisRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    schema_version: Literal["1.1"]
+    schema_version: Literal["1.1", "1.2"]
     event_id: UUID
     event_type: Literal["interview.resume-analysis.requested"]
     occurred_at: datetime
@@ -157,6 +211,28 @@ class ResumeAnalysisRequest(BaseModel):
         return self
 
 
+class JobContextAnchor(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    anchor_id: str = Field(min_length=1, max_length=160)
+    field: str = Field(min_length=1, max_length=80)
+    excerpt: str = Field(min_length=1, max_length=12_000)
+
+
+class ResumeAnalysisRequestV12(ResumeAnalysisRequest):
+    schema_version: Literal["1.2"]
+    analysis_revision: int = Field(ge=1)
+    job_context_anchors: list[JobContextAnchor] = Field(min_length=1, max_length=250)
+    job_context_truncated: bool
+
+    @model_validator(mode="after")
+    def validate_v12_identity(self) -> ResumeAnalysisRequestV12:
+        if len({item.anchor_id for item in self.job_context_anchors}) != len(
+            self.job_context_anchors
+        ):
+            raise ValueError("job-context anchor IDs must be unique")
+        return self
+
+
 class ResumeEvidence(BaseModel):
     model_config = ConfigDict(extra="forbid")
     anchor_id: str = Field(min_length=1, max_length=80)
@@ -182,7 +258,7 @@ class PersonalizedQuestion(BaseModel):
 
 class ResumeAnalysisOutcome(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    schema_version: Literal["1.1"]
+    schema_version: Literal["1.1", "1.2"]
     event_id: UUID
     event_type: Literal["interview.resume-analysis.outcome"]
     occurred_at: datetime
@@ -216,6 +292,68 @@ class ResumeAnalysisOutcome(BaseModel):
             raise ValueError("completed outcome is missing its summary")
         if self.analysis_mode == "SUMMARY_ONLY" and self.personalized_questions:
             raise ValueError("summary-only outcome contains questions")
+        return self
+
+
+class FitFinding(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    weight_percent: int = Field(ge=1, le=100)
+    match_percent: int = Field(ge=0, le=100)
+    evidence_status: Literal["EVIDENCED", "NOT_EVIDENCED"]
+    explanation: str = Field(min_length=1, max_length=1000)
+    job_excerpt: str = Field(min_length=1, max_length=2000)
+    job_anchor_id: str = Field(min_length=1, max_length=160)
+    cv_evidence_anchor_ids: list[str] = Field(max_length=20)
+
+
+class ResumeAnalysisOutcomeV12(ResumeAnalysisOutcome):
+    schema_version: Literal["1.2"]
+    analysis_revision: int = Field(ge=1)
+    fit_score_percent: int | None = Field(default=None, ge=0, le=100)
+    fit_confidence: Literal["LOW", "MEDIUM", "HIGH"] | None = None
+    fit_explanation: str | None = Field(default=None, max_length=1000)
+    strengths: list[FitFinding] = Field(max_length=50)
+    gaps: list[FitFinding] = Field(max_length=50)
+
+    @model_validator(mode="after")
+    def validate_fit_outcome(self) -> ResumeAnalysisOutcomeV12:
+        if self.status == "FAILED":
+            if any(
+                (
+                    self.fit_score_percent is not None,
+                    self.fit_confidence is not None,
+                    self.fit_explanation is not None,
+                    bool(self.strengths),
+                    bool(self.gaps),
+                )
+            ):
+                raise ValueError("failed outcome contains fit content")
+            return self
+        if (
+            self.fit_score_percent is None
+            or self.fit_confidence is None
+            or not self.fit_explanation
+        ):
+            raise ValueError("completed outcome is missing fit content")
+        findings = self.strengths + self.gaps
+        if sum(item.weight_percent for item in findings) != 100:
+            raise ValueError("fit weights must total 100")
+        weighted = sum(item.weight_percent * item.match_percent for item in findings)
+        if self.fit_score_percent != (weighted + 50) // 100:
+            raise ValueError("fit score does not match weighted findings")
+        for item in self.strengths:
+            if (
+                item.evidence_status != "EVIDENCED"
+                or not item.cv_evidence_anchor_ids
+                or not 70 <= item.match_percent <= 100
+            ):
+                raise ValueError("invalid strength")
+        for item in self.gaps:
+            if item.evidence_status == "NOT_EVIDENCED":
+                if item.match_percent != 0 or item.cv_evidence_anchor_ids:
+                    raise ValueError("invalid not-evidenced gap")
+            elif not item.cv_evidence_anchor_ids or not 1 <= item.match_percent <= 69:
+                raise ValueError("invalid partial gap")
         return self
 
 
@@ -409,9 +547,7 @@ class TerminalResultV11(InterviewEventV11):
     score_policy_version: Literal["equal-core-questions-v1"]
     overall_score: Decimal | None = Field(default=None, ge=0, le=100, decimal_places=2)
     english_dimensions: EnglishDimensions | None
-    english_band: Literal[
-        "BASIC", "CONVERSATIONAL", "WORKING_PROFICIENCY", "PROFESSIONAL"
-    ] | None
+    english_band: Literal["BASIC", "CONVERSATIONAL", "WORKING_PROFICIENCY", "PROFESSIONAL"] | None
     section_results: list[SectionResult] = Field(max_length=10)
     question_results: list[QuestionResult] = Field(max_length=100)
 
@@ -420,9 +556,8 @@ class TerminalResultV11(InterviewEventV11):
         if self.aggregate_id != self.session_id:
             raise ValueError("aggregate_id must equal session_id")
         semantic_key = (
-            ("failed" if self.event_type == "interview.session.failed" else "completed")
-            + (":v1.2" if self.schema_version == "1.2" else ":v1.1")
-        )
+            "failed" if self.event_type == "interview.session.failed" else "completed"
+        ) + (":v1.2" if self.schema_version == "1.2" else ":v1.1")
         expected_event = (
             interview_runtime_event_id(
                 self.event_type, self.session_id, self.call_attempt_id, semantic_key
@@ -459,9 +594,7 @@ class TerminalResultV11(InterviewEventV11):
             if self.english_dimensions is None or self.english_band is None:
                 raise ValueError("English result is incomplete")
             means = {
-                field: sum(
-                    (getattr(item, field) for item in english_evaluations), Decimal(0)
-                )
+                field: sum((getattr(item, field) for item in english_evaluations), Decimal(0))
                 / Decimal(len(english_evaluations))
                 for field in (
                     "comprehension",
@@ -472,8 +605,7 @@ class TerminalResultV11(InterviewEventV11):
                 )
             }
             if any(
-                getattr(self.english_dimensions, field) != value
-                for field, value in means.items()
+                getattr(self.english_dimensions, field) != value for field, value in means.items()
             ):
                 raise ValueError("English dimensions do not equal their evaluation means")
             mean = sum(means.values(), Decimal(0)) / Decimal(5)
@@ -557,23 +689,21 @@ def parse_interview_event(payload: bytes) -> BaseModel:
     event_type = raw.get("event_type")
     model: type[BaseModel] | None
     if event_type == "interview.resume-analysis.requested":
-        model = (
-            ResumeAnalysisRequest
-            if raw.get("schema_version") == "1.1"
-            else ResumeAnalysisRequestV10
-        )
+        if raw.get("schema_version") == "1.2":
+            model = ResumeAnalysisRequestV12
+        elif raw.get("schema_version") == "1.1":
+            model = ResumeAnalysisRequest
+        else:
+            model = ResumeAnalysisRequestV10
     elif event_type == "interview.resume-analysis.outcome":
-        model = (
-            ResumeAnalysisOutcome
-            if raw.get("schema_version") == "1.1"
-            else ResumeAnalysisOutcomeV10
-        )
+        if raw.get("schema_version") == "1.2":
+            model = ResumeAnalysisOutcomeV12
+        elif raw.get("schema_version") == "1.1":
+            model = ResumeAnalysisOutcome
+        else:
+            model = ResumeAnalysisOutcomeV10
     elif event_type == "interview.turn.finalized":
-        model = (
-            FinalizedTurn
-            if raw.get("schema_version") in {"1.1", "1.2"}
-            else FinalizedTurnV10
-        )
+        model = FinalizedTurn if raw.get("schema_version") in {"1.1", "1.2"} else FinalizedTurnV10
     elif event_type == "interview.session.completed":
         model = (
             InterviewCompleted
@@ -582,16 +712,10 @@ def parse_interview_event(payload: bytes) -> BaseModel:
         )
     elif event_type == "interview.session.failed":
         model = (
-            InterviewFailed
-            if raw.get("schema_version") in {"1.1", "1.2"}
-            else InterviewFailedV10
+            InterviewFailed if raw.get("schema_version") in {"1.1", "1.2"} else InterviewFailedV10
         )
     elif event_type == "interview.provider.usage":
-        model = (
-            ProviderUsage
-            if raw.get("schema_version") in {"1.1", "1.2"}
-            else ProviderUsageV10
-        )
+        model = ProviderUsage if raw.get("schema_version") in {"1.1", "1.2"} else ProviderUsageV10
     else:
         model = EVENT_MODELS.get(event_type)
     if model is None:

@@ -29,9 +29,10 @@ public class RecruitmentApplication extends BaseEntity {
     @Enumerated(EnumType.STRING) @Column(name = "cv_analysis_status", nullable = false) private RecruitmentEnums.CvAnalysisStatus cvAnalysisStatus;
     @Enumerated(EnumType.STRING) @Column(name = "cv_ai_mode_snapshot", nullable = false, updatable = false)
     private RecruitmentEnums.CvAiMode cvAiModeSnapshot = RecruitmentEnums.CvAiMode.OFF;
-    @Column(name = "cv_ai_policy_version", nullable = false, updatable = false) private String cvAiPolicyVersion="cv-redaction-v1";
-    @Column(name = "cv_ai_model_version", nullable = false, updatable = false) private String cvAiModelVersion="resume-analysis-v1";
+    @Column(name = "cv_ai_policy_version", nullable = false, updatable = false) private String cvAiPolicyVersion="cv-redaction-fit-v2";
+    @Column(name = "cv_ai_model_version", nullable = false, updatable = false) private String cvAiModelVersion="resume-analysis-v2";
     @Column(name = "active_cv_analysis_id") private UUID activeCvAnalysisId;
+    @Column(name = "pending_cv_analysis_id") private UUID pendingCvAnalysisId;
     @Column(name = "template_revision_id", nullable = false) private UUID templateRevisionId;
     @JdbcTypeCode(SqlTypes.JSON) @Column(name = "template_snapshot", nullable = false, columnDefinition = "jsonb") private String templateSnapshot;
     @Column(name = "template_snapshot_sha256", nullable = false, length = 64) private String templateSnapshotSha256;

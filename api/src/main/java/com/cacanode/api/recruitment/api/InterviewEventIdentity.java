@@ -27,6 +27,19 @@ public final class InterviewEventIdentity {
                 +mode+"|"+policyVersion+"|"+modelVersion);
     }
 
+    public static UUID resumeAnalysisId(UUID tenantId,UUID applicationId,UUID cvId,
+            String cvSha256,String mode,String policyVersion,String modelVersion) {
+        return uuidV5(NAMESPACE,"cv-analysis-v2|"+tenantId+"|"+applicationId+"|"+cvId+"|"
+                +cvSha256+"|"+mode+"|"+policyVersion+"|"+modelVersion);
+    }
+
+    public static UUID resumeAnalysisId(UUID tenantId,UUID applicationId,UUID cvId,
+            String cvSha256,String mode,String policyVersion,String modelVersion,int revision) {
+        if(revision<1)throw new IllegalArgumentException("Analysis revision must be positive");
+        return uuidV5(NAMESPACE,"cv-analysis-v1.2|"+tenantId+"|"+applicationId+"|"+cvId+"|"
+                +cvSha256+"|"+mode+"|"+policyVersion+"|"+modelVersion+"|"+revision);
+    }
+
     public static UUID turnId(UUID sessionId,int sequence) {
         if(sequence<1)throw new IllegalArgumentException("Turn sequence must be 1-based");
         return uuidV5(NAMESPACE,"interview.turn|"+sessionId+"|"+sequence+"|v1.1");

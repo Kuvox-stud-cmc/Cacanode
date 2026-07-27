@@ -45,15 +45,17 @@ class InterviewEventContractTest {
                 String semanticKey=semanticKeys.get(eventType);
                 String version=payload.get("schema_version").asText();
                 if(Set.of("1.1","1.2").contains(version))semanticKey=switch(eventType){
-                    case "interview.resume-analysis.requested"->"requested:v1.1";
-                    case "interview.resume-analysis.outcome"->"outcome:v1.1";
+                    case "interview.resume-analysis.requested"->"1.2".equals(version)
+                            ?"requested:v1.2:revision:"+payload.get("analysis_revision").asInt():"requested:v1.1";
+                    case "interview.resume-analysis.outcome"->"1.2".equals(version)
+                            ?"outcome:v1.2:revision:"+payload.get("analysis_revision").asInt():"outcome:v1.1";
                     case "interview.turn.finalized"->"turn:"+payload.get("sequence").asInt()+":v"+version;
                     case "interview.session.completed"->"completed:v"+version;
                     case "interview.session.failed"->"failed:v"+version;
                     case "interview.provider.usage"->payload.get("provider").asText().toLowerCase()+":"+
                             payload.get("capability").asText().toLowerCase()+":v"+version;
                     default->throw new IllegalStateException(eventType);};
-                UUID expected="1.2".equals(version)
+                UUID expected="1.2".equals(version)&&!eventType.startsWith("interview.resume-analysis.")
                         ?InterviewEventIdentity.runtimeEventId(eventType,aggregateId,
                                 UUID.fromString(payload.get("call_attempt_id").asText()),semanticKey)
                         :InterviewEventIdentity.eventId(eventType,aggregateId,semanticKey);

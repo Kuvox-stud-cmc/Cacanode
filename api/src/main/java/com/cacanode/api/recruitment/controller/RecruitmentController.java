@@ -8,6 +8,7 @@ import com.cacanode.api.recruitment.query.RecruitmentCvAnalysisQueryService;
 import com.cacanode.api.recruitment.service.RecruitmentService;
 import com.cacanode.api.recruitment.service.InterviewInvitationService;
 import com.cacanode.api.recruitment.service.RecruitmentAvailabilityService;
+import com.cacanode.api.recruitment.service.RecruitmentCvAnalysisService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -36,6 +37,7 @@ public class RecruitmentController extends BaseController {
     private final InterviewInvitationService invitations;
     private final RecruitmentAvailabilityService availability;
     @Autowired(required=false) private RecruitmentCvAnalysisQueryService cvAnalyses;
+    @Autowired(required=false) private RecruitmentCvAnalysisService cvAnalysisCommands;
 
     @Autowired
     public RecruitmentController(RecruitmentService service,RecruitmentQueryService queries,
@@ -49,6 +51,13 @@ public class RecruitmentController extends BaseController {
     @GetMapping("/overview") public RecruitmentDtos.OverviewResponse overview(HttpServletRequest r){return queries.overview(getTenantId(r));}
     @GetMapping("/applications/{applicationId}/cv-analysis")
     public RecruitmentDtos.CvAnalysisResponse cvAnalysis(@PathVariable UUID applicationId,HttpServletRequest r){
+        return cvAnalyses.get(getTenantId(r),applicationId);
+    }
+    @PostMapping("/applications/{applicationId}/cv-analysis/refresh")
+    public RecruitmentDtos.CvAnalysisResponse refreshCvAnalysis(@PathVariable UUID applicationId,
+            @Valid @RequestBody RecruitmentDtos.CvAnalysisRefreshRequest body,HttpServletRequest r){
+        if(cvAnalysisCommands==null)throw new com.cacanode.api.common.exception.custom.ConflictException("CV_ANALYSIS_REFRESH_DISABLED");
+        cvAnalysisCommands.refresh(getTenantId(r),applicationId,body.requestId());
         return cvAnalyses.get(getTenantId(r),applicationId);
     }
     @PutMapping("/settings") @PreAuthorize("hasRole('TENANT_ADMIN')") public RecruitmentDtos.SettingsResponse updateSettings(@Valid @RequestBody RecruitmentDtos.SettingsUpdate body,HttpServletRequest r){return service.updateSettings(getTenantId(r),body);}

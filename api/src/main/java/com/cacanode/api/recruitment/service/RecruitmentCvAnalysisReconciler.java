@@ -11,6 +11,13 @@ import org.springframework.transaction.annotation.Transactional;
 @ConditionalOnExpression("${app.recruitment.enabled:false} and ${app.recruitment.messaging-enabled:false} and ${app.recruitment.cv-ai-enabled:false}")
 public class RecruitmentCvAnalysisReconciler {
     private final RecruitmentApplicationRepository applications;private final RecruitmentCvAnalysisService service;
-    @Scheduled(fixedDelayString="${app.recruitment.cv-analysis.reconcile-delay-ms:60000}") @Transactional
-    public void reconcile(){for(var application:applications.lockCvAnalysisCandidates())service.process(application.getTenantId(),application.getId());}
+    @Scheduled(initialDelayString="${app.recruitment.cv-analysis.reconcile-initial-delay-ms:5000}",
+            fixedDelayString="${app.recruitment.cv-analysis.reconcile-delay-ms:60000}") @Transactional
+    public void reconcile(){reconcileCandidates();}
+    private void reconcileCandidates(){
+        for(var application:applications.lockCvAnalysisCandidates())
+            service.process(application.getTenantId(),application.getId());
+        for(var application:applications.lockRetryableLegacyCvAnalysisFailures())
+            service.processRetryableLegacyFailure(application.getTenantId(),application.getId());
+    }
 }

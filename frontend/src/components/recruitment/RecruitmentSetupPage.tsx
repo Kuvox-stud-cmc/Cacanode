@@ -31,6 +31,7 @@ export function RecruitmentSetupPage() {
   const [settings, setSettings] = useState<RecruitmentSettings | null>(null);
   const [availability, setAvailability] = useState<Availability | null>(null);
   const [message, setMessage] = useState("");
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (role !== "TENANT_ADMIN") return;
@@ -57,25 +58,26 @@ export function RecruitmentSetupPage() {
   }
 
   async function save() {
-    if (!settings || !availability) return;
+    if (!settings || !availability || saving) return;
     setMessage("");
+    setSaving(true);
     try {
       const { version: ignoredVersion, ...value } = settings;
       void ignoredVersion;
-      const [savedSettings, savedAvailability] = await Promise.all([
-        updateRecruitmentSettings(request, value),
-        updateRecruitmentAvailability(request, {
-          version: availability.version,
-          weeklyWindows: availability.weeklyWindows,
-          exceptions: availability.exceptions,
-        }),
-      ]);
+      const savedSettings = await updateRecruitmentSettings(request, value);
+      const savedAvailability = await updateRecruitmentAvailability(request, {
+        version: savedSettings.version,
+        weeklyWindows: availability.weeklyWindows,
+        exceptions: availability.exceptions,
+      });
       clearLocaleDraft();
-      setSettings(savedSettings);
+      setSettings({ ...savedSettings, version: savedAvailability.version });
       setAvailability(savedAvailability);
       setMessage(t("saved"));
     } catch (cause) {
       setMessage(cause instanceof Error ? cause.message : t("loadError"));
+    } finally {
+      setSaving(false);
     }
   }
 
@@ -158,7 +160,7 @@ export function RecruitmentSetupPage() {
       </CardContent>
     </Card>}
     <div className="flex items-center gap-3">
-      <Button onClick={() => void save()} disabled={!settings}>{t("save")}</Button>
+      <Button onClick={() => void save()} disabled={!settings || !availability || saving}>{t("save")}</Button>
       {message && <span className="text-sm text-slate-600">{message}</span>}
     </div>
   </div>;

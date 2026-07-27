@@ -25,8 +25,11 @@ public record ResumeAnalysisRequestedEvent(
         @JsonProperty("analysis_mode") String analysisMode,
         @JsonProperty("policy_version") String policyVersion,
         @JsonProperty("model_version") String modelVersion,
+        @JsonProperty("analysis_revision") Integer analysisRevision,
         @JsonProperty("job_title") String jobTitle,
         @JsonProperty("job_description") String jobDescription,
+        @JsonProperty("job_context_anchors") List<JobContextAnchor> jobContextAnchors,
+        @JsonProperty("job_context_truncated") Boolean jobContextTruncated,
         @JsonProperty("allowed_core_section_ids") List<UUID> allowedCoreSectionIds,
         @JsonProperty("template_questions") List<TemplateQuestion> templateQuestions,
         @JsonProperty("personalized_question_limit") int personalizedQuestionLimit) {
@@ -35,4 +38,8 @@ public record ResumeAnalysisRequestedEvent(
             @JsonProperty("section_id") UUID sectionId,
             String prompt,
             String competency) {}
+    public record JobContextAnchor(
+            @JsonProperty("anchor_id") String anchorId,
+            String field,
+            String excerpt) {}
 }

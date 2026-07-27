@@ -26,7 +26,8 @@ export type RevisionResponse = {id:string;templateId:string;revisionNumber:numbe
 export type CvAnalysisEvidence = {anchorId:string;excerpt:string;sourceLocation:string};
 export type CvAnalysisSkill = {name:string;evidenceAnchorIds:string[]};
 export type CvAnalysisQuestion = {questionId:string;targetSectionId:string;prompt:string;competency:string;rubric:string;evidenceAnchorIds:string[]};
-export type CvAnalysisResponse = {mode:string;status:string;policyVersion:string;modelVersion:string;generatedAt:string;summary:string;evidence:CvAnalysisEvidence[];skills:CvAnalysisSkill[];personalizedQuestions:CvAnalysisQuestion[];failureCode:string|null;advisoryOnly:boolean};
+export type CvAnalysisFitFinding = {weightPercent:number;matchPercent:number;evidenceStatus:"EVIDENCED"|"NOT_EVIDENCED";explanation:string;jobExcerpt:string;jobAnchorId:string;cvEvidenceAnchorIds:string[]};
+export type CvAnalysisResponse = {mode:string;status:string;policyVersion:string;modelVersion:string;generatedAt:string|null;summary:string|null;evidence:CvAnalysisEvidence[];skills:CvAnalysisSkill[];personalizedQuestions:CvAnalysisQuestion[];failureCode:string|null;advisoryOnly:boolean;fitScorePercent?:number|null;fitConfidence?:"LOW"|"MEDIUM"|"HIGH"|null;fitExplanation?:string|null;strengths?:CvAnalysisFitFinding[];gaps?:CvAnalysisFitFinding[];analysisRevision?:number|null;refreshAvailable?:boolean;refreshStatus?:string;refreshFailureCode?:string|null};
 export type RecruitmentCandidate = {id:string;fullName:string;email:string;phone:string|null;notes:string|null;createdAt:string;updatedAt:string};
 export type RecruitmentApplication = {id:string;jobId:string;jobTitle:string;candidateId:string;candidateName:string;candidateEmail:string;status:string;submittedAt:string;verifiedAt:string|null;withdrawnAt:string|null;cvPresent:boolean;cvAnalysisStatus:string;overallScore:number|null;englishBand:string|null;interviewStatus:string|null;updatedAt:string};
 export type RecruitmentInterview = {id:string;applicationId:string;jobId:string;jobTitle:string;candidateId:string;candidateName:string;status:string;scheduledAt:string|null;scheduledStartAt:string|null;scheduledEndAt:string|null;schedulingTimezone:string|null;rescheduleCount:number;startedAt:string|null;completedAt:string|null;overallScore:number|null;englishBand:string|null;recordingEnabled:boolean;recordingRetentionDays:number;updatedAt:string};
@@ -108,5 +109,6 @@ export const deleteRecruitmentCandidate=(request:ApiRequest,id:string)=>empty(re
 export const getRecruitmentApplication=(request:ApiRequest,id:string)=>json<RecruitmentApplication>(request,`/applications/${id}`);
 export const deleteRecruitmentCv=(request:ApiRequest,applicationId:string)=>empty(request,`/applications/${applicationId}/cv`,{method:"DELETE"});
 export const getCvAnalysis=(request:ApiRequest,applicationId:string)=>json<CvAnalysisResponse>(request,`/applications/${applicationId}/cv-analysis`);
+export const refreshCvAnalysis=(request:ApiRequest,applicationId:string,requestId:string)=>json<CvAnalysisResponse>(request,`/applications/${applicationId}/cv-analysis/refresh`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({requestId})});
 
 export const getRecruitmentInterview=(request:ApiRequest,id:string)=>json<RecruitmentInterview>(request,`/interviews/${id}`);
