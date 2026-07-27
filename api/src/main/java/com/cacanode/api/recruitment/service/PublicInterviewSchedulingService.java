@@ -70,6 +70,10 @@ public class PublicInterviewSchedulingService {
         if(days<1||days>14)throw new BadRequestException("days must be between 1 and 14");
         Access access=require(raw);RecruitmentTenantSettings s=tenantSettings(access.interview().getTenantId());
         ZoneId zone=ZoneId.of(s.getSchedulingTimezone());LocalDate today=Instant.now(clock).atZone(zone).toLocalDate();
+        if(!windows.existsByTenantId(access.interview().getTenantId())
+                && !exceptions.existsByTenantIdAndKindAndExceptionDateGreaterThanEqual(
+                        access.interview().getTenantId(),AvailabilityExceptionKind.EXTRA,today))
+            throw new ConflictException("INTERVIEW_AVAILABILITY_NOT_CONFIGURED");
         LocalDate start=from==null?today:from;if(start.isBefore(today))start=today;
         LocalDate horizon=today.plusDays(s.getBookingHorizonDays());
         if(start.isAfter(horizon))return new PublicRecruitmentDtos.SlotPage(List.of(),null,zone.getId());

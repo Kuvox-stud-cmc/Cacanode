@@ -56,9 +56,9 @@ help:
 	$(info   make migrate-validate Validate applied Flyway migrations)
 	$(info   make migrate-repair   Repair Flyway metadata)
 	$(info   make migrate-baseline Baseline an existing non-empty database)
-	$(info   make db-reset         Reset local Postgres volume, restart it, then migrate)
+	$(info   make db-reset         Reset local Postgres, Qdrant, Kuzu, and SeaweedFS data, restart them, then migrate)
 	$(info   make db-seed          Seed local dev tenant and admin account)
-	$(info   make db-reset-seed    Reset local Postgres, migrate, then seed)
+	$(info   make db-reset-seed    Reset local persisted application data, migrate, then seed)
 	$(info   make baseline-credentials Print disposable baseline bearer-token exports for the seeded account)
 	$(info Optional variables: PROFILE=dev ENV_FILE=.env MAVEN_ARGS=...)
 
@@ -104,8 +104,15 @@ migrate-baseline:
 	$(ENV_RUN) $(MVNW) flyway:baseline $(FLYWAY_PROPS) $(MAVEN_ARGS)
 
 db-reset:
-	$(ENV_RUN) docker compose --env-file $(ENV_FILE) -f $(ROOT_COMPOSE_FILE) down --volumes postgres
-	$(ENV_RUN) docker compose --env-file $(ENV_FILE) -f $(ROOT_COMPOSE_FILE) up -d postgres
+	$(ENV_RUN) docker compose --env-file $(ENV_FILE) -f $(ROOT_COMPOSE_FILE) rm -s -f \
+		postgres qdrant graph-service seaweedfs-s3 seaweedfs-filer seaweedfs-volume seaweedfs-master
+	$(ENV_RUN) volumes="$$(docker compose --env-file $(ENV_FILE) -f $(ROOT_COMPOSE_FILE) config --format json | \
+		$(PYTHON) -c 'import json,sys; data=json.load(sys.stdin); keys=("postgres_data","qdrant_data","kuzu_data","seaweedfs_master","seaweedfs_volume","seaweedfs_filer"); print(" ".join(data["volumes"][key]["name"] for key in keys))')"; \
+		for volume in $$volumes; do \
+			if docker volume inspect "$$volume" >/dev/null 2>&1; then docker volume rm "$$volume"; fi; \
+		done
+	$(ENV_RUN) docker compose --env-file $(ENV_FILE) -f $(ROOT_COMPOSE_FILE) up -d --wait --wait-timeout 120 \
+		postgres qdrant graph-service seaweedfs-master seaweedfs-volume seaweedfs-filer seaweedfs-s3
 	$(MAKE) migrate ENV_FILE=$(ENV_FILE)
 
 db-seed:

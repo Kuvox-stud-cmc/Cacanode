@@ -4,5 +4,5 @@ import { PublicJobsLayout } from "@/components/recruitment/PublicJobsLayout";
 import { CandidateManagement } from "@/components/recruitment/CandidateManagement";
 import type { AppLocale } from "@/i18n/routing";
 
-export const metadata:Metadata={robots:{index:false,follow:false}};
-export default async function ManagePage({params}:{params:Promise<{locale:AppLocale}>}){const {locale}=await params;setRequestLocale(locale);const t=await getTranslations({locale,namespace:"Jobs.manage"});return <PublicJobsLayout><div className="mx-auto max-w-2xl"><h1 className="mb-2 text-3xl font-bold">{t("title")}</h1><p className="mb-7 text-slate-600">{t("description")}</p><CandidateManagement/></div></PublicJobsLayout>;}
+export const metadata:Metadata={robots:{index:false,follow:false},referrer:"no-referrer"};
+export default async function ManagePage({params,searchParams}:{params:Promise<{locale:AppLocale}>;searchParams:Promise<Record<string,string|string[]|undefined>>}){const [{locale},query]=await Promise.all([params,searchParams]);setRequestLocale(locale);const t=await getTranslations({locale,namespace:"Jobs.manage"});const scheduling=typeof query.invitation==="string";return <PublicJobsLayout><div className="mx-auto max-w-4xl"><h1 className="mb-2 text-3xl font-bold">{t(scheduling?"invitation.pageTitle":"title")}</h1><p className="mb-7 text-slate-600">{t(scheduling?"invitation.pageDescription":"description")}</p><CandidateManagement/></div></PublicJobsLayout>;}

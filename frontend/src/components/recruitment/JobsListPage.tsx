@@ -19,6 +19,7 @@ import {
 import { Plus, Eye, Trash2, Briefcase } from "lucide-react";
 
 import { formatEnumLabel } from "@/lib/recruitment-formatters";
+import { useRecruitmentConfirmation } from "@/components/recruitment/useRecruitmentConfirmation";
 
 const jobStatuses = ["DRAFT", "PUBLISHED", "PAUSED", "CLOSED", "ARCHIVED"];
 
@@ -29,6 +30,7 @@ export function JobsListPage() {
   const { request } = useApiClient();
   const search = useSearchParams();
   const router = useRouter();
+  const { confirm, confirmationDialog } = useRecruitmentConfirmation();
 
   const page = Number(search.get("page") ?? 0);
   const q = search.get("q") ?? "";
@@ -80,7 +82,12 @@ export function JobsListPage() {
   }, [load]);
 
   const handleAction = async (job: RecruitmentJob, action: "publish" | "pause" | "close" | "archive") => {
-    if (!window.confirm(`Perform "${action}" action on job "${job.title}"?`)) return;
+    if (!await confirm({
+      title: `${t(`actions.${action}`)}: ${job.title}`,
+      description: action === "publish" ? t("dialogs.publishJob") : t(`forms.confirm.${action}`),
+      confirmLabel: t(`actions.${action}`),
+      destructive: action !== "publish",
+    })) return;
     try {
       await jobAction(request, job.id, action);
       await load();
@@ -90,7 +97,7 @@ export function JobsListPage() {
   };
 
   const handleDelete = async (job: RecruitmentJob) => {
-    if (!window.confirm(`Delete draft job "${job.title}"?`)) return;
+    if (!await confirm({ title: `${t("forms.delete")}: ${job.title}`, description: t("forms.confirm.deleteJob"), confirmLabel: t("forms.delete"), destructive: true })) return;
     try {
       await deleteRecruitmentJob(request, job.id);
       await load();
@@ -215,6 +222,7 @@ export function JobsListPage() {
           </Button>
         </div>
       </div>
+      {confirmationDialog}
     </div>
   );
 }

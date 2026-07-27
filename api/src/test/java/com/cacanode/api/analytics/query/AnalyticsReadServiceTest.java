@@ -76,6 +76,17 @@ class AnalyticsReadServiceTest {
     }
 
     @Test
+    void dashboardToleratesAProjectionLagForTheTenantRow() {
+        jdbc.update("DELETE FROM analytics_tenant_projection WHERE tenant_id = ?", tenantId);
+
+        AnalyticsDtos.DashboardSummary result = service.dashboardSummary(tenantId);
+
+        assertThat(result.storageLimitBytes()).isZero();
+        assertThat(result.totalDocuments()).isZero();
+        assertThat(result.recentDocuments()).isEmpty();
+    }
+
+    @Test
     void analyticsFiltersChannelsAndCalculatesMetrics() {
         LocalDate endDate = LocalDate.now(Clock.systemUTC()).plusDays(1);
         LocalDateTime currentStart = endDate.minusDays(7).atStartOfDay();

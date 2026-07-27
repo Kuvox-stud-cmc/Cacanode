@@ -4,11 +4,12 @@ import hashlib
 import os
 import time
 from urllib.parse import urlsplit, urlunsplit
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 import redis.asyncio as redis
 
+from app.contracts.ai_interview_v1 import interview_event_id
 from app.modules.interview.internal.redis_state import (
     EVENT_RETENTION_SECONDS,
     LEASE_SECONDS,
@@ -139,6 +140,10 @@ async def test_interview_state_ttls_idempotency_leases_and_publication_markers()
         )
         assert claim.same_call_replay is False
         assert replay.same_call_replay is True
+        claimed_deadline = await client.zscore(
+            state.keys.recovery_index(), runtime_session_id
+        )
+        assert claimed_deadline is not None
         with pytest.raises(ValueError, match="another call"):
             await state.claim_runtime_token(
                 token=runtime_token,
@@ -148,8 +153,29 @@ async def test_interview_state_ttls_idempotency_leases_and_publication_markers()
                 lease_seconds=30,
             )
         assert await state.renew_runtime_session(
-            runtime_session_id, "CA" + "1" * 32, lease_seconds=30
+            runtime_session_id, "CA" + "1" * 32, lease_seconds=60
         )
+        renewed_deadline = await client.zscore(
+            state.keys.recovery_index(), runtime_session_id
+        )
+        assert renewed_deadline is not None and renewed_deadline > claimed_deadline
+        runtime_marker = str(uuid4())
+        await state.mark_confirmed_publication(runtime_marker)
+        await state.cas_checkpoint(
+            runtime_session_id,
+            expected_revision=0,
+            phase="TERMINAL_COMPLETE",
+            runtime_state={"engine": {"next_turn_sequence": 1}},
+            call_sid="CA" + "1" * 32,
+        )
+        with pytest.raises(ValueError, match="binding mismatch"):
+            await state.terminalize_runtime_session(
+                runtime_session_id, runtime_attempt, "CA" + "9" * 32
+            )
+        assert await client.exists(state.keys.checkpoint(runtime_session_id))
+        assert await client.exists(state.keys.token_hash(token_hash))
+        assert await client.zscore(state.keys.recovery_index(), runtime_session_id) is not None
+        assert await state.publication_confirmed(runtime_marker)
         assert await state.terminalize_runtime_session(
             runtime_session_id, runtime_attempt, "CA" + "1" * 32
         )
@@ -160,6 +186,8 @@ async def test_interview_state_ttls_idempotency_leases_and_publication_markers()
         assert not await client.zscore(
             state.keys.tenant_concurrency(runtime_tenant), runtime_attempt
         )
+        assert await client.zscore(state.keys.recovery_index(), runtime_session_id) is None
+        assert await state.publication_confirmed(runtime_marker)
         assert not await state.cancel_runtime_session(runtime_session_id, runtime_attempt)
         with pytest.raises(ValueError, match="invalid or expired"):
             await state.claim_runtime_token(
@@ -169,6 +197,35 @@ async def test_interview_state_ttls_idempotency_leases_and_publication_markers()
                 tenant_limit=1,
                 lease_seconds=30,
             )
+
+        completed_marker = str(
+            interview_event_id(
+                "interview.session.completed", UUID(runtime_session_id), "completed:v1.1"
+            )
+        )
+        await state.mark_confirmed_publication(completed_marker)
+        await state.cas_checkpoint(
+            runtime_session_id,
+            expected_revision=0,
+            phase="TERMINAL_COMPLETE",
+            runtime_state={"engine": {"next_turn_sequence": 1}},
+            call_sid="CA" + "1" * 32,
+        )
+        await state.mark_recoverable(runtime_session_id, recover_at_epoch_seconds=1)
+        replacement = await state.prepare_runtime_session(
+            session_id=runtime_session_id,
+            call_attempt_id=str(uuid4()),
+            tenant_id=runtime_tenant,
+            payload={"snapshotVersion": "interview-session-v1", "replacement": True},
+            payload_hash="d" * 64,
+            token_sha256="e" * 64,
+            expires_at_epoch_seconds=int(time.time()) + 900,
+        )
+        assert replacement.created
+        assert not await client.exists(state.keys.checkpoint(runtime_session_id))
+        assert await client.zscore(state.keys.recovery_index(), runtime_session_id) is None
+        assert await state.publication_confirmed(completed_marker)
+        assert await state.publication_confirmed(runtime_marker)
     finally:
         keys = [key async for key in client.scan_iter(match=f"{prefix}:*")]
         if keys:

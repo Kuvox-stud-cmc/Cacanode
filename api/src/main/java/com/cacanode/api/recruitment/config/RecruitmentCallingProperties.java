@@ -33,10 +33,11 @@ public record RecruitmentCallingProperties(
         boolean transportSmokeMode,
         boolean interviewEngineEnabled,
         boolean durableResultsEnabled,
-        String appEnvironment) {
+        String appEnvironment,
+        boolean callForMoreThan600) {
 
     public RecruitmentCallingProperties {
-        consentVoiceEnglish=defaulted(consentVoiceEnglish,"Google.en-US-Standard-C");
+        consentVoiceEnglish=defaulted(consentVoiceEnglish,"alice");
         consentVoiceVietnamese=defaulted(consentVoiceVietnamese,"Google.vi-VN-Standard-A");
         appEnvironment=defaulted(appEnvironment,"development");
     }

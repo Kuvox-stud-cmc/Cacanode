@@ -14,6 +14,8 @@ import java.util.UUID;
 public interface RecruitmentInterviewCallAttemptRepository extends JpaRepository<RecruitmentInterviewCallAttempt,UUID> {
     Optional<RecruitmentInterviewCallAttempt> findByIdAndTenantId(UUID id,UUID tenantId);
     Optional<RecruitmentInterviewCallAttempt> findByTwilioCallSid(String twilioCallSid);
+    List<RecruitmentInterviewCallAttempt> findTop100ByTenantIdAndInterviewIdOrderByAttemptNumberDesc(
+            UUID tenantId,UUID interviewId);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select a from RecruitmentInterviewCallAttempt a where a.id=:id")

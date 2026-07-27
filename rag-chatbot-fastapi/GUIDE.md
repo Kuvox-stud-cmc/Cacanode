@@ -3,7 +3,7 @@
 This guide explains how the Python AI service under `app` is organized and how to add features
 without breaking its module boundaries.
 
-The service is a modular monolith: one source tree containing six capability modules, composed into
+The service is a modular monolith: one source tree containing seven capability modules, composed into
 three runtime roles. Module boundaries are the current architecture, not a future migration target.
 Architecture tests enforce them on every test run.
 
@@ -114,6 +114,8 @@ codecs, Kuzu identities, queue behavior, and cleanup logic.
 | Retrieval Redis keys/codecs | `retrieval` |
 | Ingestion event/job/lease Redis keys | `ingestion` |
 | RabbitMQ ingestion queue, retries, publications, and DLQ behavior | `ingestion` |
+| Interview session, token, lease, concurrency, checkpoint, recovery, event-marker, and resume-analysis Redis keys | `interview` |
+| RabbitMQ AI-interview exchange, queues, publications, confirmations, recovery, and DLQ behavior | `interview` |
 | SeaweedFS document objects | Java `document`; Python has read-only access through `common.storage` |
 | PostgreSQL business data | Java modules; Python has no access |
 
@@ -163,6 +165,7 @@ app/
     index/{api,internal,transport}
     graph/{api,internal,transport}
     model/{api,internal}
+    interview/{api,internal,transport}
   common/
   bootstrap/
   contracts/
@@ -211,6 +214,7 @@ The capability graph is intentionally acyclic:
 generation -> retrieval.api, model.api, common
 retrieval  -> index.api, graph.api, model.api, common
 ingestion  -> index.api, graph.api, model.api, common.storage
+interview  -> ingestion.api, model.api
 index      -> common
 graph      -> common
 model      -> common
@@ -233,6 +237,7 @@ Do not move business orchestration into `common` or `bootstrap` merely to hide a
 | `index` | Knowledge-index replacement, deletion, dense/sparse search, neighbors, and document-unit listing | `KnowledgeIndexCommandApi`, `KnowledgeIndexQueryApi`; index commands/queries/results/errors | Qdrant `knowledge_units_v2` |
 | `graph` | Graph projection replacement/deletion and graph search | `GraphProjectionApi`, `GraphQueryApi`; graph batches/queries/results/errors | Kuzu, graph identities, and graph transport implementation |
 | `model` | Chat providers, dense embeddings, sparse embeddings, normalization, and embedding caching | `ChatModelApi`, `TextEmbeddingApi`, `SparseEmbeddingApi`; model messages/results/vectors/errors | Embedding Redis namespace and provider adaptation |
+| `interview` | Resume analysis, prepared runtime sessions, Twilio media execution, deterministic interview progression, durable turn/result publication, and crash recovery | Interview preparation/cancellation API types plus the gRPC, WebSocket, and RabbitMQ transports; depends only on `ingestion.api` and `model.api` | `ccn:*:interview:*` Redis namespaces and the `cacanode.interview.v1` RabbitMQ topology |
 
 The gRPC service delegates through these boundaries:
 
@@ -309,6 +314,44 @@ Use Java's existing reindex command for full disaster recovery. When changing th
 duplicate and concurrent deliveries, payload-hash mismatch, lease expiry, retry exhaustion, cleanup
 retry, DLQ handling, and crashes around every publication, checkpoint, replacement, and
 acknowledgement boundary.
+
+## Durable AI interviews
+
+The interview module owns all runtime Redis state. With the configured prefix, its namespaces are:
+
+```text
+{prefix}:interview:session:{session_id}
+{prefix}:interview:checkpoint:{session_id}
+{prefix}:interview:lease:{session_id}
+{prefix}:interview:token:{sha256}
+{prefix}:interview:concurrency:global
+{prefix}:interview:concurrency:tenant:{tenant_id}
+{prefix}:interview:recovery
+{prefix}:interview:event:{event_id}
+{prefix}:interview:resume:{analysis_id}
+{prefix}:interview:resume-outcome:{analysis_id}
+```
+
+Claiming a call registers its session in the recovery sorted set in the same Lua operation that
+claims the runtime token. Heartbeats atomically renew concurrency admission and move the recovery
+deadline forward. The watchdog entry remains for the full active lifetime; stream start and event
+commit do not remove it. Only terminalization or explicit cancellation clears it. If a process
+stops, the recovery worker acquires the execution lease, republishes any staged event until RabbitMQ
+confirms it, emits remaining usage and a terminal failure when needed, and then terminalizes the
+session. If recovery finds a staged terminal event or an already-committed `TERMINAL_COMPLETE`
+checkpoint, it terminalizes that confirmed result and does not create a second terminal event.
+
+RabbitMQ topology is stable: exchange `cacanode.interview.v1`, dead-letter exchange
+`cacanode.interview.dlx.v1`, resume-analysis queue `cacanode.interview.resume-analysis.v1`, Java
+result queue `cacanode.recruitment.interview-events.v1`, and their corresponding `.dlq.v1` queues.
+Routing keys remain `interview.resume-analysis.requested`, `interview.resume-analysis.outcome`,
+`interview.turn.finalized`, `interview.session.completed`, `interview.session.failed`, and
+`interview.provider.usage`.
+
+Shared wire contracts live in `contracts/ai-interview/v1`. Resume-analysis remains on schema 1.1.
+New runtime turns, terminal results, and provider usage use schema 1.2, whose UUIDv5 identities
+include both `session_id` and `call_attempt_id`. Confirmed-publication markers are retained as
+deduplication history and must never be cleared for redial.
 
 ## Where new code belongs
 
@@ -393,7 +436,7 @@ The architecture suite rejects:
 - Qdrant knowledge-index access outside `index`;
 - semantic-answer collection access outside `generation`;
 - Kuzu imports outside `graph`;
-- aio-pika imports outside ingestion transport;
+- aio-pika imports outside ingestion and interview transports;
 - boto3 imports outside common storage;
 - Redis key strings or codecs outside their owning modules;
 - maintenance imports of module internals;

@@ -38,10 +38,10 @@ public class PublicJobProjectionService {
                 .addValue("discoverable",discoverable).addValue("cvAiEnabled",cvAiEnabled);
         jdbc.update("""
                 INSERT INTO recruitment_public_jobs(
-                    job_id,tenant_id,public_id,tenant_slug,company_name,title,description,department,
+                    job_id,tenant_id,public_id,tenant_slug,company_name,title,description,description_html,department,
                     location,employment_type,work_mode,experience_level,language,cv_policy,
                     cv_ai_disclosed,cv_ai_mode,screening_questions,published_at,closing_at,created_at,updated_at,discoverable)
-                SELECT j.id,j.tenant_id,j.public_id,:tenantSlug,:companyName,j.title,j.description,j.department,
+                SELECT j.id,j.tenant_id,j.public_id,:tenantSlug,:companyName,j.title,j.description,j.description_html,j.department,
                     j.location,j.employment_type,j.work_mode,j.experience_level,j.language,j.cv_policy,
                     :cvAiEnabled AND j.effective_cv_ai_mode <> 'OFF',
                     CASE WHEN :cvAiEnabled THEN COALESCE(j.effective_cv_ai_mode,'OFF') ELSE 'OFF' END,
@@ -52,7 +52,7 @@ public class PublicJobProjectionService {
                 WHERE j.tenant_id=:tenantId AND j.id=:jobId AND j.status='PUBLISHED' AND j.closing_at>NOW()
                 ON CONFLICT (job_id) DO UPDATE SET
                     tenant_slug=EXCLUDED.tenant_slug,company_name=EXCLUDED.company_name,
-                    title=EXCLUDED.title,description=EXCLUDED.description,department=EXCLUDED.department,
+                    title=EXCLUDED.title,description=EXCLUDED.description,description_html=EXCLUDED.description_html,department=EXCLUDED.department,
                     location=EXCLUDED.location,employment_type=EXCLUDED.employment_type,
                     work_mode=EXCLUDED.work_mode,experience_level=EXCLUDED.experience_level,
                     language=EXCLUDED.language,cv_policy=EXCLUDED.cv_policy,

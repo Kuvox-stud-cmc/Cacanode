@@ -4,6 +4,8 @@ import com.cacanode.ai.v1.GenerateAnswerResponse;
 import com.cacanode.ai.v1.TicketDraft;
 import com.cacanode.api.ai.api.InterviewInferenceApi;
 import com.cacanode.api.ai.api.InterviewInferenceException;
+import io.grpc.Status;
+import io.grpc.StatusRuntimeException;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
@@ -109,5 +111,13 @@ class GrpcAiInferenceClientTest {
         assertThrows(InterviewInferenceException.class, () ->
                 GrpcAiInferenceClient.preparedInterview(command,
                         com.cacanode.ai.v1.PrepareInterviewSessionResponse.getDefaultInstance()));
+    }
+
+    @Test
+    void preservesBoundedInterviewRuntimeValidationReason() {
+        InterviewInferenceException error=GrpcAiInferenceClient.interviewFailure(
+                new StatusRuntimeException(Status.INVALID_ARGUMENT.withDescription("INTERVIEW_SNAPSHOT_HASH_MISMATCH")),
+                "prepare interview session");
+        assertEquals("INTERVIEW_SNAPSHOT_HASH_MISMATCH",error.getCode());
     }
 }

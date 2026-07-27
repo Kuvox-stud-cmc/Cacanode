@@ -17,7 +17,19 @@ async function assertNoSeriousAxeViolations(page: Page) {
   expect(result.violations.filter((item) => item.impact === "critical" || item.impact === "serious")).toEqual([]);
 }
 
-async function mockRecruiter(page: Page, masterEnabled: boolean) {
+async function mockRecruiter(page: Page, masterEnabled: boolean, jobStatus = "DRAFT") {
+  let lastJobWrite: Record<string, unknown> | null = null;
+  const job = {
+    id: "55555555-5555-4555-8555-555555555555", publicId: "66666666-6666-4666-8666-666666666666",
+    title: "Platform Engineer", description: "Legacy description", descriptionHtml: null,
+    department: "Engineering", location: "Ho Chi Minh City", employmentType: "FULL_TIME", workMode: "HYBRID",
+    experienceLevel: "MID", language: "en-US", status: jobStatus, cvPolicy: "OPTIONAL",
+    automationModeOverride: null, cvAiModeOverride: null, effectiveAutomationMode: null, effectiveCvAiMode: null,
+    recordingEnabled: false, recordingRetentionDays: 0, templateRevisionId: null, closingAt: null,
+    publishedAt: jobStatus === "PUBLISHED" ? "2026-07-20T03:00:00" : null, pausedAt: null, closedAt: null,
+    archivedAt: null, companyName: "CacaNode", companySlug: "cacanode", version: 0, screeningQuestions: [],
+    createdAt: "2026-07-20T03:00:00", updatedAt: "2026-07-20T03:00:00",
+  };
   await page.route("**/api/v1/**", async (route) => {
     const path = new URL(route.request().url()).pathname;
     if (path.endsWith("/auth/refresh")) return json(route, {
@@ -50,8 +62,24 @@ async function mockRecruiter(page: Page, masterEnabled: boolean) {
     if (path.endsWith("/recruitment/availability")) return json(route, {
       timezone: "Asia/Ho_Chi_Minh", weeklyWindows: [{ dayOfWeek: 1, startLocal: "09:00", endLocal: "17:00" }], exceptions: [], version: 0,
     });
+    if (path.endsWith("/recruitment/templates")) return json(route, [], { "X-Total-Count": "0" });
+    if (path.endsWith(`/recruitment/jobs/${job.id}/preview`)) return json(route, {
+      publicId: job.publicId, tenantSlug: "cacanode", companyName: "CacaNode", title: job.title,
+      description: "Build reliable systems", descriptionHtml: "<h2>What you will do</h2><ul><li><strong>Build reliable systems</strong></li></ul>",
+      department: job.department, location: job.location, employmentType: job.employmentType, workMode: job.workMode,
+      experienceLevel: job.experienceLevel, language: job.language, cvPolicy: job.cvPolicy, status: job.status,
+      publishedAt: job.publishedAt, closingAt: null,
+    }, { "Cache-Control": "no-store" });
+    if (path.endsWith(`/recruitment/jobs/${job.id}`)) {
+      if (route.request().method() === "PUT") {
+        lastJobWrite = route.request().postDataJSON() as Record<string, unknown>;
+        return json(route, { ...job, ...lastJobWrite, description: String(lastJobWrite.description ?? "") });
+      }
+      return json(route, job);
+    }
     await route.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify({ message: `Unmocked ${path}` }) });
   });
+  return { job, lastJobWrite: () => lastJobWrite };
 }
 
 test("shows the platform activation blocker", async ({ page }) => {
@@ -68,6 +96,38 @@ test("loads tenant-admin recruitment setup", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Recruitment setup" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Save" })).toBeEnabled();
   await assertNoSeriousAxeViolations(page);
+});
+
+test("authors and persists a formatted job description", async ({ page }) => {
+  const mocked = await mockRecruiter(page, true);
+  await page.goto(`/recruitment/jobs/${mocked.job.id}`);
+  const editor = page.getByRole("textbox", { name: "Job description content" });
+  await expect(editor).toContainText("Legacy description");
+  await editor.click();
+  await page.keyboard.press(process.platform === "darwin" ? "Meta+A" : "Control+A");
+  await page.keyboard.type("Build reliable systems");
+  await page.keyboard.press(process.platform === "darwin" ? "Meta+A" : "Control+A");
+  await page.getByRole("button", { name: "Bold" }).click();
+  await page.getByRole("button", { name: "Save draft" }).click();
+  await expect.poll(() => mocked.lastJobWrite()).not.toBeNull();
+  expect(String(mocked.lastJobWrite()?.descriptionHtml)).toContain("<strong>Build reliable systems</strong>");
+  expect(mocked.lastJobWrite()?.description).toBe("Build reliable systems");
+  await assertNoSeriousAxeViolations(page);
+});
+
+test("renders persisted recruiter preview without Apply", async ({ page }) => {
+  const mocked = await mockRecruiter(page, true);
+  await page.goto(`/recruitment/jobs/${mocked.job.id}/preview`);
+  await expect(page.getByRole("status")).toContainText("Recruiter preview · DRAFT");
+  await expect(page.getByRole("heading", { name: "What you will do" })).toBeVisible();
+  await expect(page.getByRole("link", { name: /apply/i })).toHaveCount(0);
+  await assertNoSeriousAxeViolations(page);
+});
+
+test("published unlisted jobs link to their exact public URL", async ({ page }) => {
+  const mocked = await mockRecruiter(page, true, "PUBLISHED");
+  await page.goto(`/recruitment/jobs/${mocked.job.id}`);
+  await expect(page.getByRole("link", { name: "Public preview" })).toHaveAttribute("href", `/jobs/${mocked.job.publicId}`);
 });
 
 test("exchanges a candidate token and requests confirmed erasure", async ({ page }) => {

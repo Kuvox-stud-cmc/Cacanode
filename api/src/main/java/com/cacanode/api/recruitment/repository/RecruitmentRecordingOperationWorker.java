@@ -22,6 +22,8 @@ import java.security.MessageDigest;
 import java.time.*;
 import java.util.*;
 
+import static com.cacanode.api.recruitment.repository.RecruitmentJdbcTypes.timestamptz;
+
 @Service
 @RequiredArgsConstructor
 @ConditionalOnProperty(prefix="app.recruitment",name="recording-enabled",havingValue="true")
@@ -114,7 +116,7 @@ public class RecruitmentRecordingOperationWorker {
     private void deleteProvider(Operation operation) {
         if(operation.providerSid!=null&&transport.exists(operation.providerSid))transport.delete(operation.providerSid);
         if(operation.providerSid!=null&&transport.exists(operation.providerSid))throw new RecordingTransport.UncertainFailure("TWILIO_RECORDING_DELETE_UNCONFIRMED",null);
-        Instant now=clock.instant();jdbc.update("UPDATE recruitment_interview_recordings SET state='READY',provider_deleted_at=?,ready_at=?,failure_code=NULL,updated_at=NOW() WHERE id=?",now,now,operation.recordingId);
+        Instant now=clock.instant();jdbc.update("UPDATE recruitment_interview_recordings SET state='READY',provider_deleted_at=?,ready_at=?,failure_code=NULL,updated_at=NOW() WHERE id=?",timestamptz(now),timestamptz(now),operation.recordingId);
         RecordingReadyEvent event=new RecordingReadyEvent("1.0",InterviewEventIdentity.eventId("recruitment.recording.ready",operation.sessionId,"recording:"+operation.recordingId),
                 "recruitment.recording.ready",now,operation.tenantId,operation.sessionId,operation.sessionId,operation.callAttemptId,
                 operation.storageKey,"audio/mpeg",operation.sizeBytes==null?0:operation.sizeBytes,operation.sha256,operation.retainedUntil);
@@ -127,8 +129,9 @@ public class RecruitmentRecordingOperationWorker {
         if(operation.providerSid!=null&&transport.exists(operation.providerSid))transport.delete(operation.providerSid);
         if(operation.providerSid!=null&&transport.exists(operation.providerSid))throw new IllegalStateException("RECORDING_PROVIDER_DELETE_UNCONFIRMED");
         if(operation.storageReservationId!=null)quota.releaseStorage(operation.tenantId,operation.storageReservationId);
+        Instant deletedAt=clock.instant();
         jdbc.update("UPDATE recruitment_interview_recordings SET state='DELETED',deleted_at=?,provider_deleted_at=COALESCE(provider_deleted_at,?),failure_code=NULL,updated_at=NOW() WHERE id=?",
-                clock.instant(),clock.instant(),operation.recordingId);
+                timestamptz(deletedAt),timestamptz(deletedAt),operation.recordingId);
     }
 
     private void verify(String key,long size,String expected) throws Exception {var metadata=storage.metadata(key);if(metadata.contentLength()!=size)throw new IllegalStateException("RECORDING_SIZE_MISMATCH");
@@ -148,7 +151,7 @@ public class RecruitmentRecordingOperationWorker {
                     notification_published_at=NULL,notification_next_attempt_at=?,
                     notification_last_error_code=NULL,updated_at=NOW()
                 WHERE id=?
-                """,attempts,code(exception),nextAttempt,nextAttempt,operation.id);}
+                """,attempts,code(exception),timestamptz(nextAttempt),timestamptz(nextAttempt),operation.id);}
     private static String code(Throwable value){String text=value.getMessage();return text==null?value.getClass().getSimpleName():text.substring(0,Math.min(100,text.length()));}
     private record Operation(UUID id,UUID tenantId,UUID recordingId,String kind,int attempts,UUID sessionId,
             UUID callAttemptId,String providerSid,String storageKey,Long sizeBytes,String sha256,UUID storageReservationId,

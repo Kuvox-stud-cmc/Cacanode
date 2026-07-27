@@ -1,6 +1,7 @@
 package com.cacanode.api.recruitment.service;
 
 import com.cacanode.api.common.exception.custom.ConflictException;
+import com.cacanode.api.common.exception.custom.BadRequestException;
 import com.cacanode.api.recruitment.config.RecruitmentFraudProperties;
 import com.google.i18n.phonenumbers.PhoneNumberUtil;
 import com.google.i18n.phonenumbers.Phonenumber.PhoneNumber;
@@ -40,9 +41,10 @@ public class RecruitmentCallFraudGuard {
     private final StringRedisTemplate redis;
     private final RecruitmentFraudProperties properties;
     private final MeterRegistry metrics;
+    private final RecruitmentPhoneNumbers phoneNumbers;
 
     public String requireAttempt(UUID tenantId,String rawDestination) {
-        String destination=canonicalVietnameseDestination(rawDestination);
+        String destination=canonicalDestination(rawDestination);
         String day=LocalDate.now(ZoneOffset.UTC).toString();
         String destinationKey=fingerprint("destination:"+destination);
         String tenantKey=fingerprint("tenant:"+tenantId);
@@ -63,16 +65,17 @@ public class RecruitmentCallFraudGuard {
         catch(RuntimeException exception){throw rejected("GUARD_UNAVAILABLE");}
     }
 
-    String canonicalVietnameseDestination(String raw) {
+    String canonicalDestination(String raw) {
         try {
-            PhoneNumberUtil util=PhoneNumberUtil.getInstance();PhoneNumber number=util.parse(raw,"VN");
-            if(number.getCountryCode()!=84||!util.isValidNumberForRegion(number,"VN"))throw rejected("INVALID_DESTINATION");
+            String destination=phoneNumbers.normalizeRequired(raw);
+            PhoneNumberUtil util=PhoneNumberUtil.getInstance();PhoneNumber number=util.parse(destination,null);
             PhoneNumberUtil.PhoneNumberType type=util.getNumberType(number);
             if(type==PhoneNumberUtil.PhoneNumberType.PREMIUM_RATE||type==PhoneNumberUtil.PhoneNumberType.SHARED_COST
                     ||type==PhoneNumberUtil.PhoneNumberType.VOIP||type==PhoneNumberUtil.PhoneNumberType.UNKNOWN)
                 throw rejected("HIGH_RISK_DESTINATION");
-            return util.format(number,PhoneNumberUtil.PhoneNumberFormat.E164);
+            return destination;
         } catch(ConflictException exception){throw exception;}
+        catch(BadRequestException exception){throw rejected("INVALID_DESTINATION");}
         catch(Exception exception){throw rejected("INVALID_DESTINATION");}
     }
 

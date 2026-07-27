@@ -16,13 +16,19 @@ import {
   type RecruitmentCandidate,
 } from "@/lib/recruitment-admin-api";
 import { Plus, Eye, Trash2, Edit3, UserCheck } from "lucide-react";
+import { useAuthStore } from "@/components/providers/StoreProvider";
+import { useLocaleChangeDraft } from "@/hooks/useLocaleChangeDraft";
+import { useRecruitmentConfirmation } from "@/components/recruitment/useRecruitmentConfirmation";
 
 export function CandidatesListPage() {
   const t = useTranslations("Recruitment");
+  const c = useTranslations("Recruitment.candidatePages");
   const format = useFormatter();
   const { request } = useApiClient();
   const search = useSearchParams();
   const router = useRouter();
+  const tenantId = useAuthStore((state) => state.user?.tenantId);
+  const { confirm, confirmationDialog } = useRecruitmentConfirmation();
 
   const page = Number(search.get("page") ?? 0);
   const q = search.get("q") ?? "";
@@ -41,6 +47,15 @@ export function CandidatesListPage() {
     notes: "",
   });
   const [saving, setSaving] = useState(false);
+  const clearLocaleDraft = useLocaleChangeDraft(
+    `recruitment:candidate-dialog:${tenantId ?? "unknown"}`,
+    { modalOpen, editingCandidate },
+    (draft) => {
+      setModalOpen(draft.modalOpen);
+      setEditingCandidate(draft.editingCandidate);
+    },
+    Boolean(tenantId),
+  );
 
   const updateParams = useCallback((values: Record<string, string | null>) => {
     const next = new URLSearchParams(search.toString());
@@ -88,6 +103,7 @@ export function CandidatesListPage() {
         phone: editingCandidate.phone || null,
         notes: editingCandidate.notes || null,
       });
+      clearLocaleDraft();
       setModalOpen(false);
       setEditingCandidate({ fullName: "", email: "", phone: "", notes: "" });
       await load();
@@ -99,7 +115,7 @@ export function CandidatesListPage() {
   };
 
   const handleDelete = async (cand: RecruitmentCandidate) => {
-    if (!window.confirm(`Delete candidate "${cand.fullName}"? Associated applications may be impacted.`)) return;
+    if (!await confirm({ title: t("dialogs.deleteCandidateTitle", { name: cand.fullName }), description: t("dialogs.deleteCandidate"), confirmLabel: t("forms.delete"), destructive: true })) return;
     try {
       await deleteRecruitmentCandidate(request, cand.id);
       await load();
@@ -109,11 +125,13 @@ export function CandidatesListPage() {
   };
 
   const openCreateModal = () => {
+    clearLocaleDraft();
     setEditingCandidate({ fullName: "", email: "", phone: "", notes: "" });
     setModalOpen(true);
   };
 
   const openEditModal = (cand: RecruitmentCandidate) => {
+    clearLocaleDraft();
     setEditingCandidate({
       id: cand.id,
       fullName: cand.fullName,
@@ -162,22 +180,22 @@ export function CandidatesListPage() {
                     <strong className="truncate text-base font-medium">{cand.fullName}</strong>
                   </div>
                   <p className="text-sm text-muted-foreground">
-                    Email: <span className="font-medium text-foreground">{cand.email}</span> · Phone: {cand.phone || "—"}
+                    {c("email")}: <span className="font-medium text-foreground">{cand.email}</span> · {c("phone")}: {cand.phone || "—"}
                   </p>
                   <p className="text-xs text-slate-400 mt-0.5">
-                    Added: {format.dateTime(new Date(cand.createdAt), { dateStyle: "short" })}
-                    {cand.notes && ` · Notes: ${cand.notes}`}
+                    {c("added")}: {format.dateTime(new Date(cand.createdAt), { dateStyle: "short" })}
+                    {cand.notes && ` · ${c("notes")}: ${cand.notes}`}
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
-                  <Button size="sm" variant="ghost" onClick={() => openEditModal(cand)}>
+                  <Button size="sm" variant="ghost" aria-label={c("editCandidate", { name: cand.fullName })} onClick={() => openEditModal(cand)}>
                     <Edit3 className="h-4 w-4" />
                   </Button>
-                  <Button size="sm" variant="ghost" className="text-red-600 hover:bg-red-50" onClick={() => void handleDelete(cand)}>
+                  <Button size="sm" variant="ghost" aria-label={c("deleteCandidate", { name: cand.fullName })} className="text-red-600 hover:bg-red-50" onClick={() => void handleDelete(cand)}>
                     <Trash2 className="h-4 w-4" />
                   </Button>
                   <Button size="sm" variant="outline" nativeButton={false} render={<Link href={`/recruitment/candidates/${cand.id}`} />}>
-                    <Eye className="mr-1 h-3.5 w-3.5" /> Details
+                    <Eye className="mr-1 h-3.5 w-3.5" /> {c("details")}
                   </Button>
                 </div>
               </div>
@@ -203,11 +221,11 @@ export function CandidatesListPage() {
       </div>
 
       {/* Candidate Create/Edit Modal */}
-      <Dialog open={modalOpen} onOpenChange={setModalOpen}>
+      <Dialog open={modalOpen} onOpenChange={(open) => { setModalOpen(open); if (!open) clearLocaleDraft(); }}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>{editingCandidate.id ? "Edit Candidate" : t("actions.createCandidate")}</DialogTitle>
-            <DialogDescription>{t("candidateDialog")}</DialogDescription>
+            <DialogTitle>{editingCandidate.id ? c("editCandidateTitle") : t("actions.createCandidate")}</DialogTitle>
+            <DialogDescription>{editingCandidate.id ? c("editCandidateDescription") : t("candidateDialog")}</DialogDescription>
           </DialogHeader>
           <div className="space-y-3 py-2">
             <Input
@@ -234,8 +252,8 @@ export function CandidatesListPage() {
             />
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setModalOpen(false)}>
-              Cancel
+            <Button variant="outline" onClick={() => { clearLocaleDraft(); setModalOpen(false); }}>
+              {c("cancel")}
             </Button>
             <Button onClick={() => void handleSave()} disabled={!editingCandidate.fullName || !editingCandidate.email || saving}>
               {saving ? t("actions.saving") : t("save")}
@@ -243,6 +261,7 @@ export function CandidatesListPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      {confirmationDialog}
     </div>
   );
 }

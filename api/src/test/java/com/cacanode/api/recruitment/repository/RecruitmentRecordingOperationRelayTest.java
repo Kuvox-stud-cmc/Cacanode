@@ -8,6 +8,7 @@ import org.springframework.jdbc.core.ResultSetExtractor;
 import java.sql.ResultSet;
 import java.time.Clock;
 import java.time.Instant;
+import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.UUID;
 
@@ -35,7 +36,8 @@ class RecruitmentRecordingOperationRelayTest {
         relay.publishOne();
 
         verify(publisher).publish(OPERATION_ID);
-        verify(jdbc).update(contains("notification_published_at=?"), eq(NOW), eq(OPERATION_ID));
+        verify(jdbc).update(contains("notification_published_at=?"),
+                eq(OffsetDateTime.ofInstant(NOW,ZoneOffset.UTC)),eq(OPERATION_ID));
     }
 
     @Test
@@ -49,7 +51,8 @@ class RecruitmentRecordingOperationRelayTest {
         relay.publishOne();
 
         verify(jdbc).update(contains("notification_next_attempt_at=?"),
-                eq(1), eq(NOW.plusSeconds(2)), eq("broker unavailable"), eq(OPERATION_ID));
+                eq(1),eq(OffsetDateTime.ofInstant(NOW.plusSeconds(2),ZoneOffset.UTC)),
+                eq("broker unavailable"),eq(OPERATION_ID));
     }
 
     @SuppressWarnings("unchecked")

@@ -12,6 +12,8 @@ import java.time.Clock;
 import java.time.Instant;
 import java.util.UUID;
 
+import static com.cacanode.api.recruitment.repository.RecruitmentJdbcTypes.timestamptz;
+
 @Service
 @RequiredArgsConstructor
 @ConditionalOnExpression("${app.recruitment.enabled:false} and "
@@ -50,7 +52,7 @@ public class RecruitmentRecordingOperationRelay {
                     SET notification_attempts=notification_attempts+1,
                         notification_published_at=?,notification_last_error_code=NULL,updated_at=NOW()
                     WHERE id=? AND status='PENDING' AND notification_published_at IS NULL
-                    """, clock.instant(), pending.operationId());
+                    """, timestamptz(clock.instant()), pending.operationId());
         } catch (RuntimeException exception) {
             int attempts = pending.attempts() + 1;
             Instant nextAttempt = clock.instant().plusSeconds(backoffSeconds(attempts));
@@ -59,7 +61,7 @@ public class RecruitmentRecordingOperationRelay {
                     SET notification_attempts=?,notification_next_attempt_at=?,
                         notification_last_error_code=?,updated_at=NOW()
                     WHERE id=? AND status='PENDING' AND notification_published_at IS NULL
-                    """, attempts, nextAttempt, errorCode(exception), pending.operationId());
+                    """, attempts, timestamptz(nextAttempt), errorCode(exception), pending.operationId());
         }
     }
 

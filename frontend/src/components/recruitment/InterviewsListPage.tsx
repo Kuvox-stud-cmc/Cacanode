@@ -32,6 +32,7 @@ const interviewStatuses = [
 
 export function InterviewsListPage() {
   const t = useTranslations("Recruitment");
+  const i = useTranslations("Recruitment.interviewPages");
   const locale = useLocale();
   const format = useFormatter();
   const { request } = useApiClient();
@@ -138,25 +139,25 @@ export function InterviewsListPage() {
                     <Badge variant="outline">{formatEnumLabel(inv.status, locale)}</Badge>
                     {inv.overallScore !== null && inv.overallScore !== undefined && (
                       <Badge variant="secondary" className="text-xs font-semibold bg-indigo-50 text-indigo-700 border-indigo-200">
-                        Score: {inv.overallScore}/100
+                        {i("score")}: {inv.overallScore}/100
                       </Badge>
                     )}
                   </div>
                   <p className="text-sm text-muted-foreground">
-                    Job: <span className="font-medium text-foreground">{inv.jobTitle}</span>
+                    {i("job")}: <span className="font-medium text-foreground">{inv.jobTitle}</span>
                   </p>
                   <p className="text-xs text-slate-400 mt-0.5">
                     {inv.scheduledStartAt ? (
-                      <>Scheduled: {format.dateTime(new Date(inv.scheduledStartAt), { dateStyle: "short", timeStyle: "short" })} ({formatTimezoneLabel(inv.schedulingTimezone)})</>
+                      <>{i("scheduled")}: {format.dateTime(new Date(inv.scheduledStartAt), { dateStyle: "short", timeStyle: "short" })} ({formatTimezoneLabel(inv.schedulingTimezone)})</>
                     ) : (
-                      "Not scheduled"
+                      i("notScheduled")
                     )}
-                    {inv.rescheduleCount > 0 && ` · Rescheduled ${inv.rescheduleCount}x`}
+                    {inv.rescheduleCount > 0 && ` · ${i("rescheduled", { count: inv.rescheduleCount })}`}
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
                   <Button size="sm" variant="outline" nativeButton={false} render={<Link href={`/recruitment/interviews/${inv.id}`} />}>
-                    <Eye className="mr-1 h-3.5 w-3.5" /> Details & Audio
+                    <Eye className="mr-1 h-3.5 w-3.5" /> {i("detailsAudio")}
                   </Button>
                 </div>
               </div>

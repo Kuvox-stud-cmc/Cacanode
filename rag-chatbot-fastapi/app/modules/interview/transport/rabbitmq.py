@@ -21,7 +21,11 @@ from app.contracts.ai_interview_v1 import (
     resume_analysis_id,
 )
 from app.modules.ingestion.api import PermanentIngestionFailure
-from app.modules.interview.internal.redis_state import InterviewRedisState, payload_sha256
+from app.modules.interview.internal.redis_state import (
+    CheckpointRecovery,
+    InterviewRedisState,
+    payload_sha256,
+)
 from app.modules.interview.internal.resume_analysis import (
     ResumeAnalysisProcessor,
     ResumeAnalysisRejectedError,
@@ -158,10 +162,25 @@ class ConfirmedInterviewPublisher:
             session_id, expected_revision=revision, event_id=event_id
         )
 
-    async def recover_checkpoint(self, session_id: str) -> int | None:
+    async def recover_checkpoint(
+        self, session_id: str, *, requested_event_id: str | None = None
+    ) -> CheckpointRecovery | None:
         checkpoint = await self._state.load_checkpoint(session_id)
-        if checkpoint is None or checkpoint.pending_event is None:
+        if checkpoint is None:
             return None
+        if checkpoint.pending_event is None:
+            if requested_event_id is None:
+                return None
+            confirmed_event_id = (
+                requested_event_id
+                if await self._state.publication_confirmed(requested_event_id)
+                else None
+            )
+            return CheckpointRecovery(
+                event_id=confirmed_event_id,
+                revision=checkpoint.revision,
+                phase=checkpoint.phase,
+            )
         pending = checkpoint.pending_event
         event_id = str(pending["event_id"])
         if not await self._state.publication_confirmed(event_id):
@@ -170,10 +189,15 @@ class ConfirmedInterviewPublisher:
                 routing_key=str(pending["routing_key"]),
                 payload=str(pending["payload"]).encode("utf-8"),
             )
-        return await self._state.commit_checkpoint_event(
+        revision = await self._state.commit_checkpoint_event(
             session_id,
             expected_revision=checkpoint.revision,
             event_id=event_id,
+        )
+        return CheckpointRecovery(
+            event_id=event_id,
+            revision=revision,
+            phase=str(pending["commit_phase"]),
         )
 
 

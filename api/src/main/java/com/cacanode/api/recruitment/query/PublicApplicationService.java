@@ -17,6 +17,8 @@ import com.cacanode.api.recruitment.service.TurnstileVerifier;
 import com.cacanode.api.recruitment.service.ScreeningSupport;
 import com.cacanode.api.recruitment.service.RecruitmentProjectionEventPublisher;
 import com.cacanode.api.recruitment.service.RecruitmentCapabilityService;
+import com.cacanode.api.recruitment.service.RecruitmentPhoneNumbers;
+import com.cacanode.api.recruitment.service.RecruitmentCandidateLinks;
 import org.springframework.beans.factory.annotation.Autowired;
 import lombok.RequiredArgsConstructor;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
@@ -50,6 +52,7 @@ public class PublicApplicationService {
     private final ApplicationEventPublisher events;
     private final Clock clock;
     private final ScreeningSupport screening;
+    private final RecruitmentPhoneNumbers phoneNumbers;
     @Autowired(required=false) private RecruitmentProjectionEventPublisher projectionEvents;
     @Autowired(required=false) private RecruitmentCapabilityService capabilities;
 
@@ -68,7 +71,8 @@ public class PublicApplicationService {
         RecruitmentCvStorageService.StagedCv staged=cv==null||cv.isEmpty()?null:cvs.stage(job.tenantId(),job.jobId(),cv);
         try {
             String email=data.email().strip().toLowerCase(Locale.ROOT);
-            UUID candidateId=upsertCandidate(job.tenantId(),data,email);
+            String phone=phoneNumbers.normalizeRequired(data.phone());
+            UUID candidateId=upsertCandidate(job.tenantId(),data,email,phone);
             UUID proposedApplicationId=UUID.randomUUID();
             LocalDateTime now=now();
             var params=new MapSqlParameterSource().addValue("id",proposedApplicationId)
@@ -115,18 +119,18 @@ public class PublicApplicationService {
             emailTokens.saveAndFlush(token);
             if(limiter.allowEmailDelivery(job.jobId(),email)) events.publishEvent(new CandidateAccessEmailRequestedEvent(
                     email,data.fullName().strip(),job.companyName(),job.title(),data.locale(),
-                    properties.candidateBaseUrl()+"#token="+raw,purpose==EmailTokenPurpose.VERIFICATION));
+                    RecruitmentCandidateLinks.withToken(properties.candidateBaseUrl(),"token",raw),purpose==EmailTokenPurpose.VERIFICATION));
             return PublicRecruitmentDtos.AcceptedApplication.generic();
         } catch (RuntimeException exception) {
             if(staged!=null)cvs.discard(staged); throw exception;
         }
     }
 
-    private UUID upsertCandidate(UUID tenantId,PublicRecruitmentDtos.ApplicationData data,String email){
+    private UUID upsertCandidate(UUID tenantId,PublicRecruitmentDtos.ApplicationData data,String email,String phone){
         UUID proposed=UUID.randomUUID();
         var p=new MapSqlParameterSource().addValue("id",proposed).addValue("tenantId",tenantId)
                 .addValue("fullName",data.fullName().strip()).addValue("normalizedName",normalize(data.fullName()))
-                .addValue("email",email).addValue("phone",data.phone());
+                .addValue("email",email).addValue("phone",phone);
         List<UUID> inserted=jdbc.query("""
                 INSERT INTO recruitment_candidates(id,tenant_id,full_name,normalized_name,email,normalized_email,phone)
                 VALUES(:id,:tenantId,:fullName,:normalizedName,:email,:email,:phone)

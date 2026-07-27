@@ -5,6 +5,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.ResultSetExtractor;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -48,21 +49,33 @@ public class RecruitmentInterviewResultQueryService {
                 rs.getObject(20,OffsetDateTime.class)):null,tenantId,interviewId);
         if(row==null)throw new ResponseStatusException(HttpStatus.NOT_FOUND,"INTERVIEW_RESULT_NOT_AVAILABLE");
         List<InterviewResultDtos.SectionResult> sections=new ArrayList<>();
+        ResultSetExtractor<Void> sectionExtractor=rs->{
+            while(rs.next()){
+                UUID sectionId=rs.getObject(1,UUID.class);
+                List<InterviewResultDtos.QuestionResult> questions=new ArrayList<>();
+                ResultSetExtractor<Void> questionExtractor=qrs->{
+                    while(qrs.next()){
+                        UUID questionId=qrs.getObject(1,UUID.class);
+                        List<InterviewResultDtos.Evaluation> evaluations=jdbc.query("""
+                                SELECT candidate_turn_id,accepted,rubric_score,english_comprehension,english_fluency,
+                                english_vocabulary,english_grammar,english_pronunciation FROM recruitment_interview_score_evaluations
+                                WHERE tenant_id=? AND session_id=? AND question_id=? ORDER BY position
+                                """,(ers,index)->new InterviewResultDtos.Evaluation(ers.getObject(1,UUID.class),ers.getBoolean(2),
+                                ers.getBigDecimal(3),dimensions(ers.getBigDecimal(4),ers.getBigDecimal(5),ers.getBigDecimal(6),
+                                ers.getBigDecimal(7),ers.getBigDecimal(8))),tenantId,interviewId,questionId);
+                        questions.add(new InterviewResultDtos.QuestionResult(questionId,qrs.getString(2),qrs.getString(3),
+                                qrs.getBigDecimal(4),evaluations.stream().map(InterviewResultDtos.Evaluation::candidateTurnId).toList(),evaluations));
+                    }
+                    return null;
+                };
+                jdbc.query("SELECT question_id,section_kind,question_status,question_score FROM recruitment_interview_question_results WHERE tenant_id=? AND session_id=? AND section_id=? ORDER BY position",
+                        questionExtractor,tenantId,interviewId,sectionId);
+                sections.add(new InterviewResultDtos.SectionResult(sectionId,rs.getString(2),rs.getString(3),questions));
+            }
+            return null;
+        };
         jdbc.query("SELECT section_id,section_kind,section_status FROM recruitment_interview_section_results WHERE tenant_id=? AND session_id=? ORDER BY position",
-                rs->{while(rs.next()){UUID sectionId=rs.getObject(1,UUID.class);List<InterviewResultDtos.QuestionResult> questions=new ArrayList<>();
-                    jdbc.query("SELECT question_id,section_kind,question_status,question_score FROM recruitment_interview_question_results WHERE tenant_id=? AND session_id=? AND section_id=? ORDER BY position",
-                            qrs->{while(qrs.next()){UUID questionId=qrs.getObject(1,UUID.class);List<InterviewResultDtos.Evaluation> evaluations=jdbc.query("""
-                                    SELECT candidate_turn_id,accepted,rubric_score,english_comprehension,english_fluency,
-                                    english_vocabulary,english_grammar,english_pronunciation FROM recruitment_interview_score_evaluations
-                                    WHERE tenant_id=? AND session_id=? AND question_id=? ORDER BY position
-                                    """,(ers,index)->new InterviewResultDtos.Evaluation(ers.getObject(1,UUID.class),ers.getBoolean(2),
-                                    ers.getBigDecimal(3),dimensions(ers.getBigDecimal(4),ers.getBigDecimal(5),ers.getBigDecimal(6),
-                                    ers.getBigDecimal(7),ers.getBigDecimal(8))),tenantId,interviewId,questionId);
-                                questions.add(new InterviewResultDtos.QuestionResult(questionId,qrs.getString(2),qrs.getString(3),
-                                        qrs.getBigDecimal(4),evaluations.stream().map(InterviewResultDtos.Evaluation::candidateTurnId).toList(),evaluations));}}
-                            ,tenantId,interviewId,sectionId);
-                    sections.add(new InterviewResultDtos.SectionResult(sectionId,rs.getString(2),rs.getString(3),questions));}}
-                ,tenantId,interviewId);
+                sectionExtractor,tenantId,interviewId);
         return new InterviewResultDtos.Result(interviewId,row.terminalKind,row.deliveryStatus,row.completionReason,
                 row.failureCode,row.retryable,row.failureDetail,row.partial,row.expectedTurns,row.persistedTurns,row.connectedSeconds,
                 row.policy,row.overall,row.english,row.band,row.advisoryOnly,InterviewResultDtos.ENGLISH_WARNING,row.occurredAt,sections);

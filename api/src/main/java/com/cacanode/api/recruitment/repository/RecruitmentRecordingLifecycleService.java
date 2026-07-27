@@ -20,6 +20,8 @@ import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
 
+import static com.cacanode.api.recruitment.repository.RecruitmentJdbcTypes.timestamptz;
+
 @Service
 @RequiredArgsConstructor
 @ConditionalOnProperty(prefix="app.recruitment",name="recording-enabled",havingValue="true")
@@ -36,7 +38,7 @@ public class RecruitmentRecordingLifecycleService {
                 rs->{rs.next();return rs.getInt(1);},attempt.getTenantId(),attempt.getId());if(existing!=null&&existing>0)return;
         UUID recordingId=UUID.randomUUID();Instant retainedUntil=attempt.getConsentedAt().plus(interview.getRecordingRetentionDays(), ChronoUnit.DAYS);
         jdbc.update("INSERT INTO recruitment_interview_recordings(id,tenant_id,session_id,call_attempt_id,state,retained_until) VALUES (?,?,?,?,?,?)",
-                recordingId,attempt.getTenantId(),attempt.getSessionId(),attempt.getId(),"START_PENDING",retainedUntil);
+                recordingId,attempt.getTenantId(),attempt.getSessionId(),attempt.getId(),"START_PENDING",timestamptz(retainedUntil));
         jdbc.update("INSERT INTO recruitment_recording_operations(tenant_id,recording_id,operation_kind,operation_key) VALUES (?,?,?,?)",
                 attempt.getTenantId(),recordingId,"START","recording:"+recordingId+":start");
     }
@@ -59,7 +61,7 @@ public class RecruitmentRecordingLifecycleService {
         Instant completed=clock.instant();Instant retained=completed.plus(days==null?0:days,ChronoUnit.DAYS);
         int duration=parseDuration(form.getFirst("RecordingDuration"));
         jdbc.update("UPDATE recruitment_interview_recordings SET state='COPY_PENDING',provider_account_sid=?,provider_recording_sid=?,callback_payload_sha256=?,recording_completed_at=?,retained_until=?,recording_duration_seconds=?,updated_at=NOW() WHERE id=?",
-                account,sid,hash,completed,retained,duration,recordingId);
+                account,sid,hash,timestamptz(completed),timestamptz(retained),duration,recordingId);
         jdbc.update("INSERT INTO recruitment_recording_operations(tenant_id,recording_id,operation_kind,operation_key) VALUES (?,?,?,?) ON CONFLICT DO NOTHING",
                 attempt.getTenantId(),recordingId,"COPY","recording:"+recordingId+":copy");
     }

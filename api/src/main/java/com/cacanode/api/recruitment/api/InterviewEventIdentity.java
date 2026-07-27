@@ -16,6 +16,11 @@ public final class InterviewEventIdentity {
         return uuidV5(NAMESPACE, eventType + "|" + aggregateId + "|" + semanticKey);
     }
 
+    public static UUID runtimeEventId(String eventType,UUID sessionId,UUID callAttemptId,
+            String semanticKey) {
+        return uuidV5(NAMESPACE,eventType+"|"+sessionId+"|"+callAttemptId+"|"+semanticKey);
+    }
+
     public static UUID resumeAnalysisId(UUID tenantId,UUID applicationId,String cvSha256,
             String mode,String policyVersion,String modelVersion) {
         return uuidV5(NAMESPACE,"cv-analysis|"+tenantId+"|"+applicationId+"|"+cvSha256+"|"
@@ -25,6 +30,11 @@ public final class InterviewEventIdentity {
     public static UUID turnId(UUID sessionId,int sequence) {
         if(sequence<1)throw new IllegalArgumentException("Turn sequence must be 1-based");
         return uuidV5(NAMESPACE,"interview.turn|"+sessionId+"|"+sequence+"|v1.1");
+    }
+
+    public static UUID runtimeTurnId(UUID sessionId,UUID callAttemptId,int sequence) {
+        if(sequence<1)throw new IllegalArgumentException("Turn sequence must be 1-based");
+        return uuidV5(NAMESPACE,"interview.turn|"+sessionId+"|"+callAttemptId+"|"+sequence+"|v1.2");
     }
 
     public static UUID uuidV5(UUID namespace, String name) {

@@ -57,7 +57,7 @@ public class RecruitmentCandidateEmailDeliveryService implements RecruitmentEmai
         delivery.setAttempts(delivery.getAttempts()+1);delivery.setState(CandidateEmailState.DISPATCHING);
         delivery.setLastError(null);deliveries.save(delivery);
         events.publishEvent(new RecruitmentCandidateEmailDispatchEvent(delivery.getId(),recipient.email(),recipient.name(),
-                recipient.company(),recipient.job(),recipient.locale(),properties.candidateBaseUrl()+"#invitation="+raw,
+                recipient.company(),recipient.job(),recipient.locale(),RecruitmentCandidateLinks.withToken(properties.candidateBaseUrl(),"invitation",raw),
                 delivery.getKind().name(),interview.getScheduledStartAt(),interview.getSchedulingTimezone()));
     }
 

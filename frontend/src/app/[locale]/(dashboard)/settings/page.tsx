@@ -135,6 +135,13 @@ function SettingsPageContent() {
   const [billingPlans, setBillingPlans] = useState<BillingPlan[]>([]);
   const [billingInterval, setBillingInterval] = useState<BillingInterval>("MONTHLY");
   const [billingBusy, setBillingBusy] = useState(false);
+  const [planConfirmation, setPlanConfirmation] = useState<{
+    plan: PlanId;
+    interval: BillingInterval;
+    description: string;
+    confirmLabel: string;
+    destructive: boolean;
+  } | null>(null);
   const formatDate = (value: string | null) => value ? format.dateTime(new Date(value), { dateStyle: "medium", timeStyle: "short" }) : t("never");
   const formatBytes = (bytes: number) => bytes >= 1024 ** 3
     ? `${format.number(bytes / 1024 ** 3)} GB`
@@ -512,17 +519,45 @@ function SettingsPageContent() {
     window.setTimeout(() => setCopied(false), 1500);
   }
 
-  async function selectPlan(plan: PlanId, interval: BillingInterval) {
+  function selectPlan(plan: PlanId, interval: BillingInterval) {
+    if (plan === "pro" || plan === "business") {
+      const targetPlan = plan === "business" ? "BUSINESS" : "PRO";
+      const switchingPaidPlan = ["PRO", "BUSINESS"].includes(billingAccount?.planCode ?? "")
+        && billingAccount?.planCode !== targetPlan;
+      if (switchingPaidPlan) {
+        setPlanConfirmation({
+          plan,
+          interval,
+          description: t("billing.confirmPaidSwitch", {
+            current: planLabel(billingAccount?.planCode),
+            target: plan === "business" ? planT("business") : planT("pro"),
+          }),
+          confirmLabel: t("billing.continueCheckout"),
+          destructive: false,
+        });
+        return;
+      }
+    }
+    if (plan === "starter") {
+      setPlanConfirmation({
+        plan,
+        interval,
+        description: billingAccount?.planCode === "TRIAL"
+          ? t("billing.confirmTrialDowngrade")
+          : t("billing.confirmPaidDowngrade", { date: formatDate(billingAccount?.graceEndsAt ?? null) }),
+        confirmLabel: t("billing.confirmDowngradeAction"),
+        destructive: true,
+      });
+      return;
+    }
+    void applyPlan(plan, interval);
+  }
+
+  async function applyPlan(plan: PlanId, interval: BillingInterval) {
     setBillingBusy(true);
     try {
       if (plan === "pro" || plan === "business") {
         const targetPlan = plan === "business" ? "BUSINESS" : "PRO";
-        const switchingPaidPlan = ["PRO", "BUSINESS"].includes(billingAccount?.planCode ?? "")
-          && billingAccount?.planCode !== targetPlan;
-        if (switchingPaidPlan && !window.confirm(t("billing.confirmPaidSwitch", {
-          current: planLabel(billingAccount?.planCode),
-          target: plan === "business" ? planT("business") : planT("pro"),
-        }))) return;
         const checkout = await createBillingCheckout(request, targetPlan, interval);
         window.location.assign(checkout.checkoutUrl);
         return;
@@ -532,12 +567,10 @@ function SettingsPageContent() {
         window.location.assign(enterprise?.salesUrl ?? "mailto:sales@cacanode.com");
         return;
       }
-      if (!window.confirm(billingAccount?.planCode === "TRIAL"
-        ? t("billing.confirmTrialDowngrade")
-        : t("billing.confirmPaidDowngrade", { date: formatDate(billingAccount?.graceEndsAt ?? null) }))) return;
       const result = await downgradeBilling(request);
       setBillingAccount(result.account);
       setPlan(result.account.planCode);
+      setPlanConfirmation(null);
       setPlanDialog(false);
       toast.success(result.scheduled
         ? t("billing.starterScheduledFor", { date: formatDate(result.effectiveAt) })
@@ -865,9 +898,30 @@ function SettingsPageContent() {
           <div className="min-h-0 flex-1 overflow-y-auto bg-transparent px-4 py-12 sm:px-8 sm:py-16">
             <div className="mx-auto max-w-6xl">
               <PlanCardGrid plans={billingPlans} currentPlan={backendPlan} interval={billingInterval}
-                onIntervalChange={setBillingInterval} onSelectPlan={(plan, interval) => void selectPlan(plan, interval)} />
+                onIntervalChange={setBillingInterval} onSelectPlan={selectPlan} />
             </div>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={Boolean(planConfirmation)} onOpenChange={(open) => {
+        if (!open && !billingBusy) setPlanConfirmation(null);
+      }}>
+        <DialogContent showCloseButton={false}>
+          <DialogHeader>
+            <DialogTitle>{t("billing.confirmPlanChangeTitle")}</DialogTitle>
+            <DialogDescription>{planConfirmation?.description}</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button type="button" variant="outline" disabled={billingBusy} onClick={() => setPlanConfirmation(null)}>
+              {t("actions.cancel")}
+            </Button>
+            <Button type="button" variant={planConfirmation?.destructive ? "destructive" : "default"}
+              disabled={billingBusy || !planConfirmation}
+              onClick={() => planConfirmation && void applyPlan(planConfirmation.plan, planConfirmation.interval)}>
+              {billingBusy && <Loader2 className="animate-spin" />}{planConfirmation?.confirmLabel}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 

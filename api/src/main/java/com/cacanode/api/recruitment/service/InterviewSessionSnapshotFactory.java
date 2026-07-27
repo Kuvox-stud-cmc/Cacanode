@@ -60,10 +60,23 @@ public class InterviewSessionSnapshotFactory {
 
     public String canonical(JsonNode node) {
         try {
-            return mapper.writeValueAsString(node);
+            return mapper.writeValueAsString(sorted(node));
         } catch (JsonProcessingException exception) {
             throw new IllegalStateException(exception);
         }
+    }
+
+    private static JsonNode sorted(JsonNode node) {
+        if(node.isObject()) {
+            ObjectNode result=JsonNodeFactory.instance.objectNode();
+            List<String> names=new ArrayList<>();node.fieldNames().forEachRemaining(names::add);
+            names.stream().sorted().forEach(name->result.set(name,sorted(node.get(name))));
+            return result;
+        }
+        if(node.isArray()) {
+            ArrayNode result=JsonNodeFactory.instance.arrayNode();node.forEach(child->result.add(sorted(child)));return result;
+        }
+        return node;
     }
 
     private ObjectNode sectionNode(RecruitmentDtos.Section section,List<PersonalizedQuestion> extra) {

@@ -44,8 +44,8 @@ class Settings(BaseSettings):
     INTERVIEW_RECOVERY_MAX_ATTEMPTS: int = 3
     INTERVIEW_RECOVERY_POLL_SECONDS: int = 5
     INTERVIEW_RECOVERY_BATCH_SIZE: int = 100
-    INTERVIEW_MODEL_TIMEOUT_SECONDS: float = 4.0
-    INTERVIEW_MODEL_MAX_OUTPUT_TOKENS: int = 384
+    INTERVIEW_MODEL_TIMEOUT_SECONDS: float = 8.0
+    INTERVIEW_MODEL_MAX_OUTPUT_TOKENS: int = 1024
     INTERVIEW_MODEL_MAX_ATTEMPTS: int = 2
     INTERVIEW_ENGINE_MAX_CONSECUTIVE_FAILURES: int = 3
     INTERVIEW_UTTERANCE_MAX_SECONDS: int = 90
@@ -67,7 +67,8 @@ class Settings(BaseSettings):
     CARTESIA_API_VERSION: str = "2026-03-01"
     CARTESIA_ENGLISH_VOICE_ID: str = ""
     CARTESIA_VIETNAMESE_VOICE_ID: str = ""
-    INTERVIEW_END_OF_UTTERANCE_SILENCE_MS: int = 800
+    INTERVIEW_END_OF_UTTERANCE_SILENCE_MS: int = 3000
+    INTERVIEW_TTS_OUTPUT_GAIN_DB: float = 0.0
     INTERVIEW_SMOKE_UTTERANCE_MAX_SECONDS: int = 15
     INTERVIEW_MEDIA_MAX_PAYLOAD_BYTES: int = 65536
     CV_ANALYSIS_POLICY_VERSION: str = "cv-redaction-v1"
@@ -324,14 +325,16 @@ class Settings(BaseSettings):
             raise ValueError("Interview concurrency limits are invalid")
         if self.INTERVIEW_SESSION_HEARTBEAT_SECONDS >= self.INTERVIEW_SESSION_LEASE_SECONDS:
             raise ValueError("Interview heartbeat must be shorter than its session lease")
-        if self.INTERVIEW_END_OF_UTTERANCE_SILENCE_MS != 800:
-            raise ValueError("Phase 7 end-of-utterance silence must be 800 ms")
+        if not 1500 <= self.INTERVIEW_END_OF_UTTERANCE_SILENCE_MS <= 5000:
+            raise ValueError("Interview end-of-utterance silence must be between 1500 and 5000 ms")
+        if not 0 <= self.INTERVIEW_TTS_OUTPUT_GAIN_DB <= 12:
+            raise ValueError("Interview TTS output gain must be between 0 and 12 dB")
         if self.INTERVIEW_SMOKE_UTTERANCE_MAX_SECONDS != 15:
             raise ValueError("Phase 7 smoke utterance maximum must be 15 seconds")
         if self.INTERVIEW_MODEL_TIMEOUT_SECONDS <= 0:
             raise ValueError("Interview model timeout must be positive")
-        if self.INTERVIEW_MODEL_MAX_OUTPUT_TOKENS != 384:
-            raise ValueError("Interview model output maximum must be 384 tokens")
+        if self.INTERVIEW_MODEL_MAX_OUTPUT_TOKENS != 1024:
+            raise ValueError("Interview model output maximum must be 1024 tokens")
         if self.INTERVIEW_MODEL_MAX_ATTEMPTS != 2:
             raise ValueError("Interview model attempts must be exactly 2")
         if self.INTERVIEW_ENGINE_MAX_CONSECUTIVE_FAILURES != 3:

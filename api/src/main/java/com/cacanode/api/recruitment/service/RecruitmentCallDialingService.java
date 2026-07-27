@@ -27,6 +27,8 @@ import java.util.*;
 @RequiredArgsConstructor
 @ConditionalOnProperty(prefix="app.recruitment",name="calling-enabled",havingValue="true")
 public class RecruitmentCallDialingService {
+    private static final UUID DEVELOPMENT_SEED_TENANT_ID=
+            UUID.fromString("00000000-0000-0000-0000-000000000001");
     private static final List<CallAttemptStatus> CONCURRENT=List.of(CallAttemptStatus.DIALING,
             CallAttemptStatus.CALLING,CallAttemptStatus.RINGING,CallAttemptStatus.CONSENT_PENDING,
             CallAttemptStatus.IN_PROGRESS);
@@ -46,6 +48,8 @@ public class RecruitmentCallDialingService {
     private final Clock clock;
     private final RecruitmentCapabilityService capabilities;
     private final RecruitmentCallFraudGuard fraudGuard;
+    private final RecruitmentInterviewMaterializedResultRepository materializedResults;
+    private final RecruitmentTenantSettingsRepository tenantSettings;
     @Autowired(required=false) private RecruitmentProjectionEventPublisher projectionEvents;
 
     @Scheduled(fixedDelayString="${app.recruitment.calling.scheduler-delay-ms:1000}")
@@ -56,7 +60,7 @@ public class RecruitmentCallDialingService {
         for(RecruitmentInterview interview:interviews.lockDueForCalling(
                 now.minusSeconds(properties.claimLateSeconds()),now.plusSeconds(properties.claimEarlySeconds()))) {
             if(!capabilities.capabilities(interview.getTenantId()).callingEnabled())continue;
-            RecruitmentInterviewCallAttempt attempt=claim(interview,false);
+            RecruitmentInterviewCallAttempt attempt=claim(interview,false,false);
             if(attempt!=null&&attempt.getStatus()==CallAttemptStatus.PREPARING)prepareAndDial(interview,attempt);
         }
         for(RecruitmentInterview interview:interviews.lockMissedForCalling(
@@ -85,21 +89,40 @@ public class RecruitmentCallDialingService {
             RecruitmentInterviewCallAttempt existing=attempts.findForUpdate(interview.getActiveCallAttemptId()).orElseThrow();
             return response(existing);
         }
-        RecruitmentInterviewCallAttempt attempt=claim(interview,true);
+        if(developmentRedial(interview,true,properties.appEnvironment()))
+            resetDevelopmentInterview(interview);
+        RecruitmentInterviewCallAttempt attempt=claim(interview,true,true);
         if(attempt.getStatus()==CallAttemptStatus.PREPARING)prepareAndDial(interview,attempt);
         return response(attempt);
     }
 
-    private RecruitmentInterviewCallAttempt claim(RecruitmentInterview interview,boolean persistFailure) {
+    @Transactional(readOnly=true)
+    public RecruitmentDtos.DialEligibilityResponse dialEligibility(UUID tenantId,UUID interviewId) {
+        capabilities.requireCalling(tenantId);
+        RecruitmentInterview interview=interviews.findByIdAndTenantId(interviewId,tenantId).orElseThrow();
+        RecruitmentApplication application=applications.findByIdAndTenantId(interview.getApplicationId(),tenantId).orElse(null);
+        RecruitmentJob job=jobs.findByIdAndTenantId(interview.getJobId(),tenantId).orElse(null);
+        RecruitmentCandidate candidate=application==null?null:candidates.findByIdAndTenantId(
+                application.getCandidateId(),tenantId).orElse(null);
+        String reason=eligibility(interview,application,job,candidate,true);
+        Instant scheduled=interview.getScheduledStartAt();
+        return new RecruitmentDtos.DialEligibilityResponse(reason==null,reason,
+                scheduled==null?null:scheduled.minusSeconds(properties.claimEarlySeconds()),
+                scheduled==null?null:scheduled.plusSeconds(properties.claimLateSeconds()),clock.instant());
+    }
+
+    private RecruitmentInterviewCallAttempt claim(RecruitmentInterview interview,boolean persistFailure,boolean manual) {
         RecruitmentApplication application=applications.findByIdAndTenantId(interview.getApplicationId(),interview.getTenantId()).orElse(null);
         RecruitmentJob job=jobs.findByIdAndTenantId(interview.getJobId(),interview.getTenantId()).orElse(null);
         RecruitmentCandidate candidate=application==null?null:candidates.findByIdAndTenantId(
                 application.getCandidateId(),interview.getTenantId()).orElse(null);
-        String failure=eligibility(interview,application,job,candidate);
+        String failure=eligibility(interview,application,job,candidate,manual);
         if(failure==null&&attempts.countGlobalActive(CONCURRENT)>=properties.globalConcurrency())failure="GLOBAL_CONCURRENCY_LIMIT";
         if(failure==null&&attempts.countTenantActive(interview.getTenantId(),CONCURRENT)>=properties.tenantConcurrency())failure="TENANT_CONCURRENCY_LIMIT";
         String destination=candidate==null?null:candidate.getPhone();
-        if(failure==null)try{destination=fraudGuard.requireAttempt(interview.getTenantId(),destination);}
+        if(failure==null)try{destination=bypassDailyAttemptLimits(manual,properties.appEnvironment())
+                ?fraudGuard.canonicalDestination(destination)
+                :fraudGuard.requireAttempt(interview.getTenantId(),destination);}
         catch(com.cacanode.api.common.exception.custom.ConflictException rejected){failure=rejected.getMessage();}
         if(failure!=null&&!persistFailure){metric("claim_rejected",failure);return null;}
 
@@ -128,19 +151,100 @@ public class RecruitmentCallDialingService {
     }
 
     private String eligibility(RecruitmentInterview interview,RecruitmentApplication application,
-            RecruitmentJob job,RecruitmentCandidate candidate) {
-        if(interview.getStatus()!=InterviewStatus.SCHEDULED)return "INTERVIEW_NOT_SCHEDULED";
+            RecruitmentJob job,RecruitmentCandidate candidate,boolean manual) {
+        boolean developmentRedial=developmentRedial(interview,manual,properties.appEnvironment());
+        if(interview.getStatus()!=InterviewStatus.SCHEDULED&&!developmentRedial)return "INTERVIEW_NOT_SCHEDULED";
         Instant now=clock.instant();
-        if(interview.getScheduledStartAt()==null||interview.getScheduledStartAt().isBefore(
+        if(!bypassDialWindow(manual,properties.appEnvironment())&&(interview.getScheduledStartAt()==null||interview.getScheduledStartAt().isBefore(
                 now.minusSeconds(properties.claimLateSeconds()))||interview.getScheduledStartAt().isAfter(
-                now.plusSeconds(properties.claimEarlySeconds())))return "OUTSIDE_DIAL_WINDOW";
-        if(application==null||application.getStatus()!=ApplicationStatus.INTERVIEW_SCHEDULED)return "APPLICATION_NOT_SCHEDULED";
+                now.plusSeconds(properties.claimEarlySeconds()))))return "OUTSIDE_DIAL_WINDOW";
+        if(application==null||(application.getStatus()!=ApplicationStatus.INTERVIEW_SCHEDULED
+                &&!(developmentRedial&&Set.of(ApplicationStatus.INTERVIEW_INVITED,
+                        ApplicationStatus.INTERVIEW_COMPLETED).contains(application.getStatus()))))
+            return "APPLICATION_NOT_SCHEDULED";
         if(job==null||(job.getStatus()!=JobStatus.PUBLISHED&&job.getStatus()!=JobStatus.PAUSED))return "JOB_NOT_CALLABLE";
-        if(candidate==null||candidate.getPhone()==null||!candidate.getPhone().matches("^\\+84[0-9]{9,10}$"))return "INVALID_DESTINATION";
-        if(interview.getQuotaReservationId()==null||interview.getQuotaReservedSeconds()==null||
+        if(candidate==null||candidate.getPhone()==null||!candidate.getPhone().matches("^\\+[1-9][0-9]{7,14}$"))return "INVALID_DESTINATION";
+        if(!developmentRedial&&(interview.getQuotaReservationId()==null||interview.getQuotaReservedSeconds()==null||
                 !quota.isInterviewReservationActive(interview.getTenantId(),interview.getQuotaReservationId(),
-                        interview.getQuotaReservedSeconds()))return "QUOTA_RESERVATION_INVALID";
+                        interview.getQuotaReservedSeconds())))return "QUOTA_RESERVATION_INVALID";
         return null;
+    }
+
+    private void resetDevelopmentInterview(RecruitmentInterview interview) {
+        RecruitmentApplication application=applications.findForUpdate(
+                interview.getTenantId(),interview.getApplicationId()).orElseThrow();
+        cancelHistoricalPreparedRuntimes(interview);
+        long seconds=interview.getQuotaReservedSeconds()==null||interview.getQuotaReservedSeconds()<1
+                ?snapshotDuration(interview):interview.getQuotaReservedSeconds();
+        LocalDateTime expiresAt=LocalDateTime.now(clock).plusSeconds(Math.max(3600,seconds+900));
+        HiringQuotaApi.Reservation reservation=quota.reserveInterviewSeconds(
+                interview.getTenantId(),UUID.randomUUID(),seconds,expiresAt);
+
+        materializedResults.deleteForDevelopmentRedial(interview.getTenantId(),interview.getId());
+        refreshDevelopmentRecordingSnapshot(interview);
+
+        application.setStatus(ApplicationStatus.INTERVIEW_SCHEDULED);
+        application.setOverallScore(null);application.setEnglishBand(null);applications.save(application);
+        interview.setStatus(InterviewStatus.SCHEDULED);interview.setStartedAt(null);interview.setCompletedAt(null);
+        interview.setCancelledAt(null);interview.setExpiredAt(null);
+        interview.setOverallScore(null);interview.setEnglishBand(null);interview.setActiveCallAttemptId(null);
+        interview.setQuotaReservationId(reservation.reservationId());
+        interview.setQuotaReservedSeconds(reservation.reservedAmount());
+        interview.setQuotaReservationExpiresAt(expiresAt);interviews.saveAndFlush(interview);
+        metric("development_terminal_redial_reset","OK");
+    }
+
+    private void refreshDevelopmentRecordingSnapshot(RecruitmentInterview interview) {
+        boolean recordingCapabilityEnabled=capabilities.capabilities(
+                interview.getTenantId()).recordingEnabled();
+        RecruitmentTenantSettings current=tenantSettings.findForUpdate(
+                interview.getTenantId()).orElse(null);
+        applyDevelopmentRecordingSnapshot(interview,current,recordingCapabilityEnabled);
+        metric("development_recording_snapshot_refresh",
+                interview.isRecordingEnabled()?"ENABLED":"DISABLED");
+    }
+
+    static void applyDevelopmentRecordingSnapshot(RecruitmentInterview interview,
+            RecruitmentTenantSettings settings,boolean recordingCapabilityEnabled) {
+        boolean enabled=recordingCapabilityEnabled&&settings!=null&&settings.isRecordingEnabled()
+                &&settings.getRecordingRetentionDays()>0;
+        interview.setRecordingEnabled(enabled);
+        interview.setRecordingRetentionDays(enabled?settings.getRecordingRetentionDays():0);
+    }
+
+    private void cancelHistoricalPreparedRuntimes(RecruitmentInterview interview) {
+        for(RecruitmentInterviewCallAttempt attempt:attempts
+                .findTop100ByTenantIdAndInterviewIdOrderByAttemptNumberDesc(
+                        interview.getTenantId(),interview.getId())) {
+            if(attempt.getPreparedSessionSha256()==null)continue;
+            try {
+                inference.cancel(new InterviewInferenceApi.CancelInterviewCommand(
+                        attempt.getSessionId(),attempt.getId(),"DEVELOPMENT_REDIAL",null));
+                metric("development_runtime_cleanup","OK");return;
+            } catch(RuntimeException ignored) {
+                metric("development_runtime_cleanup","ATTEMPT_MISMATCH");
+            }
+        }
+    }
+
+    private long snapshotDuration(RecruitmentInterview interview) {
+        try {return Math.max(1,mapper.readTree(interview.getTemplateSnapshot())
+                .path("durationLimitSeconds").asLong(600));}
+        catch(Exception ignored){return 600;}
+    }
+
+    static boolean developmentRedial(RecruitmentInterview interview,boolean manual,String appEnvironment) {
+        return manual&&"development".equalsIgnoreCase(appEnvironment)
+                &&DEVELOPMENT_SEED_TENANT_ID.equals(interview.getTenantId())
+                &&InterviewLifecycle.isTerminal(interview.getStatus());
+    }
+
+    static boolean bypassDialWindow(boolean manual,String appEnvironment) {
+        return manual&&"development".equalsIgnoreCase(appEnvironment);
+    }
+
+    static boolean bypassDailyAttemptLimits(boolean manual,String appEnvironment) {
+        return manual&&"development".equalsIgnoreCase(appEnvironment);
     }
 
     private void expireMissed(RecruitmentInterview interview) {
@@ -207,7 +311,7 @@ public class RecruitmentCallDialingService {
             attempt.setCreateOutcomeUncertain(false);attempt.setCreateUncertainUntil(null);attempts.save(attempt);
             interview.setStatus(InterviewStatus.CALLING);interviews.save(interview);metric("dial_created","OK");
         } catch (TwilioCallTransport.DefiniteFailure exception) {
-            fail(interview,attempt,"TWILIO_CREATE_REJECTED",true);
+            fail(interview,attempt,bounded(exception.getMessage(),"TWILIO_CREATE_REJECTED"),true);
         } catch (TwilioCallTransport.UncertainFailure exception) {
             attempt.setCreateOutcomeUncertain(true);attempt.setCreateUncertainUntil(clock.instant().plusSeconds(120));
             attempt.setFailureCode("TWILIO_CREATE_UNCERTAIN");attempts.save(attempt);metric("dial_uncertain","TWILIO_CREATE_UNCERTAIN");
@@ -237,7 +341,8 @@ public class RecruitmentCallDialingService {
                     root.path("introductionText").asText(),root.path("disclosureText").asText(),root.path("closingText").asText(),
                     root.path("durationLimitSeconds").asInt(),new InterviewInferenceApi.InteractionLimits(
                     limits.path("repetitionLimit").asInt(),limits.path("clarificationLimit").asInt(),
-                    limits.path("silenceTimeoutSeconds").asInt(),limits.path("silencePromptLimit").asInt()),false,
+                    limits.path("silenceTimeoutSeconds").asInt(),limits.path("silencePromptLimit").asInt()),
+                    root.path("recordingEnabled").asBoolean(),
                     root.path("cvPersonalizationEnabled").asBoolean(),sections,null);
         } catch (Exception exception) {throw new IllegalStateException("Prepared interview snapshot is invalid",exception);}
     }
@@ -246,7 +351,9 @@ public class RecruitmentCallDialingService {
             .path("durationLimitSeconds").asInt();}catch(Exception exception){return 900;}}
 
     private void fail(RecruitmentInterview interview,RecruitmentInterviewCallAttempt attempt,String code,boolean releaseQuota) {
-        Instant now=clock.instant();attempt.setStatus(CallAttemptStatus.FAILED);attempt.setFailureCode(bounded(code,"CALL_FAILED"));
+        String failureCode=bounded(code,"CALL_FAILED");
+        if(releaseQuota&&attempt.getAnsweredAt()==null)cancelPreparedRuntime(attempt,failureCode);
+        Instant now=clock.instant();attempt.setStatus(CallAttemptStatus.FAILED);attempt.setFailureCode(failureCode);
         attempt.setTerminalAt(now);attempt.setNextRetryAt(null);attempt.setCreateOutcomeUncertain(false);
         attempt.setCreateUncertainUntil(null);attempts.save(attempt);interview.setActiveCallAttemptId(null);
         interview.setStatus(InterviewStatus.FAILED);interview=interviews.save(interview);
@@ -256,6 +363,17 @@ public class RecruitmentCallDialingService {
             catch(HiringQuotaApi.HiringQuotaException ignored) {}
         }
         metric("failed",attempt.getFailureCode());
+    }
+
+    private void cancelPreparedRuntime(RecruitmentInterviewCallAttempt attempt,String reason) {
+        if(attempt.getPreparedSessionSha256()==null)return;
+        for(int number=1;number<=properties.cancellationMaxAttempts();number++) {
+            attempt.setCancellationAttempts(number);attempts.save(attempt);
+            try {
+                inference.cancel(new InterviewInferenceApi.CancelInterviewCommand(
+                        attempt.getSessionId(),attempt.getId(),reason,null));return;
+            } catch(RuntimeException ignored) {}
+        }
     }
 
     private RecruitmentDtos.DialResponse response(RecruitmentInterviewCallAttempt attempt) {

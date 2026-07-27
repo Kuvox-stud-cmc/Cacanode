@@ -15,16 +15,17 @@ public final class PublicRecruitmentDtos {
 
     public record PublicJob(
             UUID publicId, String tenantSlug, String companyName, String title, String description,
+            String descriptionHtml,
             String department, String location, EmploymentType employmentType, WorkMode workMode,
             ExperienceLevel experienceLevel, String language, CvPolicy cvPolicy,
             CvAiMode cvAiMode, boolean cvAiDisclosed, List<PublicScreeningQuestion> screeningQuestions,
-            LocalDateTime publishedAt, LocalDateTime closingAt) {
+            LocalDateTime publishedAt, LocalDateTime closingAt, boolean discoverable) {
         public PublicJob(UUID publicId,String tenantSlug,String companyName,String title,String description,
                 String department,String location,EmploymentType employmentType,WorkMode workMode,
                 ExperienceLevel experienceLevel,String language,CvPolicy cvPolicy,CvAiMode cvAiMode,boolean cvAiDisclosed,
                 LocalDateTime publishedAt,LocalDateTime closingAt){this(publicId,tenantSlug,companyName,title,description,
-                department,location,employmentType,workMode,experienceLevel,language,cvPolicy,cvAiMode,cvAiDisclosed,List.of(),
-                publishedAt,closingAt);}
+                null,department,location,employmentType,workMode,experienceLevel,language,cvPolicy,cvAiMode,cvAiDisclosed,List.of(),
+                publishedAt,closingAt,true);}
     }
 
     public record PublicScreeningOption(UUID optionId,String label) {}
@@ -36,7 +37,7 @@ public final class PublicRecruitmentDtos {
     public record ApplicationData(
             @NotBlank @Size(max = 200) String fullName,
             @NotBlank @Email @Size(max = 320) String email,
-            @NotBlank @Pattern(regexp = "^\\+84[0-9]{9,10}$") String phone,
+            @NotBlank @Pattern(regexp = "^\\+[1-9][0-9]{7,14}$") String phone,
             @NotBlank @Pattern(regexp = "vi-VN|en-US") String locale,
             @AssertTrue boolean privacyConsent,
             boolean cvUseConsent,

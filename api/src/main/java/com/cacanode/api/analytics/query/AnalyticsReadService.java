@@ -72,9 +72,10 @@ public class AnalyticsReadService implements AnalyticsReadApi {
                 "SELECT COUNT(*) FROM analytics_user_projection WHERE tenant_id = ? AND status = 'ACTIVE' AND created_at >= ?",
                 tenantId, weekStart
         );
-        Long maxStorageMb = jdbcTemplate.queryForObject(
-                "SELECT max_storage_mb FROM analytics_tenant_projection WHERE tenant_id = ?", Long.class, tenantId
-        );
+        long maxStorageMb = jdbcTemplate.query(
+                "SELECT max_storage_mb FROM analytics_tenant_projection WHERE tenant_id = ?",
+                (rs, rowNum) -> rs.getLong(1), tenantId
+        ).stream().findFirst().orElse(0L);
         List<AnalyticsDtos.RecentDocument> recent = jdbcTemplate.query(
                 """
                 SELECT document_id AS id, file_name, file_type, status, file_size_bytes, created_at
@@ -95,7 +96,7 @@ public class AnalyticsReadService implements AnalyticsReadApi {
         Aggregate safeDocuments = documents == null ? new Aggregate(0, 0) : documents;
         return new AnalyticsDtos.DashboardSummary(
                 safeDocuments.count(), weeklyDocuments, currentMessages, previousMessages,
-                safeDocuments.bytes(), Math.max(0, maxStorageMb == null ? 0 : maxStorageMb) * 1024L * 1024L,
+                safeDocuments.bytes(), Math.max(0, maxStorageMb) * 1024L * 1024L,
                 activeUsers, weeklyActiveUsers, recent
         );
     }

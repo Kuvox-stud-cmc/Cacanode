@@ -295,23 +295,22 @@ public class GrpcAiInferenceClient implements AiInferenceApi, InterviewInference
         try {
             return operation.apply(stub.withDeadlineAfter(interviewDeadlineSeconds, TimeUnit.SECONDS));
         } catch (StatusRuntimeException exception) {
-            Status.Code status = exception.getStatus().getCode();
-            String details = exception.getStatus().getDescription();
-            if (status == Status.Code.FAILED_PRECONDITION && "INTERVIEW_DISABLED".equals(details)) {
-                throw new InterviewInferenceException("INTERVIEW_DISABLED", "Interview runtime is disabled.");
-            }
-            if (status == Status.Code.UNAVAILABLE
-                    && "INTERVIEW_RUNTIME_NOT_READY".equals(details)) {
-                throw new InterviewInferenceException(
-                        "INTERVIEW_RUNTIME_NOT_READY", "Interview runtime is not ready.");
-            }
-            if (status == Status.Code.DEADLINE_EXCEEDED) {
-                throw new InterviewInferenceException(
-                        "INTERVIEW_RUNTIME_TIMEOUT", "Interview runtime request timed out.");
-            }
-            throw new InterviewInferenceException(
-                    "INTERVIEW_RUNTIME_ERROR", "The inference service could not " + operationName + ".");
+            throw interviewFailure(exception,operationName);
         }
+    }
+
+    static InterviewInferenceException interviewFailure(StatusRuntimeException exception,String operationName) {
+        Status.Code status=exception.getStatus().getCode();String details=exception.getStatus().getDescription();
+        if(status==Status.Code.FAILED_PRECONDITION&&"INTERVIEW_DISABLED".equals(details))
+            return new InterviewInferenceException("INTERVIEW_DISABLED","Interview runtime is disabled.");
+        if(status==Status.Code.UNAVAILABLE&&"INTERVIEW_RUNTIME_NOT_READY".equals(details))
+            return new InterviewInferenceException("INTERVIEW_RUNTIME_NOT_READY","Interview runtime is not ready.");
+        if(status==Status.Code.DEADLINE_EXCEEDED)
+            return new InterviewInferenceException("INTERVIEW_RUNTIME_TIMEOUT","Interview runtime request timed out.");
+        if((status==Status.Code.INVALID_ARGUMENT||status==Status.Code.ALREADY_EXISTS||status==Status.Code.FAILED_PRECONDITION)
+                && details!=null&&details.matches("[A-Z][A-Z0-9_]{2,99}"))
+            return new InterviewInferenceException(details,"Interview runtime rejected "+operationName+".");
+        return new InterviewInferenceException("INTERVIEW_RUNTIME_ERROR","The inference service could not "+operationName+".");
     }
 
     private <T> T unavailableRetry(

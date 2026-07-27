@@ -14,6 +14,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.CacheControl;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
@@ -64,6 +65,7 @@ public class RecruitmentController extends BaseController {
         var result=queries.jobs(getTenantId(r),page,size,status,department,location,employmentType,workMode,language,closingFrom,closingTo,search,sort,direction);return listed(result);}
     @PostMapping("/jobs") public ResponseEntity<RecruitmentDtos.JobResponse> createJob(@Valid @RequestBody RecruitmentDtos.JobWrite body,HttpServletRequest r){var response=service.createJob(getTenantId(r),body);return created("/api/v1/recruitment/jobs/"+response.id(),response);}
     @GetMapping("/jobs/{id}") public RecruitmentDtos.JobResponse job(@PathVariable UUID id,HttpServletRequest r){return service.job(getTenantId(r),id);}
+    @GetMapping("/jobs/{id}/preview") public ResponseEntity<RecruitmentDtos.JobPreview> preview(@PathVariable UUID id,HttpServletRequest r){return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(service.preview(getTenantId(r),id));}
     @PutMapping("/jobs/{id}") public RecruitmentDtos.JobResponse updateJob(@PathVariable UUID id,@Valid @RequestBody RecruitmentDtos.JobWrite body,HttpServletRequest r){return service.updateJob(getTenantId(r),id,body);}
     @DeleteMapping("/jobs/{id}") public ResponseEntity<Void> deleteJob(@PathVariable UUID id,HttpServletRequest r){service.deleteJob(getTenantId(r),id);return ResponseEntity.noContent().build();}
     @PostMapping("/jobs/{id}/publish") public RecruitmentDtos.JobResponse publish(@PathVariable UUID id,HttpServletRequest r){return service.publish(getTenantId(r),id);}

@@ -148,6 +148,7 @@ auth         -> tenant.api
 billing      -> tenant.api, document.api
 document     -> tenant.api, ai.api
 chat         -> tenant.api, document.api, billing.api, ai.api
+recruitment  -> ai.api, billing.api, tenant.api
 support      -> tenant.api, chat.api
 integration  -> tenant.api and producer api.event packages
 notification -> producer api.event packages
@@ -170,10 +171,11 @@ projection.
 | `billing` | Plans, subscriptions, payment orders, PayOS webhooks, entitlements, quotas, and usage counters | `BillingModuleApi`, `BillingQuotaApi`, `HiringQuotaApi`, API-owned billing DTOs and quota exceptions | `usage_metrics`, `billing_subscriptions`, `billing_payment_orders`, `billing_webhook_events`, `billing_order_code_seq`, `hiring_quota_consumptions`, `hiring_quota_reservations` |
 | `document` | Document metadata, object storage, ingestion, indexing cleanup, visibility, citations, evidence links, and usage export | `DocumentApi` | `documents`, `internal_event_outbox`, `internal_event_inbox` |
 | `chat` | Employee and external conversations, messages, turns, idempotency, quota coordination, and inference orchestration | `ChatApi`, including support validation and analytics snapshot export | `chat_sessions`, `chat_messages`, `chat_turns` |
+| `recruitment` | Jobs, candidates, applications, scheduling, AI interview calling, durable interview results, recordings, candidate communications, privacy deletion, activation, and recruitment analytics export | `RecruitmentApplicationCommandApi`, `RecruitmentInterviewCommandApi`, `RecruitmentEmailDeliveryCallbackApi`, `RecruitmentAnalyticsExportApi`, `ResumeAnalysisPublisher`; recruitment-owned events and identity helpers | `recruitment_tenant_settings`, `recruitment_jobs`, `recruitment_interview_templates`, `recruitment_interview_template_revisions`, `recruitment_candidates`, `recruitment_applications`, `recruitment_interviews`, `recruitment_interview_call_attempts`, `recruitment_twilio_callback_inbox`, `recruitment_public_jobs`, `recruitment_application_email_tokens`, `recruitment_candidate_sessions`, `recruitment_application_cvs`, `recruitment_cv_analyses`, `recruitment_cv_analysis_inbox`, `recruitment_availability_windows`, `recruitment_availability_exceptions`, `recruitment_interview_invitation_tokens`, `recruitment_candidate_email_deliveries`, `recruitment_interview_event_inbox`, `recruitment_interview_transcript_turns`, `recruitment_interview_results`, `recruitment_interview_section_results`, `recruitment_interview_question_results`, `recruitment_interview_score_evaluations`, `recruitment_interview_provider_usage`, `recruitment_interview_recordings`, `recruitment_recording_operations`, `recruitment_tenant_activation`, `recruitment_privacy_deletion_requests` |
 | `support` | Customer support tickets, ticket notes, assignment, priority, and status | `SupportAnalyticsExportApi`; support REST controllers remain module-owned | `tickets`, `ticket_notes` |
 | `integration` | Webhook endpoints, encrypted secrets, webhook outbox creation, dispatch, attempts, and retries | No general synchronous business API; consumes producer events | `webhook_endpoints`, `webhook_outbox`, `webhook_deliveries` |
 | `notification` | In-app notifications and transactional email reactions | No general synchronous business API; consumes producer events | `notifications` |
-| `analytics` | Dashboard and 7/30/90-day analytics from event-built projections | `AnalyticsReadApi`, `AnalyticsProjectionRebuildApi` | `analytics_tenant_projection`, `analytics_user_projection`, `analytics_invitation_projection`, `analytics_document_projection`, `analytics_conversation_projection`, `analytics_message_projection`, `analytics_ticket_projection` |
+| `analytics` | Dashboard and 7/30/90-day analytics from event-built projections | `AnalyticsReadApi`, `AnalyticsProjectionRebuildApi` | `analytics_tenant_projection`, `analytics_user_projection`, `analytics_invitation_projection`, `analytics_document_projection`, `analytics_conversation_projection`, `analytics_message_projection`, `analytics_ticket_projection`, `analytics_recruitment_job_projection`, `analytics_recruitment_application_projection`, `analytics_recruitment_interview_projection` |
 | `common` | Shared technical infrastructure only | Not a business API | `audit_logs`, `module_event_outbox`, `module_event_inbox` |
 | `bootstrap` | Application composition, security wiring, event registry, startup commands, and readiness | Not a business API | No business tables |
 
@@ -287,9 +289,11 @@ The core implementation lives in:
 
 `analytics` is an owned read model, not permission to query every table.
 
-Runtime analytics queries read only the seven `analytics_*_projection` tables. Live projection
-updates are built from producer-owned durable events. Repair and reconciliation use paginated
-snapshot APIs owned by tenant, document, chat, and support.
+Runtime analytics queries read only the ten `analytics_*_projection` tables: tenant, user,
+invitation, document, conversation, message, ticket, recruitment job, recruitment application,
+and recruitment interview. Live projection updates are built from producer-owned durable events.
+Repair and reconciliation use paginated snapshot APIs owned by tenant, document, chat, support,
+and recruitment, including `RecruitmentAnalyticsExportApi` for the three recruitment projections.
 
 The projection rebuild boundary is `AnalyticsProjectionRebuildApi`. The implementation is
 `AnalyticsProjectionRebuildService`, and a startup rebuild can be enabled with:
@@ -310,8 +314,9 @@ The message projection has a deliberate privacy boundary:
 Do not add assistant answer text, citations, prompts, or full transcripts to an analytics event or
 projection without an explicit privacy review.
 
-Flyway V24 creates and backfills the projection tables. The default cache prefix is `ccn:v2`, so
-dashboard and analytics data written before the refactor cannot be reused accidentally.
+Flyway V24 creates and backfills the core projection tables, and V32 does the same for the three
+recruitment projections. The default cache prefix is `ccn:v2`, so dashboard and analytics data
+written before the refactor cannot be reused accidentally.
 
 ## Where new code belongs
 

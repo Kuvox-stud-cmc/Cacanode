@@ -39,6 +39,15 @@ class TemplateSnapshotSupportTest {
                 content(List.of(englishScreen), 400)));
     }
 
+    @Test
+    void enforcesTheConfiguredProviderDurationCeiling() {
+        var trialSupport=new TemplateSnapshotSupport(new ObjectMapper(),600);
+        assertDoesNotThrow(()->trialSupport.validateAndCreate("en-US",content(englishContent().sections(),600)));
+        BadRequestException error=assertThrows(BadRequestException.class,
+                ()->trialSupport.validateAndCreate("en-US",content(englishContent().sections(),601)));
+        assertEquals("Interview duration cannot exceed 600 seconds",error.getMessage());
+    }
+
     private static RecruitmentDtos.RevisionContent englishContent() {
         var q = new RecruitmentDtos.Question(UUID.randomUUID(), 1, "Tell me about your work", "Communication", "Clear answer", 1,
                 InterviewInferenceApi.QuestionSource.TEMPLATE, null);

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { useFormatter, useTranslations } from "next-intl";
+import { useFormatter, useLocale, useTranslations } from "next-intl";
 import { Link, useRouter } from "@/i18n/navigation";
 import { useApiClient } from "@/hooks/useApiClient";
 import { Badge } from "@/components/ui/badge";
@@ -17,12 +17,18 @@ import {
   type RecruitmentCandidate,
 } from "@/lib/recruitment-admin-api";
 import { ArrowLeft, Edit3, Trash2, User, FileText, Calendar, Plus } from "lucide-react";
+import { useLocaleChangeDraft } from "@/hooks/useLocaleChangeDraft";
+import { useRecruitmentConfirmation } from "@/components/recruitment/useRecruitmentConfirmation";
+import { formatEnumLabel } from "@/lib/recruitment-formatters";
 
 export function CandidateDetailPage({ candidateId }: { candidateId: string }) {
   const t = useTranslations("Recruitment");
+  const c = useTranslations("Recruitment.candidatePages");
+  const locale = useLocale();
   const format = useFormatter();
   const { request } = useApiClient();
   const router = useRouter();
+  const { confirm, confirmationDialog } = useRecruitmentConfirmation();
 
   const [candidate, setCandidate] = useState<RecruitmentCandidate | null>(null);
   const [applications, setApplications] = useState<RecruitmentApplication[]>([]);
@@ -59,6 +65,16 @@ export function CandidateDetailPage({ candidateId }: { candidateId: string }) {
     void load();
   }, [load]);
 
+  const clearLocaleDraft = useLocaleChangeDraft(
+    `recruitment:candidate:${candidateId}`,
+    { editing, form },
+    (draft) => {
+      setEditing(draft.editing);
+      setForm(draft.form);
+    },
+    !loading && Boolean(candidate),
+  );
+
   const handleSave = async () => {
     setSaving(true);
     setError("");
@@ -70,6 +86,7 @@ export function CandidateDetailPage({ candidateId }: { candidateId: string }) {
         phone: form.phone || null,
         notes: form.notes || null,
       });
+      clearLocaleDraft();
       setCandidate(updated);
       setEditing(false);
     } catch (cause) {
@@ -80,9 +97,10 @@ export function CandidateDetailPage({ candidateId }: { candidateId: string }) {
   };
 
   const handleDelete = async () => {
-    if (!window.confirm("Permanently delete this candidate profile?")) return;
+    if (!candidate || !await confirm({ title: t("dialogs.deleteCandidateTitle", { name: candidate.fullName }), description: t("dialogs.deleteCandidate"), confirmLabel: t("forms.delete"), destructive: true })) return;
     try {
       await deleteRecruitmentCandidate(request, candidateId);
+      clearLocaleDraft();
       router.push("/recruitment/candidates");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : t("loadError"));
@@ -97,18 +115,24 @@ export function CandidateDetailPage({ candidateId }: { candidateId: string }) {
       <div className="flex flex-wrap items-center justify-between gap-4 border-b pb-4">
         <div>
           <Button variant="ghost" size="sm" nativeButton={false} render={<Link href="/recruitment/candidates" />}>
-            <ArrowLeft className="mr-1 h-4 w-4" /> Back to Candidates
+            <ArrowLeft className="mr-1 h-4 w-4" /> {c("back")}
           </Button>
           <h2 className="text-2xl font-bold mt-2">{candidate.fullName}</h2>
-          <p className="text-sm text-muted-foreground">Candidate ID: {candidate.id}</p>
+          <p className="text-sm text-muted-foreground">{c("candidateId")}: {candidate.id}</p>
         </div>
 
         <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={() => setEditing(!editing)}>
-            <Edit3 className="mr-1 h-4 w-4" /> {editing ? "Cancel" : "Edit Profile"}
+          <Button variant="outline" size="sm" onClick={() => {
+            if (editing && candidate) {
+              clearLocaleDraft();
+              setForm({ fullName: candidate.fullName, email: candidate.email, phone: candidate.phone || "", notes: candidate.notes || "" });
+            }
+            setEditing(!editing);
+          }}>
+            <Edit3 className="mr-1 h-4 w-4" /> {editing ? c("cancel") : c("editProfile")}
           </Button>
           <Button variant="destructive" size="sm" onClick={() => void handleDelete()}>
-            <Trash2 className="mr-1 h-4 w-4" /> Delete
+            <Trash2 className="mr-1 h-4 w-4" /> {c("delete")}
           </Button>
         </div>
       </div>
@@ -120,26 +144,26 @@ export function CandidateDetailPage({ candidateId }: { candidateId: string }) {
         <Card className="md:col-span-1">
           <CardHeader>
             <CardTitle className="text-base flex items-center gap-2">
-              <User className="h-4 w-4 text-indigo-600" /> Candidate Info
+              <User className="h-4 w-4 text-indigo-600" /> {c("candidateInfo")}
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             {editing ? (
               <div className="space-y-3">
                 <div className="space-y-1">
-                  <label className="text-xs font-medium">Full Name</label>
+                  <label className="text-xs font-medium">{c("fullName")}</label>
                   <Input value={form.fullName} onChange={(e) => setForm({ ...form, fullName: e.target.value })} />
                 </div>
                 <div className="space-y-1">
-                  <label className="text-xs font-medium">Email</label>
+                  <label className="text-xs font-medium">{c("email")}</label>
                   <Input value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
                 </div>
                 <div className="space-y-1">
-                  <label className="text-xs font-medium">Phone</label>
+                  <label className="text-xs font-medium">{c("phone")}</label>
                   <Input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
                 </div>
                 <div className="space-y-1">
-                  <label className="text-xs font-medium">Notes</label>
+                  <label className="text-xs font-medium">{c("notes")}</label>
                   <textarea
                     className="w-full min-h-20 rounded-md border p-2 text-sm"
                     value={form.notes}
@@ -153,20 +177,20 @@ export function CandidateDetailPage({ candidateId }: { candidateId: string }) {
             ) : (
               <div className="space-y-3 text-sm">
                 <div>
-                  <p className="text-xs text-muted-foreground">Email Address</p>
+                  <p className="text-xs text-muted-foreground">{c("emailAddress")}</p>
                   <p className="font-medium">{candidate.email}</p>
                 </div>
                 <div>
-                  <p className="text-xs text-muted-foreground">Phone Number</p>
+                  <p className="text-xs text-muted-foreground">{c("phoneNumber")}</p>
                   <p className="font-medium">{candidate.phone || "—"}</p>
                 </div>
                 <div>
-                  <p className="text-xs text-muted-foreground">Created At</p>
+                  <p className="text-xs text-muted-foreground">{c("createdAt")}</p>
                   <p>{format.dateTime(new Date(candidate.createdAt), { dateStyle: "medium" })}</p>
                 </div>
                 {candidate.notes && (
                   <div>
-                    <p className="text-xs text-muted-foreground">Recruiter Notes</p>
+                    <p className="text-xs text-muted-foreground">{c("recruiterNotes")}</p>
                     <p className="text-xs bg-slate-50 p-2 rounded border">{candidate.notes}</p>
                   </div>
                 )}
@@ -179,15 +203,15 @@ export function CandidateDetailPage({ candidateId }: { candidateId: string }) {
         <Card className="md:col-span-2">
           <CardHeader className="flex flex-row items-center justify-between">
             <CardTitle className="text-base flex items-center gap-2">
-              <FileText className="h-4 w-4 text-indigo-600" /> Application History ({applications.length})
+              <FileText className="h-4 w-4 text-indigo-600" /> {c("applicationHistory", { count: applications.length })}
             </CardTitle>
             <Button size="sm" variant="outline" nativeButton={false} render={<Link href={`/recruitment/applications?candidateId=${candidateId}`} />}>
-              <Plus className="mr-1 h-3.5 w-3.5" /> Apply to Job
+              <Plus className="mr-1 h-3.5 w-3.5" /> {c("viewApplications")}
             </Button>
           </CardHeader>
           <CardContent>
             {applications.length === 0 ? (
-              <p className="text-sm text-muted-foreground py-4">No applications submitted by this candidate yet.</p>
+              <p className="text-sm text-muted-foreground py-4">{c("noApplications")}</p>
             ) : (
               <div className="divide-y border rounded-md">
                 {applications.map((app) => (
@@ -195,7 +219,7 @@ export function CandidateDetailPage({ candidateId }: { candidateId: string }) {
                     <div>
                       <strong className="text-sm font-semibold">{app.jobTitle}</strong>
                       <div className="flex items-center gap-2 mt-1">
-                        <Badge variant="outline">{app.status.replaceAll("_", " ")}</Badge>
+                        <Badge variant="outline">{formatEnumLabel(app.status, locale)}</Badge>
                         {app.submittedAt && (
                           <span className="text-xs text-muted-foreground">
                             <Calendar className="inline h-3 w-3 mr-1" />
@@ -205,7 +229,7 @@ export function CandidateDetailPage({ candidateId }: { candidateId: string }) {
                       </div>
                     </div>
                     <Button size="sm" variant="ghost" nativeButton={false} render={<Link href={`/recruitment/applications/${app.id}`} />}>
-                      View
+                      {c("view")}
                     </Button>
                   </div>
                 ))}
@@ -214,6 +238,7 @@ export function CandidateDetailPage({ candidateId }: { candidateId: string }) {
           </CardContent>
         </Card>
       </div>
+      {confirmationDialog}
     </div>
   );
 }

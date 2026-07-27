@@ -26,6 +26,7 @@ import java.security.MessageDigest;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 
 @Service
 @RequiredArgsConstructor
@@ -64,8 +65,8 @@ public class CandidateAccessService {
     public PublicRecruitmentDtos.CandidateSessionResponse refresh(String rawRefresh,HttpServletResponse response){
         RecruitmentCandidateSession current=sessions.findForUpdateByRefreshHash(tokens.hash(rawRefresh))
                 .orElseThrow(CandidateAccessService::unauthorized);
-        if(!current.getRefreshExpiresAt().isAfter(now()))throw unauthorized();
-        current.setRevokedAt(now());sessions.save(current);
+        if(!current.getRefreshExpiresAt().isAfter(sessionNow()))throw unauthorized();
+        current.setRevokedAt(sessionNow());sessions.save(current);
         RecruitmentApplication application=applications.findByIdAndTenantId(current.getApplicationId(),current.getTenantId())
                 .orElseThrow(CandidateAccessService::unauthorized);
         return issue(application,response);
@@ -91,7 +92,7 @@ public class CandidateAccessService {
     @Transactional
     public void logout(String rawAccess,String rawCsrf,HttpServletResponse response){
         RecruitmentCandidateSession session=requireAccess(rawAccess);requireCsrf(session,rawCsrf);
-        session.setRevokedAt(now());sessions.save(session);clearCookies(response);
+        session.setRevokedAt(sessionNow());sessions.save(session);clearCookies(response);
     }
 
     public void clearCookies(HttpServletResponse response){
@@ -100,7 +101,7 @@ public class CandidateAccessService {
     }
 
     private PublicRecruitmentDtos.CandidateSessionResponse issue(RecruitmentApplication application,HttpServletResponse response){
-        String access=tokens.opaqueToken(),refresh=tokens.opaqueToken(),csrf=tokens.opaqueToken();LocalDateTime now=now();
+        String access=tokens.opaqueToken(),refresh=tokens.opaqueToken(),csrf=tokens.opaqueToken();LocalDateTime now=sessionNow();
         RecruitmentCandidateSession session=new RecruitmentCandidateSession();session.setTenantId(application.getTenantId());
         session.setApplicationId(application.getId());session.setJobId(application.getJobId());
         session.setAccessTokenHash(tokens.hash(access));session.setRefreshTokenHash(tokens.hash(refresh));
@@ -115,7 +116,7 @@ public class CandidateAccessService {
         if(raw==null||raw.isBlank())throw unauthorized();
         RecruitmentCandidateSession session=sessions.findByAccessTokenHashAndRevokedAtIsNull(tokens.hash(raw))
                 .orElseThrow(CandidateAccessService::unauthorized);
-        if(!session.getAccessExpiresAt().isAfter(now()))throw unauthorized();return session;
+        if(!session.getAccessExpiresAt().isAfter(sessionNow()))throw unauthorized();return session;
     }
     private void requireCsrf(RecruitmentCandidateSession session,String raw){
         if(raw==null||!MessageDigest.isEqual(tokens.hash(raw).getBytes(StandardCharsets.US_ASCII),
@@ -139,6 +140,7 @@ public class CandidateAccessService {
     private ResponseCookie cookie(String name,String value,Duration age,String path){return ResponseCookie.from(name,value)
             .httpOnly(true).secure(properties.cookieSecure()).sameSite("Strict").path(path).maxAge(age).build();}
     private LocalDateTime now(){return LocalDateTime.now(clock);}
+    LocalDateTime sessionNow(){return LocalDateTime.ofInstant(clock.instant(),ZoneId.systemDefault());}
     private static UnauthorizedException unauthorized(){return new UnauthorizedException("Invalid or expired candidate access");}
     public record DeletionSubject(java.util.UUID tenantId,java.util.UUID applicationId,java.util.UUID candidateId) {}
 }

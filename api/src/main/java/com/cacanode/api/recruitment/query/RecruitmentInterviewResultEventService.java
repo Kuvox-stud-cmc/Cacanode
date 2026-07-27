@@ -73,30 +73,38 @@ public class RecruitmentInterviewResultEventService {
     }
 
     private void acceptTurn(JsonNode root) {
-        boolean v11="1.1".equals(text(root,"schema_version"));
-        exact(root,v11?TURN_V11:TURN_V10,"turn");Common common=common(root);Binding binding=binding(common);
-        int sequence=integer(root,"sequence",v11?1:0,500);UUID turnId=uuid(root,"turn_id");
+        String version=text(root,"schema_version");boolean modern=!"1.0".equals(version),v12="1.2".equals(version);
+        exact(root,modern?TURN_V11:TURN_V10,"turn");Common common=common(root);Binding binding=binding(common);
+        int sequence=integer(root,"sequence",modern?1:0,500);UUID turnId=uuid(root,"turn_id");
+        if(modern){
+            String semantic="turn:"+sequence+(v12?":v1.2":":v1.1");
+            UUID expectedEvent=v12
+                    ?InterviewEventIdentity.runtimeEventId(common.type,common.sessionId,common.callAttemptId,semantic)
+                    :InterviewEventIdentity.eventId(common.type,common.sessionId,semantic);
+            UUID expectedTurn=v12
+                    ?InterviewEventIdentity.runtimeTurnId(common.sessionId,common.callAttemptId,sequence)
+                    :InterviewEventIdentity.turnId(common.sessionId,sequence);
+            expect(expectedEvent.equals(common.eventId),"Invalid turn event identity");
+            expect(expectedTurn.equals(turnId),"Invalid turn identity");
+        }
+        String hash=canonicalHash(root),semantic=v12?"turn:"+sequence+":v1.2":modern?"turn:"+sequence+":v1.1":"turn:"+sequence;
+        if(replay(common,hash))return;
+        if(obsoleteAttempt(common)){inbox(common,semantic,hash,root,"APPLIED");return;}
         Integer terminalExpected=jdbc.query("SELECT expected_turn_count FROM recruitment_interview_results WHERE tenant_id=? AND session_id=?",
                 rs->rs.next()?rs.getInt(1):null,common.tenantId,common.sessionId);
         if(terminalExpected!=null)expect(sequence<=terminalExpected,"Turn exceeds terminal expected count");
-        if(v11){
-            expect(InterviewEventIdentity.eventId(common.type,common.sessionId,"turn:"+sequence+":v1.1").equals(common.eventId),"Invalid turn event identity");
-            expect(InterviewEventIdentity.turnId(common.sessionId,sequence).equals(turnId),"Invalid turn identity");
-        }
         String speaker=boundedEnum(root,"speaker",Set.of("CANDIDATE","INTERVIEWER","SYSTEM"));
-        String kind=v11?boundedEnum(root,"turn_kind",TURN_KINDS):("CANDIDATE".equals(speaker)?"CANDIDATE_UTTERANCE":"QUESTION");
+        String kind=modern?boundedEnum(root,"turn_kind",TURN_KINDS):("CANDIDATE".equals(speaker)?"CANDIDATE_UTTERANCE":"QUESTION");
         UUID section=nullableUuid(root,"section_id"),question=nullableUuid(root,"question_id");
         Snapshot snapshot=snapshot(binding.preparedSession);
         if(section!=null)expect(snapshot.sections.containsKey(section),"Unknown transcript section");
         if(question!=null)expect(snapshot.questions.containsKey(question),"Unknown transcript question");
         if(question!=null)expect(Objects.equals(snapshot.questionSections.get(question),section),"Transcript question/section mismatch");
-        if(v11&&Set.of("QUESTION","FOLLOW_UP","CLARIFICATION","REPETITION").contains(kind))
+        if(modern&&Set.of("QUESTION","FOLLOW_UP","CLARIFICATION","REPETITION").contains(kind))
             expect(section!=null&&question!=null,"Question-scoped turn is missing context");
         String language=boundedEnum(root,"language_tag",Set.of("vi-VN","en-US"));
         long started=longValue(root,"started_at_epoch_ms",0,Long.MAX_VALUE),ended=longValue(root,"ended_at_epoch_ms",started,Long.MAX_VALUE);
         String transcript=text(root,"transcript");expect(!transcript.isBlank()&&transcript.length()<=8000,"Invalid transcript bounds");
-        String hash=canonicalHash(root),semantic=v11?"turn:"+sequence+":v1.1":"turn:"+sequence;
-        if(replay(common,hash))return;
         Integer existing=jdbc.query("SELECT sequence_number FROM recruitment_interview_transcript_turns WHERE tenant_id=? AND session_id=? AND sequence_number=?",
                 rs->rs.next()?rs.getInt(1):null,common.tenantId,common.sessionId,sequence);
         expect(existing==null,"Conflicting transcript sequence replay");
@@ -111,15 +119,20 @@ public class RecruitmentInterviewResultEventService {
     }
 
     private void acceptTerminal(JsonNode root,boolean failed) {
-        boolean v11="1.1".equals(text(root,"schema_version"));
-        exact(root,v11?(failed?FAILED_V11:COMPLETED_V11):(failed?FAILED_V10:COMPLETED_V10),"terminal event");
-        Common common=common(root);Binding binding=binding(common);String semantic=(failed?"failed":"completed")+(v11?":v1.1":":v1");
-        if(v11)expect(InterviewEventIdentity.eventId(common.type,common.sessionId,semantic).equals(common.eventId),"Invalid terminal event identity");
+        String version=text(root,"schema_version");boolean modern=!"1.0".equals(version),v12="1.2".equals(version);
+        exact(root,modern?(failed?FAILED_V11:COMPLETED_V11):(failed?FAILED_V10:COMPLETED_V10),"terminal event");
+        Common common=common(root);Binding binding=binding(common);String semantic=(failed?"failed":"completed")+
+                (v12?":v1.2":modern?":v1.1":":v1");
+        if(modern){UUID expected=v12
+                ?InterviewEventIdentity.runtimeEventId(common.type,common.sessionId,common.callAttemptId,semantic)
+                :InterviewEventIdentity.eventId(common.type,common.sessionId,semantic);
+            expect(expected.equals(common.eventId),"Invalid terminal event identity");}
         String hash=canonicalHash(root);if(replay(common,hash))return;
+        if(obsoleteAttempt(common)){inbox(common,semantic,hash,root,"APPLIED");return;}
         Integer terminalCount=jdbc.query("SELECT count(*) FROM recruitment_interview_results WHERE tenant_id=? AND session_id=?",
                 rs->{rs.next();return rs.getInt(1);},common.tenantId,common.sessionId);
         expect(terminalCount==0,"Interview already has an immutable terminal result");
-        Terminal terminal=v11?validateTerminalV11(root,binding,failed):legacyTerminal(root,binding,failed);
+        Terminal terminal=modern?validateTerminalV11(root,binding,failed):legacyTerminal(root,binding,failed);
         int persisted=countTurns(common.tenantId,common.sessionId);
         String delivery=persisted>=terminal.expectedTurns?"COMPLETE":"PENDING_TURNS";
         inbox(common,semantic,hash,root,delivery.equals("COMPLETE")?"APPLIED":"PENDING_TURNS");
@@ -135,7 +148,7 @@ public class RecruitmentInterviewResultEventService {
                 dimension(terminal.english,"comprehension"),dimension(terminal.english,"fluency"),
                 dimension(terminal.english,"vocabulary"),dimension(terminal.english,"grammar"),
                 dimension(terminal.english,"pronunciation"),terminal.band,common.occurredAt);
-        persistResultChildren(common,root,v11);
+        persistResultChildren(common,root,modern);
         mirrorBusinessState(binding,terminal,failed);
         reconcile(common.tenantId,common.sessionId);
     }
@@ -146,10 +159,16 @@ public class RecruitmentInterviewResultEventService {
         String capability=boundedEnum(root,"capability",Set.of("VOICE_CALL","MEDIA_STREAM","STT","TTS","LLM"));
         String unit=boundedEnum(root,"unit",Set.of("CONNECTED_SECOND","AUDIO_SECOND","CHARACTER","TOKEN"));
         BigDecimal quantity=decimal(root,"quantity");expect(quantity.signum()>0&&quantity.compareTo(new BigDecimal("1000000000"))<=0,"Invalid provider usage quantity");
-        boolean v11="1.1".equals(common.version);if(v11){String semantic=provider.toLowerCase(Locale.ROOT)+":"+capability.toLowerCase(Locale.ROOT)+":v1.1";
-            expect(common.eventId.equals(usageId)&&InterviewEventIdentity.eventId(common.type,common.sessionId,semantic).equals(common.eventId),"Invalid usage identity");}
-        String semantic=v11?provider.toLowerCase(Locale.ROOT)+":"+capability.toLowerCase(Locale.ROOT)+":v1.1":provider.toLowerCase(Locale.ROOT)+":"+capability.toLowerCase(Locale.ROOT);
-        String hash=canonicalHash(root);if(replay(common,hash))return;inbox(common,semantic,hash,root,"APPLIED");
+        boolean modern=!"1.0".equals(common.version),v12="1.2".equals(common.version);
+        String base=provider.toLowerCase(Locale.ROOT)+":"+capability.toLowerCase(Locale.ROOT);
+        String semantic=v12?base+":v1.2":modern?base+":v1.1":base;
+        if(modern){UUID expected=v12
+                ?InterviewEventIdentity.runtimeEventId(common.type,common.sessionId,common.callAttemptId,semantic)
+                :InterviewEventIdentity.eventId(common.type,common.sessionId,semantic);
+            expect(common.eventId.equals(usageId)&&expected.equals(common.eventId),"Invalid usage identity");}
+        String hash=canonicalHash(root);if(replay(common,hash))return;
+        if(obsoleteAttempt(common)){inbox(common,semantic,hash,root,"APPLIED");return;}
+        inbox(common,semantic,hash,root,"APPLIED");
         Integer existing=jdbc.query("SELECT count(*) FROM recruitment_interview_provider_usage WHERE tenant_id=? AND session_id=? AND provider=? AND capability=?",
                 rs->{rs.next();return rs.getInt(1);},common.tenantId,common.sessionId,provider,capability);
         expect(existing==0,"Conflicting provider usage replay");
@@ -242,7 +261,7 @@ public class RecruitmentInterviewResultEventService {
                 rs->{if(!rs.next())return null;return Map.of("event",rs.getObject(1,UUID.class),"expected",rs.getInt(2));},tenantId,sessionId);
         if(result==null)return;UUID eventId=(UUID)result.get("event");JsonNode terminal=jdbc.query("SELECT canonical_payload FROM recruitment_interview_event_inbox WHERE event_id=?",
                 rs->{try{return rs.next()?mapper.readTree(rs.getString(1)):null;}catch(Exception e){throw new IllegalStateException(e);}},eventId);
-        if(terminal!=null&&"1.1".equals(text(terminal,"schema_version"))){Common common=common(terminal);for(JsonNode question:terminal.path("question_results"))
+        if(terminal!=null&&!"1.0".equals(text(terminal,"schema_version"))){Common common=common(terminal);for(JsonNode question:terminal.path("question_results"))
             persistAvailableEvaluations(common,uuid(question,"section_id"),uuid(question,"question_id"),question.path("evaluations"));}
         int count=countTurns(tenantId,sessionId),expected=(Integer)result.get("expected");jdbc.update("UPDATE recruitment_interview_results SET persisted_turn_count=?,delivery_status=?,updated_at=NOW() WHERE tenant_id=? AND session_id=?",
                 count,count>=expected?"COMPLETE":"PENDING_TURNS",tenantId,sessionId);
@@ -263,7 +282,7 @@ public class RecruitmentInterviewResultEventService {
     }
 
     private Common common(JsonNode root) {
-        String version=text(root,"schema_version"),type=text(root,"event_type");expect(Set.of("1.0","1.1").contains(version),"Unsupported interview schema");
+        String version=text(root,"schema_version"),type=text(root,"event_type");expect(Set.of("1.0","1.1","1.2").contains(version),"Unsupported interview schema");
         UUID event=uuid(root,"event_id"),tenant=uuid(root,"tenant_id"),aggregate=uuid(root,"aggregate_id"),session=uuid(root,"session_id"),attempt=uuid(root,"call_attempt_id");
         expect(aggregate.equals(session),"Interview aggregate/session mismatch");OffsetDateTime occurred;try{occurred=OffsetDateTime.parse(text(root,"occurred_at"));}catch(Exception e){reject("Invalid event timestamp");return null;}
         return new Common(version,event,type,tenant,session,attempt,occurred);
@@ -281,6 +300,17 @@ public class RecruitmentInterviewResultEventService {
     private boolean replay(Common common,String hash) {Map<String,String> exact=jdbc.query("SELECT payload_sha256,event_type FROM recruitment_interview_event_inbox WHERE event_id=?",
             rs->{if(!rs.next())return null;return Map.of("hash",rs.getString(1),"type",rs.getString(2));},common.eventId);if(exact==null)return false;
         expect(exact.get("hash").equals(hash)&&exact.get("type").equals(common.type),"Conflicting interview event replay");return true;}
+    private boolean obsoleteAttempt(Common common) {Boolean value=jdbc.query("""
+            SELECT EXISTS (
+                SELECT 1 FROM recruitment_interview_call_attempts current_attempt
+                JOIN recruitment_interview_call_attempts newer
+                  ON newer.tenant_id=current_attempt.tenant_id
+                 AND newer.interview_id=current_attempt.interview_id
+                 AND newer.attempt_number>current_attempt.attempt_number
+                WHERE current_attempt.tenant_id=? AND current_attempt.id=?
+            )
+            """,rs->{rs.next();return rs.getBoolean(1);},common.tenantId,common.callAttemptId);
+        return Boolean.TRUE.equals(value);}
     private void inbox(Common common,String semantic,String hash,JsonNode root,String status) {jdbc.update("""
             INSERT INTO recruitment_interview_event_inbox(event_id,tenant_id,session_id,call_attempt_id,schema_version,
             event_type,semantic_key,payload_sha256,canonical_payload,processing_status,occurred_at)

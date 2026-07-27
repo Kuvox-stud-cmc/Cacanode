@@ -17,6 +17,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { useLocaleChangeDraft } from "@/hooks/useLocaleChangeDraft";
 
 import { useLocale } from "next-intl";
 import { formatEnumLabel, TIMEZONE_OPTIONS } from "@/lib/recruitment-formatters";
@@ -25,6 +26,7 @@ export function RecruitmentSetupPage() {
   const t = useTranslations("Recruitment");
   const locale = useLocale();
   const role = useAuthStore((state) => state.user?.role);
+  const tenantId = useAuthStore((state) => state.user?.tenantId);
   const { request } = useApiClient();
   const [settings, setSettings] = useState<RecruitmentSettings | null>(null);
   const [availability, setAvailability] = useState<Availability | null>(null);
@@ -39,6 +41,16 @@ export function RecruitmentSetupPage() {
       })
       .catch((cause) => setMessage(cause instanceof Error ? cause.message : t("loadError")));
   }, [request, role, t]);
+
+  const clearLocaleDraft = useLocaleChangeDraft(
+    `recruitment:setup:${tenantId ?? "unknown"}`,
+    { settings, availability },
+    (draft) => {
+      setSettings(draft.settings);
+      setAvailability(draft.availability);
+    },
+    Boolean(tenantId && settings && availability),
+  );
 
   if (role !== "TENANT_ADMIN") {
     return <p role="alert" className="rounded-md border border-red-200 bg-red-50 p-4 text-red-800">{t("adminOnly")}</p>;
@@ -58,6 +70,7 @@ export function RecruitmentSetupPage() {
           exceptions: availability.exceptions,
         }),
       ]);
+      clearLocaleDraft();
       setSettings(savedSettings);
       setAvailability(savedAvailability);
       setMessage(t("saved"));

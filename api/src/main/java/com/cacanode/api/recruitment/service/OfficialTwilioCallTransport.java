@@ -20,29 +20,42 @@ public class OfficialTwilioCallTransport implements TwilioCallTransport {
 
     public OfficialTwilioCallTransport(RecruitmentCallingProperties properties) {
         this.properties=properties;
-        client=new TwilioRestClient.Builder(properties.twilioApiKeySid(),properties.twilioApiKeySecret())
+        boolean accountAuth=useAccountAuthToken(properties.appEnvironment());
+        client=new TwilioRestClient.Builder(accountAuth?properties.twilioAccountSid():properties.twilioApiKeySid(),
+                accountAuth?properties.twilioAuthToken():properties.twilioApiKeySecret())
                 .accountSid(properties.twilioAccountSid()).build();
     }
 
     @Override
     public CreatedCall create(CreateCall command) {
         try {
-            Call call=Call.creator(new PhoneNumber(command.destination()),new PhoneNumber(properties.twilioFromNumber()),
+            var creator=Call.creator(new PhoneNumber(command.destination()),new PhoneNumber(properties.twilioFromNumber()),
                             URI.create(command.voiceUrl()))
                     .setMethod(HttpMethod.POST)
                     .setFallbackUrl(URI.create(command.fallbackUrl())).setFallbackMethod(HttpMethod.POST)
                     .setStatusCallback(URI.create(command.statusUrl())).setStatusCallbackMethod(HttpMethod.POST)
                     .setStatusCallbackEvent(List.of("initiated","ringing","answered","completed"))
-                    .setTimeout(30).setTimeLimit(command.durationLimitSeconds()+120).setRecord(false)
-                    .create(client);
+                    .setTimeout(30).setTimeLimit(providerTimeLimitSeconds(
+                            command.durationLimitSeconds(),properties.callForMoreThan600())).setRecord(false);
+            Call call=creator.create(client);
             return new CreatedCall(call.getSid());
         } catch (ApiException exception) {
             Integer status=exception.getStatusCode();
             if(status==null||status>=500)throw new UncertainFailure("TWILIO_CREATE_UNCERTAIN",exception);
-            throw new DefiniteFailure("TWILIO_CREATE_REJECTED",exception);
+            Integer code=exception.getCode();
+            throw new DefiniteFailure(code==null?"TWILIO_CREATE_REJECTED":"TWILIO_CREATE_REJECTED_"+code,exception);
         } catch (RuntimeException exception) {
             throw new UncertainFailure("TWILIO_CREATE_UNCERTAIN",exception);
         }
+    }
+
+    static boolean useAccountAuthToken(String appEnvironment) {
+        return "development".equalsIgnoreCase(appEnvironment);
+    }
+
+    static int providerTimeLimitSeconds(int interviewDurationSeconds,boolean callForMoreThan600) {
+        long requested=Math.max(1L,(long)interviewDurationSeconds+120L);
+        return (int)Math.min(requested,callForMoreThan600?14400L:600L);
     }
 
     @Override

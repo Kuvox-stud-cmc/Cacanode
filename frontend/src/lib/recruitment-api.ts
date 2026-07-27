@@ -6,6 +6,7 @@ export type PublicJob = {
   companyName: string;
   title: string;
   description: string;
+  descriptionHtml: string | null;
   department: string | null;
   location: string | null;
   employmentType: "FULL_TIME" | "PART_TIME" | "CONTRACT" | "TEMPORARY" | "INTERNSHIP" | null;
@@ -18,6 +19,7 @@ export type PublicJob = {
   screeningQuestions: { questionId: string; prompt: string; options: { optionId: string; label: string }[] }[];
   publishedAt: string;
   closingAt: string;
+  discoverable: boolean;
 };
 
 export type PublicJobPage = { items: PublicJob[]; nextCursor: string | null };

@@ -14,10 +14,28 @@ def interview_event_id(event_type: str, aggregate_id: UUID, semantic_key: str) -
     return uuid5(INTERVIEW_EVENT_NAMESPACE, f"{event_type}|{aggregate_id}|{semantic_key}")
 
 
+def interview_runtime_event_id(
+    event_type: str, session_id: UUID, call_attempt_id: UUID, semantic_key: str
+) -> UUID:
+    return uuid5(
+        INTERVIEW_EVENT_NAMESPACE,
+        f"{event_type}|{session_id}|{call_attempt_id}|{semantic_key}",
+    )
+
+
 def interview_turn_id(session_id: UUID, sequence: int) -> UUID:
     if sequence < 1:
         raise ValueError("turn sequence must be 1-based")
     return uuid5(INTERVIEW_EVENT_NAMESPACE, f"interview.turn|{session_id}|{sequence}|v1.1")
+
+
+def interview_runtime_turn_id(session_id: UUID, call_attempt_id: UUID, sequence: int) -> UUID:
+    if sequence < 1:
+        raise ValueError("turn sequence must be 1-based")
+    return uuid5(
+        INTERVIEW_EVENT_NAMESPACE,
+        f"interview.turn|{session_id}|{call_attempt_id}|{sequence}|v1.2",
+    )
 
 
 def resume_analysis_id(
@@ -258,7 +276,7 @@ class ProviderUsageV10(InterviewEvent):
 class InterviewEventV11(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: Literal["1.1"]
+    schema_version: Literal["1.1", "1.2"]
     event_id: UUID
     event_type: str
     occurred_at: datetime
@@ -300,10 +318,21 @@ class FinalizedTurn(InterviewEventV11):
             or self.ended_at_epoch_ms < self.started_at_epoch_ms
         ):
             raise ValueError("invalid finalized-turn binding or timestamps")
-        expected_turn = interview_turn_id(self.session_id, self.sequence)
-        expected_event = interview_event_id(
-            self.event_type, self.session_id, f"turn:{self.sequence}:v1.1"
-        )
+        if self.schema_version == "1.2":
+            expected_turn = interview_runtime_turn_id(
+                self.session_id, self.call_attempt_id, self.sequence
+            )
+            expected_event = interview_runtime_event_id(
+                self.event_type,
+                self.session_id,
+                self.call_attempt_id,
+                f"turn:{self.sequence}:v1.2",
+            )
+        else:
+            expected_turn = interview_turn_id(self.session_id, self.sequence)
+            expected_event = interview_event_id(
+                self.event_type, self.session_id, f"turn:{self.sequence}:v1.1"
+            )
         if self.turn_id != expected_turn or self.event_id != expected_event:
             raise ValueError("invalid finalized-turn identity")
         if self.turn_kind == "CANDIDATE_UTTERANCE" and self.speaker != "CANDIDATE":
@@ -390,6 +419,19 @@ class TerminalResultV11(InterviewEventV11):
     def validate_terminal_result(self) -> TerminalResultV11:
         if self.aggregate_id != self.session_id:
             raise ValueError("aggregate_id must equal session_id")
+        semantic_key = (
+            ("failed" if self.event_type == "interview.session.failed" else "completed")
+            + (":v1.2" if self.schema_version == "1.2" else ":v1.1")
+        )
+        expected_event = (
+            interview_runtime_event_id(
+                self.event_type, self.session_id, self.call_attempt_id, semantic_key
+            )
+            if self.schema_version == "1.2"
+            else interview_event_id(self.event_type, self.session_id, semantic_key)
+        )
+        if self.event_id != expected_event:
+            raise ValueError("invalid terminal-result identity")
         core_scores = [
             item.score
             for item in self.question_results
@@ -476,6 +518,19 @@ class ProviderUsage(InterviewEventV11):
     def validate_usage(self) -> ProviderUsage:
         if self.aggregate_id != self.session_id or self.usage_id != self.event_id:
             raise ValueError("invalid provider-usage binding")
+        semantic_key = (
+            f"{self.provider.lower()}:{self.capability.lower()}:"
+            f"{'v1.2' if self.schema_version == '1.2' else 'v1.1'}"
+        )
+        expected_event = (
+            interview_runtime_event_id(
+                self.event_type, self.session_id, self.call_attempt_id, semantic_key
+            )
+            if self.schema_version == "1.2"
+            else interview_event_id(self.event_type, self.session_id, semantic_key)
+        )
+        if self.event_id != expected_event:
+            raise ValueError("invalid provider-usage identity")
         return self
 
 
@@ -514,17 +569,29 @@ def parse_interview_event(payload: bytes) -> BaseModel:
             else ResumeAnalysisOutcomeV10
         )
     elif event_type == "interview.turn.finalized":
-        model = FinalizedTurn if raw.get("schema_version") == "1.1" else FinalizedTurnV10
+        model = (
+            FinalizedTurn
+            if raw.get("schema_version") in {"1.1", "1.2"}
+            else FinalizedTurnV10
+        )
     elif event_type == "interview.session.completed":
         model = (
             InterviewCompleted
-            if raw.get("schema_version") == "1.1"
+            if raw.get("schema_version") in {"1.1", "1.2"}
             else InterviewCompletedV10
         )
     elif event_type == "interview.session.failed":
-        model = InterviewFailed if raw.get("schema_version") == "1.1" else InterviewFailedV10
+        model = (
+            InterviewFailed
+            if raw.get("schema_version") in {"1.1", "1.2"}
+            else InterviewFailedV10
+        )
     elif event_type == "interview.provider.usage":
-        model = ProviderUsage if raw.get("schema_version") == "1.1" else ProviderUsageV10
+        model = (
+            ProviderUsage
+            if raw.get("schema_version") in {"1.1", "1.2"}
+            else ProviderUsageV10
+        )
     else:
         model = EVENT_MODELS.get(event_type)
     if model is None:

@@ -15,6 +15,7 @@ import {
   type RecruitmentTemplate,
 } from "@/lib/recruitment-admin-api";
 import { Plus, Eye, Archive, FileCode } from "lucide-react";
+import { useRecruitmentConfirmation } from "@/components/recruitment/useRecruitmentConfirmation";
 
 export function TemplatesListPage() {
   const t = useTranslations("Recruitment");
@@ -22,6 +23,7 @@ export function TemplatesListPage() {
   const { request } = useApiClient();
   const search = useSearchParams();
   const router = useRouter();
+  const { confirm, confirmationDialog } = useRecruitmentConfirmation();
 
   const page = Number(search.get("page") ?? 0);
   const q = search.get("q") ?? "";
@@ -67,7 +69,7 @@ export function TemplatesListPage() {
   }, [load]);
 
   const handleArchive = async (tmpl: RecruitmentTemplate) => {
-    if (!window.confirm(`Archive template "${tmpl.name}"? Existing frozen job revisions will remain active.`)) return;
+    if (!await confirm({ title: `${t("forms.archiveTemplate")}: ${tmpl.name}`, description: t("forms.confirm.archiveTemplate"), confirmLabel: t("actions.archive"), destructive: true })) return;
     try {
       await archiveRecruitmentTemplate(request, tmpl.id);
       await load();
@@ -113,25 +115,25 @@ export function TemplatesListPage() {
                     <FileCode className="h-4 w-4 text-indigo-600" />
                     <strong className="truncate text-base font-medium">{tmpl.name}</strong>
                     <Badge variant={tmpl.archived ? "destructive" : "outline"}>
-                      {tmpl.archived ? "Archived" : `v${tmpl.latestRevisionNumber}`}
+                      {tmpl.archived ? t("forms.archived") : `v${tmpl.latestRevisionNumber}`}
                     </Badge>
                     <Badge variant="secondary" className="text-xs">
-                      {tmpl.locale}
+                      {tmpl.locale === "vi-VN" ? t("forms.viVN") : t("forms.enUS")}
                     </Badge>
                   </div>
                   {tmpl.description && <p className="text-sm text-muted-foreground truncate">{tmpl.description}</p>}
                   <p className="text-xs text-slate-400 mt-0.5">
-                    Updated: {format.dateTime(new Date(tmpl.updatedAt), { dateStyle: "short" })}
+                    {t("forms.updatedAt", { date: format.dateTime(new Date(tmpl.updatedAt), { dateStyle: "short" }) })}
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
                   {!tmpl.archived && (
-                    <Button size="sm" variant="ghost" className="text-red-600 hover:bg-red-50" onClick={() => void handleArchive(tmpl)}>
+                    <Button size="sm" variant="ghost" className="text-red-600 hover:bg-red-50" aria-label={t("forms.archiveTemplate")} title={t("forms.archiveTemplate")} onClick={() => void handleArchive(tmpl)}>
                       <Archive className="h-4 w-4" />
                     </Button>
                   )}
                   <Button size="sm" variant="outline" nativeButton={false} render={<Link href={`/recruitment/templates/${tmpl.id}`} />}>
-                    <Eye className="mr-1 h-3.5 w-3.5" /> Edit / Revisions
+                    <Eye className="mr-1 h-3.5 w-3.5" /> {t("actions.editRevisions")}
                   </Button>
                 </div>
               </div>
@@ -155,6 +157,7 @@ export function TemplatesListPage() {
           </Button>
         </div>
       </div>
+      {confirmationDialog}
     </div>
   );
 }

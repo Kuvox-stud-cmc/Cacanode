@@ -19,6 +19,13 @@ import java.util.UUID;
 public class RecruitmentDialController extends BaseController {
     private final RecruitmentCallDialingService dialing;
 
+    @GetMapping("/{id}/dial-eligibility")
+    @PreAuthorize("hasRole('TENANT_ADMIN')")
+    public ResponseEntity<RecruitmentDtos.DialEligibilityResponse> dialEligibility(
+            @PathVariable UUID id,HttpServletRequest request) {
+        return ResponseEntity.ok(dialing.dialEligibility(getTenantId(request),id));
+    }
+
     @PostMapping("/{id}/dial")
     @PreAuthorize("hasRole('TENANT_ADMIN')")
     public ResponseEntity<RecruitmentDtos.DialResponse> dial(@PathVariable UUID id,HttpServletRequest request) {

@@ -27,6 +27,7 @@ import { formatEnumLabel } from "@/lib/recruitment-formatters";
 
 const applicationStatuses = [
   "AWAITING_CANDIDATE",
+  "SUBMITTED_UNVERIFIED",
   "SUBMITTED",
   "INTERVIEW_INVITED",
   "INTERVIEW_SCHEDULED",
@@ -39,6 +40,7 @@ const applicationStatuses = [
 
 export function ApplicationsListPage() {
   const t = useTranslations("Recruitment");
+  const a = useTranslations("Recruitment.applicationPages");
   const locale = useLocale();
   const format = useFormatter();
   const { request } = useApiClient();
@@ -62,7 +64,7 @@ export function ApplicationsListPage() {
   const [selectedCandidateId, setSelectedCandidateId] = useState("");
   const [selectedJobId, setSelectedJobId] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const [cooldown, setCooldown] = useState<Record<string, number>>({});
+  const [cooldown, setCooldown] = useState<Record<string, boolean>>({});
 
   const updateParams = useCallback((values: Record<string, string | null>) => {
     const next = new URLSearchParams(search.toString());
@@ -126,7 +128,7 @@ export function ApplicationsListPage() {
       setCreateOpen(false);
       setSelectedJobId("");
       setSelectedCandidateId("");
-      setActionSuccess("Application created. Completion link ready to send.");
+      setActionSuccess(a("createSuccess"));
       await load();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : t("forms.createError"));
@@ -136,11 +138,12 @@ export function ApplicationsListPage() {
   };
 
   const handleResendCompletionLink = async (appId: string) => {
-    if (cooldown[appId] && Date.now() < cooldown[appId]) return;
+    if (cooldown[appId]) return;
     try {
       await sendApplicationCompletionLink(request, appId);
-      setCooldown((prev) => ({ ...prev, [appId]: Date.now() + 60000 }));
-      setActionSuccess("Completion link sent successfully.");
+      setCooldown((prev) => ({ ...prev, [appId]: true }));
+      window.setTimeout(() => setCooldown((prev) => ({ ...prev, [appId]: false })), 60000);
+      setActionSuccess(a("completionSent"));
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : t("loadError"));
     }
@@ -157,7 +160,7 @@ export function ApplicationsListPage() {
         </div>
         <Button onClick={() => void openCreateModal()}>
           <Plus className="mr-1 h-4 w-4" />
-          Create Application
+          {a("createApplication")}
         </Button>
       </div>
 
@@ -201,15 +204,15 @@ export function ApplicationsListPage() {
                     <Badge variant="outline">{formatEnumLabel(app.status, locale)}</Badge>
                     {app.cvPresent && (
                       <Badge variant="secondary" className="text-xs">
-                        <FileText className="mr-1 h-3 w-3" /> CV Attached
+                        <FileText className="mr-1 h-3 w-3" /> {a("cvAttached")}
                       </Badge>
                     )}
                   </div>
                   <p className="text-sm text-muted-foreground">
-                    Job: <span className="font-medium text-foreground">{app.jobTitle}</span> · Email: {app.candidateEmail}
+                    {a("job")}: <span className="font-medium text-foreground">{app.jobTitle}</span> · {a("email")}: {app.candidateEmail}
                   </p>
                   <p className="text-xs text-slate-400 mt-0.5">
-                    Submitted: {app.submittedAt ? format.dateTime(new Date(app.submittedAt), { dateStyle: "short", timeStyle: "short" }) : "Pending candidate"}
+                    {a("submitted")}: {app.submittedAt ? format.dateTime(new Date(app.submittedAt), { dateStyle: "short", timeStyle: "short" }) : a("pendingCandidate")}
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
@@ -217,15 +220,15 @@ export function ApplicationsListPage() {
                     <Button
                       size="sm"
                       variant="outline"
-                      disabled={Boolean(cooldown[app.id] && Date.now() < cooldown[app.id])}
+                      disabled={Boolean(cooldown[app.id])}
                       onClick={() => void handleResendCompletionLink(app.id)}
                     >
                       <Send className="mr-1 h-3.5 w-3.5" />
-                      {cooldown[app.id] && Date.now() < cooldown[app.id] ? "Resent (60s)" : "Send Link"}
+                      {cooldown[app.id] ? a("resent") : a("sendLink")}
                     </Button>
                   )}
                   <Button size="sm" variant="outline" nativeButton={false} render={<Link href={`/recruitment/applications/${app.id}`} />}>
-                    <Eye className="mr-1 h-3.5 w-3.5" /> View Detail
+                    <Eye className="mr-1 h-3.5 w-3.5" /> {a("viewDetail")}
                   </Button>
                 </div>
               </div>
@@ -253,20 +256,20 @@ export function ApplicationsListPage() {
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Create Candidate Application</DialogTitle>
+            <DialogTitle>{a("createDialogTitle")}</DialogTitle>
             <DialogDescription>
-              Select an existing candidate and a published job posting to create an application awaiting candidate completion.
+              {a("createDialogDescription")}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-2">
             <div className="space-y-2">
-              <label className="text-sm font-medium">Candidate *</label>
+              <label className="text-sm font-medium">{a("candidate")} *</label>
               <select
                 className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm"
                 value={selectedCandidateId}
                 onChange={(e) => setSelectedCandidateId(e.target.value)}
               >
-                <option value="">Select Candidate...</option>
+                <option value="">{a("selectCandidate")}</option>
                 {candidates.map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.fullName} ({c.email})
@@ -275,16 +278,16 @@ export function ApplicationsListPage() {
               </select>
             </div>
             <div className="space-y-2">
-              <label className="text-sm font-medium">Job Posting *</label>
+              <label className="text-sm font-medium">{a("jobPosting")} *</label>
               <select
                 className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm"
                 value={selectedJobId}
                 onChange={(e) => setSelectedJobId(e.target.value)}
               >
-                <option value="">Select Job Posting...</option>
+                <option value="">{a("selectJob")}</option>
                 {jobs.map((j) => (
                   <option key={j.id} value={j.id}>
-                    {j.title} ({j.department || "General"})
+                    {j.title} ({j.department || a("general")})
                   </option>
                 ))}
               </select>
@@ -292,10 +295,10 @@ export function ApplicationsListPage() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setCreateOpen(false)}>
-              Cancel
+              {a("cancel")}
             </Button>
             <Button onClick={() => void handleCreate()} disabled={!selectedCandidateId || !selectedJobId || submitting}>
-              {submitting ? "Creating..." : "Create Application"}
+              {submitting ? a("creating") : a("createApplication")}
             </Button>
           </DialogFooter>
         </DialogContent>

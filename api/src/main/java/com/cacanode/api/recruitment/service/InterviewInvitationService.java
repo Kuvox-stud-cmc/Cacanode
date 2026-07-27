@@ -13,7 +13,10 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.beans.factory.annotation.Autowired;
 
 import java.time.Clock;
+import java.time.Instant;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.Set;
 import java.util.UUID;
 
@@ -26,6 +29,8 @@ public class InterviewInvitationService {
     private final RecruitmentInterviewRepository interviews;
     private final RecruitmentJobRepository jobs;
     private final RecruitmentTenantSettingsRepository settings;
+    private final RecruitmentAvailabilityWindowRepository availabilityWindows;
+    private final RecruitmentAvailabilityExceptionRepository availabilityExceptions;
     private final RecruitmentCandidateEmailDeliveryRepository deliveries;
     private final Clock clock;
     private final RecruitmentProperties properties;
@@ -36,6 +41,13 @@ public class InterviewInvitationService {
     public RecruitmentInterview invite(UUID tenantId,UUID applicationId,boolean manual) {
         if(capabilities!=null)capabilities.requireMasterEnabled(tenantId);
         if(!properties.publicJobsEnabled())throw new ConflictException("Public interview scheduling is disabled");
+        RecruitmentTenantSettings tenantSettings=settings.findById(tenantId).orElse(null);
+        ZoneId schedulingZone=ZoneId.of(tenantSettings==null?"Asia/Ho_Chi_Minh":tenantSettings.getSchedulingTimezone());
+        LocalDate today=Instant.now(clock).atZone(schedulingZone).toLocalDate();
+        if(!availabilityWindows.existsByTenantId(tenantId)
+                && !availabilityExceptions.existsByTenantIdAndKindAndExceptionDateGreaterThanEqual(
+                        tenantId,AvailabilityExceptionKind.EXTRA,today))
+            throw new ConflictException("INTERVIEW_AVAILABILITY_NOT_CONFIGURED");
         RecruitmentApplication application=applications.findForUpdate(tenantId,applicationId)
                 .orElseThrow(()->new ResourceNotFoundException("Application was not found"));
         RecruitmentJob job=jobs.findByIdAndTenantId(application.getJobId(),tenantId)
@@ -44,7 +56,7 @@ public class InterviewInvitationService {
             throw new ConflictException("Application cannot be invited");
         RecruitmentInterview interview=interviews.findByApplicationForUpdate(tenantId,applicationId).orElse(null);
         LocalDateTime now=LocalDateTime.now(clock);
-        int lifetime=settings.findById(tenantId).map(RecruitmentTenantSettings::getInvitationLifetimeDays).orElse(7);
+        int lifetime=tenantSettings==null?7:tenantSettings.getInvitationLifetimeDays();
         if(interview==null){
             interview=new RecruitmentInterview();interview.setTenantId(tenantId);interview.setApplicationId(applicationId);
             interview.setJobId(application.getJobId());interview.setStatus(InterviewStatus.INVITED);

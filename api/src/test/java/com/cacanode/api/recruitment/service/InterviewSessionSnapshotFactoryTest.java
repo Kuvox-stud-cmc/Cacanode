@@ -53,6 +53,11 @@ class InterviewSessionSnapshotFactoryTest {
         assertTrue(root.path("disclosureText").asText().contains("not used"));
     }
 
+    @Test void canonicalJsonSortsEveryObjectForCrossLanguageHashing()throws Exception{
+        var root=mapper.readTree("{\"z\":1,\"a\":{\"y\":2,\"b\":3},\"items\":[{\"d\":4,\"c\":5}]}");
+        assertEquals("{\"a\":{\"b\":3,\"y\":2},\"items\":[{\"c\":5,\"d\":4}],\"z\":1}",factory.canonical(root));
+    }
+
     private RecruitmentInterview interview(UUID sectionId) throws Exception {
         RecruitmentDtos.Question question=new RecruitmentDtos.Question(UUID.randomUUID(),1,"Describe a system.",
                 "Engineering","Look for clear decisions",1,InterviewInferenceApi.QuestionSource.TEMPLATE,null);

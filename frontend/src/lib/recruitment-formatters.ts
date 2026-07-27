@@ -55,9 +55,13 @@ export function formatEnumLabel(value: string | null | undefined, locale: string
     SUMMARY_ONLY: "Chỉ tóm tắt CV",
     PERSONALIZED_QUESTIONS: "Tóm tắt & Tạo câu hỏi cá nhân hóa",
 
+    // Interview template section kinds
+    CORE: "Phỏng vấn chuyên môn",
+    ENGLISH_SCREEN: "Kiểm tra năng lực tiếng Anh",
+
     // Application statuses
     AWAITING_CANDIDATE: "Chờ ứng viên hoàn thiện",
-    SUBMITTED_UNVERIFIED: "Đã nộp (Chưa xác thực)",
+    SUBMITTED_UNVERIFIED: "Chờ xác minh email",
     SUBMITTED: "Đã nộp",
     UNDER_REVIEW: "Đang xem xét",
     INTERVIEW_INVITED: "Đã mời phỏng vấn",
@@ -78,6 +82,8 @@ export function formatEnumLabel(value: string | null | undefined, locale: string
     INVITED: "Đã mời",
     SCHEDULED: "Đã lên lịch",
     PREPARING: "Đang chuẩn bị",
+    READY: "Sẵn sàng",
+    DIALING: "Đang quay số",
     CALLING: "Đang gọi",
     RINGING: "Đang đổ chuông",
     CONSENT_PENDING: "Chờ đồng ý ghi âm",
@@ -88,6 +94,24 @@ export function formatEnumLabel(value: string | null | undefined, locale: string
     FAILED: "Cuộc gọi thất bại",
     CANCELLED: "Đã hủy",
     EXPIRED: "Đã hết hạn",
+
+    // Interview delivery and result values
+    DISPATCHING: "Đang gửi",
+    SENT: "Đã gửi",
+    INVITATION: "Lời mời phỏng vấn",
+    CONFIRMATION: "Xác nhận lịch",
+    RESCHEDULE_CONFIRMATION: "Xác nhận đổi lịch",
+    REMINDER: "Nhắc lịch",
+    FINISHED: "Hoàn tất",
+    CANDIDATE_STOPPED: "Ứng viên dừng",
+    TIME_LIMIT: "Hết thời gian",
+    PARTIAL: "Chưa đầy đủ",
+    COMPLETE: "Đầy đủ",
+
+    // CV analysis statuses
+    NOT_REQUESTED: "Chưa yêu cầu",
+    PENDING: "Đang xử lý",
+    SKIPPED_QUOTA: "Bỏ qua do hết hạn mức",
   };
 
   const labelsEn: Record<string, string> = {
@@ -120,8 +144,11 @@ export function formatEnumLabel(value: string | null | undefined, locale: string
     SUMMARY_ONLY: "Summary Only",
     PERSONALIZED_QUESTIONS: "Summary & Questions",
 
+    CORE: "Core interview",
+    ENGLISH_SCREEN: "English proficiency check",
+
     AWAITING_CANDIDATE: "Awaiting Candidate",
-    SUBMITTED_UNVERIFIED: "Submitted (Unverified)",
+    SUBMITTED_UNVERIFIED: "Awaiting Email Verification",
     SUBMITTED: "Submitted",
     UNDER_REVIEW: "Under Review",
     INTERVIEW_INVITED: "Interview Invited",
@@ -140,6 +167,8 @@ export function formatEnumLabel(value: string | null | undefined, locale: string
     INVITED: "Invited",
     SCHEDULED: "Scheduled",
     PREPARING: "Preparing Call",
+    READY: "Ready",
+    DIALING: "Dialing",
     CALLING: "Calling",
     RINGING: "Ringing",
     CONSENT_PENDING: "Consent Pending",
@@ -150,6 +179,22 @@ export function formatEnumLabel(value: string | null | undefined, locale: string
     FAILED: "Failed",
     CANCELLED: "Cancelled",
     EXPIRED: "Expired",
+
+    DISPATCHING: "Sending",
+    SENT: "Sent",
+    INVITATION: "Interview Invitation",
+    CONFIRMATION: "Schedule Confirmation",
+    RESCHEDULE_CONFIRMATION: "Reschedule Confirmation",
+    REMINDER: "Reminder",
+    FINISHED: "Finished",
+    CANDIDATE_STOPPED: "Stopped by Candidate",
+    TIME_LIMIT: "Time Limit Reached",
+    PARTIAL: "Partial",
+    COMPLETE: "Complete",
+
+    NOT_REQUESTED: "Not Requested",
+    PENDING: "Processing",
+    SKIPPED_QUOTA: "Skipped — Quota Exhausted",
   };
 
   const dict = isVi ? labelsVi : labelsEn;

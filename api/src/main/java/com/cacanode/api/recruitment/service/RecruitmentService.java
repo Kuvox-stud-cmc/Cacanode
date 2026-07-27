@@ -10,6 +10,7 @@ import com.cacanode.api.recruitment.api.RecruitmentApplicationCommandApi;
 import com.cacanode.api.recruitment.api.RecruitmentInterviewCommandApi;
 import com.cacanode.api.recruitment.api.event.PublicJobProjectionChangedEvent;
 import com.cacanode.api.recruitment.dto.RecruitmentDtos;
+import com.cacanode.api.recruitment.config.RecruitmentCallingProperties;
 import com.cacanode.api.recruitment.model.*;
 import com.cacanode.api.recruitment.model.RecruitmentEnums.*;
 import com.cacanode.api.recruitment.query.RecruitmentQueryService;
@@ -53,9 +54,12 @@ public class RecruitmentService implements RecruitmentApplicationCommandApi, Rec
     private final Clock clock;
     private final ApplicationEventPublisher eventPublisher;
     private final ScreeningSupport screening;
+    private final JobDescriptionHtml jobDescriptions;
+    private final RecruitmentPhoneNumbers phoneNumbers;
     private final ApplicationSubmissionTransitionService submissionTransition;
     private final RecruitmentInterviewCancellationService cancellations;
     private final RecruitmentCapabilityService capabilities;
+    private final RecruitmentCallingProperties callingProperties;
     @Autowired(required=false) private RecruitmentCvStorageService cvStorageService;
     @Autowired(required=false) private RecruitmentProjectionEventPublisher projectionEvents;
     @Value("${app.recruitment.recording-enabled:false}") private boolean globalRecordingEnabled;
@@ -106,6 +110,16 @@ public class RecruitmentService implements RecruitmentApplicationCommandApi, Rec
     @Transactional(readOnly = true)
     public RecruitmentDtos.JobResponse job(UUID tenantId, UUID id) { return jobResponse(requireJob(tenantId,id)); }
 
+    @Transactional(readOnly = true)
+    public RecruitmentDtos.JobPreview preview(UUID tenantId, UUID id) {
+        RecruitmentJob job = requireJob(tenantId,id);
+        TenantPublicProfileApi.TenantPublicProfile profile = tenantPublicProfileApi.getPublicProfile(tenantId);
+        return new RecruitmentDtos.JobPreview(job.getPublicId(),profile.slug(),profile.companyName(),job.getTitle(),
+                job.getDescription(),job.getDescriptionHtml(),job.getDepartment(),job.getLocation(),
+                job.getEmploymentType(),job.getWorkMode(),job.getExperienceLevel(),job.getLanguage(),job.getCvPolicy(),
+                job.getStatus(),job.getPublishedAt(),job.getClosingAt());
+    }
+
     @Transactional
     public RecruitmentDtos.JobResponse updateJob(UUID tenantId, UUID id, RecruitmentDtos.JobWrite request) {
         capabilities.requireMasterEnabled(tenantId);
@@ -153,7 +167,7 @@ public class RecruitmentService implements RecruitmentApplicationCommandApi, Rec
     @Transactional
     public RecruitmentDtos.TemplateResponse createTemplate(UUID tenantId,RecruitmentDtos.TemplateCreate request){
         capabilities.requireMasterEnabled(tenantId);
-        requireLocale(request.locale()); TemplateSnapshotSupport snapshots=new TemplateSnapshotSupport(objectMapper);var snapshot=snapshots.validateAndCreate(request.locale(),request.content());
+        requireLocale(request.locale()); TemplateSnapshotSupport snapshots=templateSnapshots();var snapshot=snapshots.validateAndCreate(request.locale(),request.content());
         InterviewTemplate template=new InterviewTemplate();template.setTenantId(tenantId);template.setName(request.name().strip());template.setDescription(trim(request.description()));template.setLocale(request.locale());
         template=templateRepository.saveAndFlush(template); createRevision(template,1,snapshot); return templateResponse(template,1);
     }
@@ -168,7 +182,7 @@ public class RecruitmentService implements RecruitmentApplicationCommandApi, Rec
     public void archiveTemplate(UUID tenantId,UUID id){InterviewTemplate t=templateRepository.findForUpdate(tenantId,id).orElseThrow(()->notFound("Template"));if(!t.isArchived()){t.setArchived(true);t.setArchivedAt(now());templateRepository.save(t);}}
 
     @Transactional
-    public RecruitmentDtos.RevisionResponse addRevision(UUID tenantId,UUID templateId,RecruitmentDtos.RevisionCreate request){InterviewTemplate t=templateRepository.findForUpdate(tenantId,templateId).orElseThrow(()->notFound("Template"));if(t.isArchived())throw conflict("Archived templates cannot be revised");var snapshot=new TemplateSnapshotSupport(objectMapper).validateAndCreate(t.getLocale(),request.content());int next=revisionRepository.findFirstByTenantIdAndTemplateIdOrderByRevisionNumberDesc(tenantId,templateId).map(r->r.getRevisionNumber()+1).orElse(1);return revisionResponse(createRevision(t,next,snapshot));}
+    public RecruitmentDtos.RevisionResponse addRevision(UUID tenantId,UUID templateId,RecruitmentDtos.RevisionCreate request){InterviewTemplate t=templateRepository.findForUpdate(tenantId,templateId).orElseThrow(()->notFound("Template"));if(t.isArchived())throw conflict("Archived templates cannot be revised");var snapshot=templateSnapshots().validateAndCreate(t.getLocale(),request.content());int next=revisionRepository.findFirstByTenantIdAndTemplateIdOrderByRevisionNumberDesc(tenantId,templateId).map(r->r.getRevisionNumber()+1).orElse(1);return revisionResponse(createRevision(t,next,snapshot));}
 
     @Transactional(readOnly=true)
     public java.util.List<RecruitmentDtos.RevisionResponse> revisions(UUID tenantId,UUID templateId){requireTemplate(tenantId,templateId);return revisionRepository.findByTenantIdAndTemplateIdOrderByRevisionNumberDesc(tenantId,templateId).stream().map(this::revisionResponse).toList();}
@@ -205,17 +219,18 @@ public class RecruitmentService implements RecruitmentApplicationCommandApi, Rec
 
     private void validateRecording(UUID tenantId,boolean enabled,int days){if(!enabled){if(days!=0)throw new BadRequestException("Recording retention must be zero when recording is disabled");return;}if(!globalRecordingEnabled)throw conflict("Recording is not enabled for this deployment");BillingPlanCode plan=billingModuleApi.account(tenantId).planCode();int max=switch(plan){case PRO->30;case BUSINESS->90;case STARTER,TRIAL->0;case ENTERPRISE->-1;};if(max<0)throw conflict("Enterprise recording retention is not contracted");if(max==0)throw conflict("Recording is not available on this plan");if(days<1||days>max)throw conflict("Recording retention exceeds the plan limit of "+max+" days");}
     private InterviewTemplateRevision validateRevision(UUID tenantId,UUID id,boolean active){if(id==null)throw conflict("An interview template revision is required");InterviewTemplateRevision r=revisionRepository.findByIdAndTenantId(id,tenantId).orElseThrow(()->conflict("Template revision is not available for this tenant"));InterviewTemplate t=requireTemplate(tenantId,r.getTemplateId());if(active&&t.isArchived())throw conflict("Template revision belongs to an archived template");return r;}
-    private void validateJobWrite(UUID tenantId,RecruitmentDtos.JobWrite r,boolean requireActive){requireLocale(r.language());screening.validateAndWrite(r.screeningQuestions());if(requireActive&&(r.closingAt()==null||!r.closingAt().isAfter(now())))throw new BadRequestException("Closing date must be in the future");if(requireActive&&r.templateRevisionId()==null)throw new BadRequestException("Paused jobs require a template revision");if(r.templateRevisionId()!=null)validateRevision(tenantId,r.templateRevisionId(),requireActive);}
-    private void apply(RecruitmentJob j,RecruitmentDtos.JobWrite r){j.setTitle(r.title().strip());j.setDescription(r.description().strip());j.setDepartment(trim(r.department()));j.setLocation(trim(r.location()));j.setEmploymentType(r.employmentType());j.setWorkMode(r.workMode());j.setExperienceLevel(r.experienceLevel());j.setLanguage(r.language());j.setCvPolicy(r.cvPolicy());j.setAutomationModeOverride(r.automationModeOverride());j.setCvAiModeOverride(r.cvAiModeOverride());j.setTemplateRevisionId(r.templateRevisionId());j.setClosingAt(r.closingAt());j.setScreeningConfig(screening.validateAndWrite(r.screeningQuestions()));}
-    private void apply(RecruitmentCandidate c,RecruitmentDtos.CandidateWrite r){String email=r.email().strip().toLowerCase(Locale.ROOT);c.setFullName(r.fullName().strip());c.setNormalizedName(normalize(r.fullName()));c.setEmail(email);c.setNormalizedEmail(email);c.setPhone(trim(r.phone()));c.setNotes(trim(r.notes()));}
+    private void validateJobWrite(UUID tenantId,RecruitmentDtos.JobWrite r,boolean requireActive){requireLocale(r.language());if(r.descriptionHtml()==null&&(r.description()==null||r.description().isBlank()))throw new BadRequestException("Job description is required");if(r.descriptionHtml()!=null)jobDescriptions.normalize(r.descriptionHtml());screening.validateAndWrite(r.screeningQuestions());if(requireActive&&(r.closingAt()==null||!r.closingAt().isAfter(now())))throw new BadRequestException("Closing date must be in the future");if(requireActive&&r.templateRevisionId()==null)throw new BadRequestException("Paused jobs require a template revision");if(r.templateRevisionId()!=null)validateRevision(tenantId,r.templateRevisionId(),requireActive);}
+    private void apply(RecruitmentJob j,RecruitmentDtos.JobWrite r){j.setTitle(r.title().strip());if(r.descriptionHtml()!=null){var description=jobDescriptions.normalize(r.descriptionHtml());j.setDescription(description.plainText());j.setDescriptionHtml(description.html());}else{j.setDescription(r.description().strip());j.setDescriptionHtml(null);}j.setDepartment(trim(r.department()));j.setLocation(trim(r.location()));j.setEmploymentType(r.employmentType());j.setWorkMode(r.workMode());j.setExperienceLevel(r.experienceLevel());j.setLanguage(r.language());j.setCvPolicy(r.cvPolicy());j.setAutomationModeOverride(r.automationModeOverride());j.setCvAiModeOverride(r.cvAiModeOverride());j.setTemplateRevisionId(r.templateRevisionId());j.setClosingAt(r.closingAt());j.setScreeningConfig(screening.validateAndWrite(r.screeningQuestions()));}
+    private void apply(RecruitmentCandidate c,RecruitmentDtos.CandidateWrite r){String email=r.email().strip().toLowerCase(Locale.ROOT);c.setFullName(r.fullName().strip());c.setNormalizedName(normalize(r.fullName()));c.setEmail(email);c.setNormalizedEmail(email);c.setPhone(phoneNumbers.normalizeOptional(r.phone()));c.setNotes(trim(r.notes()));}
     private InterviewTemplateRevision createRevision(InterviewTemplate t,int number,TemplateSnapshotSupport.Snapshot s){InterviewTemplateRevision r=new InterviewTemplateRevision();r.setTenantId(t.getTenantId());r.setTemplateId(t.getId());r.setRevisionNumber(number);r.setContent(s.json());r.setContentSha256(s.sha256());return revisionRepository.save(r);}
     private RecruitmentJob requireJob(UUID tenantId,UUID id){return jobRepository.findByIdAndTenantId(id,tenantId).orElseThrow(()->notFound("Job"));} private RecruitmentJob lockJob(UUID tenantId,UUID id){return jobRepository.findForUpdate(tenantId,id).orElseThrow(()->notFound("Job"));}
     private InterviewTemplate requireTemplate(UUID tenantId,UUID id){return templateRepository.findByIdAndTenantId(id,tenantId).orElseThrow(()->notFound("Template"));} private RecruitmentCandidate requireCandidate(UUID tenantId,UUID id){return candidateRepository.findByIdAndTenantId(id,tenantId).orElseThrow(()->notFound("Candidate"));}
     private RecruitmentDtos.SettingsResponse settingsResponse(RecruitmentTenantSettings s){return new RecruitmentDtos.SettingsResponse(s.getDefaultAutomationMode(),s.getCvAiMode(),s.getDefaultTemplateRevisionId(),s.isRecordingEnabled(),s.getRecordingRetentionDays(),s.getSchedulingTimezone(),s.getSlotGridMinutes(),s.getMinimumNoticeMinutes(),s.getBookingHorizonDays(),s.getInvitationLifetimeDays(),s.getRescheduleCutoffMinutes(),s.getReminderOffsetsMinutes(),s.getVersion());}
     private void resolveEffectiveSettings(RecruitmentJob job,RecruitmentDtos.SettingsResponse settings){job.setEffectiveAutomationMode(job.getAutomationModeOverride()!=null?job.getAutomationModeOverride():settings.defaultAutomationMode());job.setEffectiveCvAiMode(job.getCvAiModeOverride()!=null?job.getCvAiModeOverride():settings.cvAiMode());job.setRecordingEnabled(settings.recordingEnabled());job.setRecordingRetentionDays(settings.recordingRetentionDays());}
-    private RecruitmentDtos.JobResponse jobResponse(RecruitmentJob j){return new RecruitmentDtos.JobResponse(j.getId(),j.getPublicId(),j.getTitle(),j.getDescription(),j.getDepartment(),j.getLocation(),j.getEmploymentType(),j.getWorkMode(),j.getExperienceLevel(),j.getLanguage(),j.getStatus(),j.getCvPolicy(),j.getAutomationModeOverride(),j.getCvAiModeOverride(),j.getEffectiveAutomationMode(),j.getEffectiveCvAiMode(),j.isRecordingEnabled(),j.getRecordingRetentionDays(),j.getTemplateRevisionId(),j.getClosingAt(),j.getPublishedAt(),j.getPausedAt(),j.getClosedAt(),j.getArchivedAt(),j.getActiveJobReservationId(),j.getFrozenCompanyName(),j.getFrozenCompanySlug(),j.getVersion(),screening.read(j.getScreeningConfig()),j.getCreatedAt(),j.getUpdatedAt());}
+    private RecruitmentDtos.JobResponse jobResponse(RecruitmentJob j){return new RecruitmentDtos.JobResponse(j.getId(),j.getPublicId(),j.getTitle(),j.getDescription(),j.getDescriptionHtml(),j.getDepartment(),j.getLocation(),j.getEmploymentType(),j.getWorkMode(),j.getExperienceLevel(),j.getLanguage(),j.getStatus(),j.getCvPolicy(),j.getAutomationModeOverride(),j.getCvAiModeOverride(),j.getEffectiveAutomationMode(),j.getEffectiveCvAiMode(),j.isRecordingEnabled(),j.getRecordingRetentionDays(),j.getTemplateRevisionId(),j.getClosingAt(),j.getPublishedAt(),j.getPausedAt(),j.getClosedAt(),j.getArchivedAt(),j.getActiveJobReservationId(),j.getFrozenCompanyName(),j.getFrozenCompanySlug(),j.getVersion(),screening.read(j.getScreeningConfig()),j.getCreatedAt(),j.getUpdatedAt());}
     private RecruitmentDtos.TemplateResponse templateResponse(InterviewTemplate t,int latest){return new RecruitmentDtos.TemplateResponse(t.getId(),t.getName(),t.getDescription(),t.getLocale(),t.isArchived(),t.getArchivedAt(),latest,t.getVersion(),t.getCreatedAt(),t.getUpdatedAt());}
-    private RecruitmentDtos.RevisionResponse revisionResponse(InterviewTemplateRevision r){return new RecruitmentDtos.RevisionResponse(r.getId(),r.getTemplateId(),r.getRevisionNumber(),new TemplateSnapshotSupport(objectMapper).read(r.getContent()),r.getContentSha256(),r.getCreatedAt());}
+    private RecruitmentDtos.RevisionResponse revisionResponse(InterviewTemplateRevision r){return new RecruitmentDtos.RevisionResponse(r.getId(),r.getTemplateId(),r.getRevisionNumber(),templateSnapshots().read(r.getContent()),r.getContentSha256(),r.getCreatedAt());}
+    private TemplateSnapshotSupport templateSnapshots(){return new TemplateSnapshotSupport(objectMapper,callingProperties.callForMoreThan600()?14400:600);}
     private RecruitmentDtos.CandidateResponse candidateResponse(RecruitmentCandidate c){return new RecruitmentDtos.CandidateResponse(c.getId(),c.getFullName(),c.getEmail(),c.getPhone(),c.getNotes(),c.getVersion(),c.getCreatedAt(),c.getUpdatedAt());}
     private static String normalize(String v){return Normalizer.normalize(v.strip().toLowerCase(Locale.ROOT),Normalizer.Form.NFKC).replaceAll("\\s+"," ");} private static String trim(String v){return v==null||v.isBlank()?null:v.strip();}
     private static void requireLocale(String locale){if(!"vi-VN".equals(locale)&&!"en-US".equals(locale))throw new BadRequestException("Locale must be vi-VN or en-US");}

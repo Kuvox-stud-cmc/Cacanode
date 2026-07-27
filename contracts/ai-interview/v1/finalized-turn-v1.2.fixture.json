@@ -1,0 +1,7 @@
+{
+  "schema_version":"1.2","event_id":"75214588-6495-5f61-a066-653c46c16fe5","event_type":"interview.turn.finalized","occurred_at":"2026-07-23T08:10:00Z",
+  "tenant_id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","aggregate_id":"22222222-2222-4222-8222-222222222222","session_id":"22222222-2222-4222-8222-222222222222",
+  "call_attempt_id":"55555555-5555-4555-8555-555555555555","turn_id":"c307452e-96d1-5745-bbf5-f926e9edffe7","sequence":1,
+  "speaker":"CANDIDATE","turn_kind":"CANDIDATE_UTTERANCE","section_id":"77777777-7777-4777-8777-777777777777","question_id":"99999999-9999-4999-8999-999999999999",
+  "language_tag":"vi-VN","started_at_epoch_ms":1784794195000,"ended_at_epoch_ms":1784794200000,"transcript":"Tôi đã xây dựng các dịch vụ xử lý sự kiện.","interrupted":false
+}

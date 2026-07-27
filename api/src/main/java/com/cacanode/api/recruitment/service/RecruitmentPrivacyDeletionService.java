@@ -74,7 +74,7 @@ public class RecruitmentPrivacyDeletionService {
         RecruitmentCandidate candidate=candidates.findByIdAndTenantId(application.getCandidateId(),application.getTenantId()).orElseThrow();
         RecruitmentJob job=jobs.findByIdAndTenantId(application.getJobId(),application.getTenantId()).orElseThrow();
         events.publishEvent(new CandidatePrivacyDeletionConfirmationRequestedEvent(candidate.getEmail(),candidate.getFullName(),
-                job.getFrozenCompanyName(),job.getTitle(),application.getLocale(),properties.candidateBaseUrl()+"#deletion="+raw));
+                job.getFrozenCompanyName(),job.getTitle(),application.getLocale(),RecruitmentCandidateLinks.withToken(properties.candidateBaseUrl(),"deletion",raw)));
         audit(request,null);return response(request);
     }
 

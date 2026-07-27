@@ -6,10 +6,14 @@ import { ExternalLink, Plus, Trash2 } from "lucide-react";
 import { Link, useRouter } from "@/i18n/navigation";
 import { useApiClient } from "@/hooks/useApiClient";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { RichJobDescriptionEditor } from "@/components/recruitment/RichJobDescriptionEditor";
+import { useLocaleChangeDraft } from "@/hooks/useLocaleChangeDraft";
+import { useRecruitmentConfirmation } from "@/components/recruitment/useRecruitmentConfirmation";
+import { useAuthStore } from "@/components/providers/StoreProvider";
 import {
   createRecruitmentJob,
   deleteRecruitmentJob,
@@ -25,7 +29,7 @@ import {
 } from "@/lib/recruitment-admin-api";
 
 type RevisionChoice = RevisionResponse & { templateName: string; archived: boolean };
-type SaveIntent = "draft" | "publish";
+type SaveIntent = "draft" | "preview" | "publish";
 
 const employmentTypes = ["FULL_TIME", "PART_TIME", "CONTRACT", "TEMPORARY", "INTERNSHIP"];
 const workModes = ["ONSITE", "REMOTE", "HYBRID"];
@@ -36,6 +40,7 @@ const cvAiModes = ["OFF", "SUMMARY_ONLY", "PERSONALIZED_QUESTIONS"];
 const emptyJob: JobWrite = {
   title: "",
   description: "",
+  descriptionHtml: null,
   department: null,
   location: null,
   employmentType: null,
@@ -69,6 +74,7 @@ function toWrite(job: RecruitmentJob): JobWrite {
   return {
     title: job.title,
     description: job.description,
+    descriptionHtml: job.descriptionHtml,
     department: job.department,
     location: job.location,
     employmentType: job.employmentType,
@@ -119,6 +125,8 @@ export function JobForm({ jobId }: { jobId?: string }) {
   const locale = useLocale();
   const { request } = useApiClient();
   const router = useRouter();
+  const { confirm, confirmationDialog } = useRecruitmentConfirmation();
+  const tenantId = useAuthStore((state) => state.user?.tenantId);
   const [job, setJob] = useState<JobWrite>(emptyJob);
   const [record, setRecord] = useState<RecruitmentJob | null>(null);
   const [revisions, setRevisions] = useState<RevisionChoice[]>([]);
@@ -152,6 +160,12 @@ export function JobForm({ jobId }: { jobId?: string }) {
 
   const editable = !record || record.status === "DRAFT" || record.status === "PAUSED";
   const canPublish = !record || record.status === "DRAFT" || record.status === "PAUSED";
+  const clearLocaleDraft = useLocaleChangeDraft(
+    `recruitment:job:${tenantId ?? "unknown"}:${jobId ?? "new"}`,
+    job,
+    setJob,
+    Boolean(tenantId) && !loading && editable,
+  );
   const selectedRevision = useMemo(() => revisions.find((item) => item.id === job.templateRevisionId), [job.templateRevisionId, revisions]);
 
   function updateQuestion(index: number, value: ScreeningQuestion) {
@@ -161,6 +175,8 @@ export function JobForm({ jobId }: { jobId?: string }) {
   async function save(intent: SaveIntent) {
     const validation = validateJob(job, intent === "publish");
     if (validation) { setError(t(`forms.errors.${validation}` as Parameters<typeof t>[0])); return; }
+    const previewWindow = intent === "preview" ? window.open("about:blank", "_blank") : null;
+    if (previewWindow) previewWindow.opener = null;
     setSaving(intent);
     setError("");
     try {
@@ -168,11 +184,18 @@ export function JobForm({ jobId }: { jobId?: string }) {
         ? await updateRecruitmentJob(request, record.id, job)
         : await createRecruitmentJob(request, job);
       const finalValue = intent === "publish" ? await jobAction(request, saved.id, "publish") : saved;
+      clearLocaleDraft();
       setRecord(finalValue);
       setJob(toWrite(finalValue));
       if (!jobId) router.replace(`/recruitment/jobs/${finalValue.id}`);
+      if (intent === "preview") {
+        const previewUrl = `${locale.startsWith("vi") ? "/vi" : ""}/recruitment/jobs/${finalValue.id}/preview`;
+        if (previewWindow) previewWindow.location.replace(previewUrl);
+        else window.open(previewUrl, "_blank", "noopener,noreferrer");
+      }
       router.refresh();
     } catch (cause) {
+      previewWindow?.close();
       setError(cause instanceof Error ? cause.message : t("forms.createError"));
     } finally {
       setSaving(null);
@@ -180,19 +203,20 @@ export function JobForm({ jobId }: { jobId?: string }) {
   }
 
   async function runAction(action: "pause" | "close" | "archive") {
-    if (!record || !window.confirm(t(`forms.confirm.${action}`))) return;
+    if (!record || !await confirm({ title: `${t(`actions.${action}`)}: ${record.title}`, description: t(`forms.confirm.${action}`), confirmLabel: t(`actions.${action}`), destructive: true })) return;
     setSaving("action"); setError("");
     try {
       const value = await jobAction(request, record.id, action);
+      clearLocaleDraft();
       setRecord(value); setJob(toWrite(value)); router.refresh();
     } catch (cause) { setError(cause instanceof Error ? cause.message : t("forms.createError")); }
     finally { setSaving(null); }
   }
 
   async function remove() {
-    if (!record || !window.confirm(t("forms.confirm.deleteJob"))) return;
+    if (!record || !await confirm({ title: `${t("forms.delete")}: ${record.title}`, description: t("forms.confirm.deleteJob"), confirmLabel: t("forms.delete"), destructive: true })) return;
     setSaving("action"); setError("");
-    try { await deleteRecruitmentJob(request, record.id); router.push("/recruitment/jobs"); }
+    try { await deleteRecruitmentJob(request, record.id); clearLocaleDraft(); router.push("/recruitment/jobs"); }
     catch (cause) { setError(cause instanceof Error ? cause.message : t("forms.createError")); setSaving(null); }
   }
 
@@ -200,9 +224,9 @@ export function JobForm({ jobId }: { jobId?: string }) {
 
   return <div className="mx-auto max-w-5xl space-y-4">
     <div className="flex flex-wrap items-start justify-between gap-3">
-      <div><div className="flex items-center gap-2"><h3 className="text-xl font-semibold">{record ? record.title : t("forms.createJob")}</h3>{record && <Badge variant="outline">{formatEnumLabel(record.status, locale)}</Badge>}</div><p className="text-sm text-muted-foreground">{t("forms.jobHelp")}</p></div>
+      <div><div className="flex items-center gap-2"><h3 className="text-xl font-semibold">{record ? record.title : t("forms.createJob")}</h3>{record && <Badge variant="outline">{formatEnumLabel(record.status, locale)}</Badge>}</div><p className="text-sm text-slate-600">{t("forms.jobHelp")}</p></div>
       <div className="flex flex-wrap gap-2">
-        {record?.status === "PUBLISHED" && record.companySlug && <Button variant="outline" nativeButton={false} render={<Link href={`/careers/${record.companySlug}`} target="_blank" />}><ExternalLink />{t("forms.publicPreview")}</Button>}
+        {record?.status === "PUBLISHED" && <Link href={`/jobs/${record.publicId}`} target="_blank" rel="noopener noreferrer" className={buttonVariants({ variant: "outline" })}><ExternalLink />{t("forms.publicPreview")}</Link>}
         {record?.status === "DRAFT" && <Button variant="destructive" onClick={() => void remove()} disabled={Boolean(saving)}><Trash2 />{t("forms.delete")}</Button>}
         {record?.status === "PUBLISHED" && <><Button variant="outline" onClick={() => void runAction("pause")} disabled={Boolean(saving)}>{t("actions.pause")}</Button><Button variant="destructive" onClick={() => void runAction("close")} disabled={Boolean(saving)}>{t("actions.close")}</Button></>}
         {record?.status === "PAUSED" && <Button variant="destructive" onClick={() => void runAction("close")} disabled={Boolean(saving)}>{t("actions.close")}</Button>}
@@ -213,7 +237,7 @@ export function JobForm({ jobId }: { jobId?: string }) {
 
     <Card><CardHeader><CardTitle>{t("forms.jobBasics")}</CardTitle><CardDescription>{t("forms.jobBasicsHelp")}</CardDescription></CardHeader><CardContent className="grid gap-4 md:grid-cols-2">
       <div className="space-y-2 md:col-span-2"><Label htmlFor="job-title">{t("fields.title")} *</Label><Input id="job-title" required disabled={!editable} value={job.title} onChange={(event) => setJob({ ...job, title: event.target.value })} /></div>
-      <div className="space-y-2 md:col-span-2"><Label htmlFor="job-description">{t("fields.description")} *</Label><textarea id="job-description" disabled={!editable} className="min-h-36 w-full rounded-lg border border-input bg-background p-3 text-sm disabled:opacity-60" value={job.description} onChange={(event) => setJob({ ...job, description: event.target.value })} /></div>
+      <div className="space-y-2 md:col-span-2"><Label htmlFor="job-description">{t("fields.description")} *</Label><RichJobDescriptionEditor id="job-description" disabled={!editable} locale={locale} value={job.descriptionHtml} legacyPlainText={job.description} onChange={(descriptionHtml, description) => setJob((current) => ({ ...current, descriptionHtml, description }))} /><p className="text-xs text-muted-foreground">{t("forms.richDescriptionHelp")}</p></div>
       <div className="space-y-2"><Label htmlFor="department">{t("fields.department")}</Label><Input id="department" disabled={!editable} value={job.department ?? ""} onChange={(event) => setJob({ ...job, department: event.target.value || null })} /></div>
       <div className="space-y-2"><Label htmlFor="location">{t("fields.location")}</Label><Input id="location" disabled={!editable} value={job.location ?? ""} onChange={(event) => setJob({ ...job, location: event.target.value || null })} /></div>
       <SelectField id="employment" label={t("forms.employmentType")} value={job.employmentType} values={employmentTypes} disabled={!editable} onChange={(value) => setJob({ ...job, employmentType: value })} />
@@ -239,6 +263,7 @@ export function JobForm({ jobId }: { jobId?: string }) {
       {editable && <Button type="button" variant="outline" disabled={job.screeningQuestions.length >= 10} onClick={() => setJob({ ...job, screeningQuestions: [...job.screeningQuestions, newQuestion()] })}><Plus />{t("forms.addQuestion")}</Button>}
     </CardContent></Card>
 
-    {editable && <div className="flex flex-wrap justify-end gap-2"><Button variant="outline" nativeButton={false} render={<Link href="/recruitment/jobs" />}>{t("actions.cancel")}</Button><Button variant="outline" disabled={Boolean(saving)} onClick={() => void save("draft")}>{saving === "draft" ? t("actions.saving") : t("forms.saveDraft")}</Button>{canPublish && <Button disabled={Boolean(saving)} onClick={() => void save("publish")}>{saving === "publish" ? t("actions.saving") : record?.status === "PAUSED" ? t("forms.saveRepublish") : t("forms.savePublish")}</Button>}</div>}
+    {editable && <div className="flex flex-wrap justify-end gap-2"><Button variant="outline" nativeButton={false} render={<Link href="/recruitment/jobs" onClick={clearLocaleDraft} />}>{t("actions.cancel")}</Button><Button variant="outline" disabled={Boolean(saving)} onClick={() => void save("draft")}>{saving === "draft" ? t("actions.saving") : t("forms.saveDraft")}</Button><Button variant="outline" disabled={Boolean(saving)} onClick={() => void save("preview")}>{saving === "preview" ? t("actions.saving") : t("forms.savePreview")}</Button>{canPublish && <Button disabled={Boolean(saving)} onClick={() => void save("publish")}>{saving === "publish" ? t("actions.saving") : record?.status === "PAUSED" ? t("forms.saveRepublish") : t("forms.savePublish")}</Button>}</div>}
+    {confirmationDialog}
   </div>;
 }

@@ -1,6 +1,9 @@
 package com.cacanode.api.recruitment.service;
 
+import com.cacanode.api.ai.api.InterviewInferenceApi;
 import com.cacanode.api.billing.api.HiringQuotaApi;
+import com.cacanode.api.common.event.durable.DurableEventPublisher;
+import com.cacanode.api.recruitment.api.event.RecruitmentInterviewProjectionChangedEvent;
 import com.cacanode.api.recruitment.config.RecruitmentCallingProperties;
 import com.cacanode.api.recruitment.model.RecruitmentEnums.CallAttemptStatus;
 import com.cacanode.api.recruitment.model.RecruitmentEnums.InterviewStatus;
@@ -8,6 +11,7 @@ import com.cacanode.api.recruitment.model.RecruitmentInterview;
 import com.cacanode.api.recruitment.model.RecruitmentInterviewCallAttempt;
 import com.cacanode.api.recruitment.repository.RecruitmentInterviewCallAttemptRepository;
 import com.cacanode.api.recruitment.repository.RecruitmentInterviewRepository;
+import com.cacanode.api.recruitment.repository.RecruitmentInterviewTransportReconciliationRepository;
 import com.cacanode.api.recruitment.repository.RecruitmentTwilioCallbackInboxRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -23,10 +27,12 @@ import org.springframework.web.server.ResponseStatusException;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.*;
@@ -36,6 +42,13 @@ class TwilioCallbackSettlementTest {
     private final RecruitmentTwilioCallbackInboxRepository inbox=mock(RecruitmentTwilioCallbackInboxRepository.class);
     private final RecruitmentInterviewRepository interviews=mock(RecruitmentInterviewRepository.class);
     private final HiringQuotaApi quota=mock(HiringQuotaApi.class);
+    private final InterviewInferenceApi inference=mock(InterviewInferenceApi.class);
+    private final RecruitmentInterviewTransportReconciliationRepository reconciliation=
+            mock(RecruitmentInterviewTransportReconciliationRepository.class);
+    private final DurableEventPublisher durableEvents=mock(DurableEventPublisher.class);
+    private final RecruitmentProjectionEventPublisher projectionEvents=
+            new RecruitmentProjectionEventPublisher(durableEvents);
+    private final SimpleMeterRegistry metrics=new SimpleMeterRegistry();
     private final UUID tenant=UUID.randomUUID();
     private final UUID interviewId=UUID.randomUUID();
     private final UUID attemptId=UUID.randomUUID();
@@ -49,7 +62,10 @@ class TwilioCallbackSettlementTest {
         attempt=new RecruitmentInterviewCallAttempt();attempt.setId(attemptId);attempt.setTenantId(tenant);
         attempt.setInterviewId(interviewId);attempt.setTwilioCallSid("CA"+"1".repeat(32));
         attempt.setStatus(CallAttemptStatus.IN_PROGRESS);attempt.setAnsweredAt(Instant.parse("2026-01-01T00:00:00Z"));
+        attempt.setConsentedAt(Instant.parse("2026-01-01T00:00:01Z"));
         interview=new RecruitmentInterview();interview.setId(interviewId);interview.setTenantId(tenant);
+        interview.setApplicationId(UUID.randomUUID());interview.setJobId(UUID.randomUUID());
+        interview.setStatus(InterviewStatus.IN_PROGRESS);
         interview.setQuotaReservationId(reservationId);interview.setQuotaReservedSeconds(120L);
         when(attempts.findForUpdate(attemptId)).thenReturn(Optional.of(attempt));
         when(interviews.findForUpdate(tenant,interviewId)).thenReturn(Optional.of(interview));
@@ -57,10 +73,11 @@ class TwilioCallbackSettlementTest {
         when(quota.settleInterviewSeconds(any(),any(),anyLong()))
                 .thenReturn(new HiringQuotaApi.Consumption(120,0,false));
         RecruitmentCallingProperties properties=new RecruitmentCallingProperties(false,false,15,120,2,2,10,2,
-                "","","","","","","","","","","","","",false,false,false,"test");
+                "","","","","","","","","","","","","",false,false,false,"test",false);
         service=new TwilioCallbackService(properties,attempts,inbox,interviews,
-                quota,new ObjectMapper(),new SimpleMeterRegistry(),
-                Clock.fixed(Instant.parse("2026-01-01T00:05:00Z"), ZoneOffset.UTC));
+                quota,inference,new ObjectMapper(),metrics,
+                Clock.fixed(Instant.parse("2026-01-01T00:05:00Z"), ZoneOffset.UTC),reconciliation,
+                projectionEvents);
     }
 
     @ParameterizedTest
@@ -89,6 +106,15 @@ class TwilioCallbackSettlementTest {
     }
 
     @Test
+    void malformedPreparedPayloadFallsBackToSafeConsentCopyAndLanguage() {
+        attempt.setPreparedSession("not-json");
+
+        assertEquals("en-US",service.languageTag(attempt));
+        assertEquals("This is an automated AI interview. Your responses will be processed for recruitment "
+                +"and may be recorded when recording is enabled.",service.disclosure(attempt));
+    }
+
+    @Test
     void exactDurationReplayUsesQuotaIdempotencyWithoutReopening(){
         when(quota.settleInterviewSeconds(tenant,reservationId,30))
                 .thenReturn(new HiringQuotaApi.Consumption(30,90,false),
@@ -107,6 +133,62 @@ class TwilioCallbackSettlementTest {
         assertEquals(CallAttemptStatus.COMPLETED,attempt.getStatus());
         assertEquals(InterviewStatus.IN_PROGRESS,interview.getStatus());
         assertNull(interview.getActiveCallAttemptId());
+        assertEquals(Instant.parse("2026-01-01T00:06:00Z"),attempt.getNextRetryAt());
+    }
+
+    @Test
+    void reconcilesTransportCompletionWhenNoRuntimeResultArrives() {
+        interview.setStatus(InterviewStatus.FAILED);
+        when(reconciliation.failCompletedTransportsWithoutResult()).thenReturn(List.of(interviewId));
+        when(interviews.findById(interviewId)).thenReturn(Optional.of(interview));
+
+        service.reconcileCompletedTransportWithoutResult();
+
+        verify(reconciliation).failCompletedTransportsWithoutResult();
+        var payload=org.mockito.ArgumentCaptor.forClass(Object.class);
+        verify(durableEvents).publish(eq("recruitment.interview.projection.v1"),eq(1),payload.capture());
+        RecruitmentInterviewProjectionChangedEvent event=
+                assertInstanceOf(RecruitmentInterviewProjectionChangedEvent.class,payload.getValue());
+        assertEquals(interviewId,event.interviewId());
+        assertEquals("interview.failed",event.businessEvent());
+        assertEquals(1.0,metrics.get("recruitment.interview.transport_reconciliation")
+                .tag("result","missing_runtime_result").counter().count());
+    }
+
+    @Test
+    void twilioCompletedBeforeConsentDoesNotLeaveInterviewStuck() {
+        attempt.setStatus(CallAttemptStatus.CONSENT_PENDING);
+        attempt.setAnsweredAt(Instant.parse("2026-01-01T00:00:00Z"));
+        attempt.setConsentedAt(null);
+        interview.setStatus(InterviewStatus.CONSENT_PENDING);interview.setActiveCallAttemptId(attemptId);
+
+        service.status(attemptId,terminal("completed","15","8"));
+
+        assertEquals(CallAttemptStatus.NO_ANSWER,attempt.getStatus());
+        assertEquals("CONSENT_NOT_RECEIVED",attempt.getFailureCode());
+        assertEquals(InterviewStatus.NO_ANSWER,interview.getStatus());
+        assertNull(interview.getActiveCallAttemptId());
+    }
+
+    @Test
+    void consentTimeoutIsNoAnswerButExplicitRejectionRemainsDeclined() {
+        attempt.setStatus(CallAttemptStatus.CONSENT_PENDING);attempt.setConsentedAt(null);
+        attempt.setSessionId(interviewId);attempt.setPreparedSessionSha256("a".repeat(64));
+        interview.setStatus(InterviewStatus.CONSENT_PENDING);interview.setActiveCallAttemptId(attemptId);
+
+        service.consent(attempt,false,"CONSENT_NOT_RECEIVED");
+
+        assertEquals(CallAttemptStatus.NO_ANSWER,attempt.getStatus());
+        assertEquals(InterviewStatus.NO_ANSWER,interview.getStatus());
+        verify(inference).cancel(new InterviewInferenceApi.CancelInterviewCommand(
+                interviewId,attemptId,"CONSENT_NOT_RECEIVED",null));
+
+        attempt.setStatus(CallAttemptStatus.CONSENT_PENDING);attempt.setFailureCode(null);
+        interview.setStatus(InterviewStatus.CONSENT_PENDING);interview.setActiveCallAttemptId(attemptId);
+        service.consent(attempt,false,"CONSENT_DECLINED");
+
+        assertEquals(CallAttemptStatus.DECLINED,attempt.getStatus());
+        assertEquals(InterviewStatus.DECLINED,interview.getStatus());
     }
 
     @Test

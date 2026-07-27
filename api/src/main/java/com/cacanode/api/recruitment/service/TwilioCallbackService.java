@@ -1,5 +1,6 @@
 package com.cacanode.api.recruitment.service;
 
+import com.cacanode.api.ai.api.InterviewInferenceApi;
 import com.cacanode.api.billing.api.HiringQuotaApi;
 import com.cacanode.api.recruitment.config.RecruitmentCallingProperties;
 import com.cacanode.api.recruitment.model.*;
@@ -13,6 +14,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.HttpStatus;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -28,16 +30,20 @@ import java.util.*;
 @RequiredArgsConstructor
 @ConditionalOnProperty(prefix="app.recruitment",name="calling-enabled",havingValue="true")
 public class TwilioCallbackService {
+    private static final String FALLBACK_DISCLOSURE="This is an automated AI interview. "
+            +"Your responses will be processed for recruitment and may be recorded when recording is enabled.";
     private final RecruitmentCallingProperties properties;
     private final RecruitmentInterviewCallAttemptRepository attempts;
     private final RecruitmentTwilioCallbackInboxRepository inbox;
     private final RecruitmentInterviewRepository interviews;
     private final HiringQuotaApi quota;
+    private final InterviewInferenceApi inference;
     private final ObjectMapper mapper;
     private final MeterRegistry metrics;
     private final Clock clock;
+    private final RecruitmentInterviewTransportReconciliationRepository transportReconciliation;
+    private final RecruitmentProjectionEventPublisher projectionEvents;
     @Autowired(required=false) private RecruitmentRecordingLifecycleService recordings;
-    @Autowired(required=false) private RecruitmentProjectionEventPublisher projectionEvents;
 
     public void validate(HttpServletRequest request,MultiValueMap<String,String> form) {
         String signature=request.getHeader("X-Twilio-Signature");
@@ -125,12 +131,17 @@ public class TwilioCallbackService {
             attempt.setStatus(CallAttemptStatus.IN_PROGRESS);attempt.setConsentedAt(clock.instant());
             interview.setStatus(InterviewStatus.IN_PROGRESS);interview.setStartedAt(LocalDateTime.now(clock));
         } else {
-            Instant now=clock.instant();attempt.setStatus(CallAttemptStatus.DECLINED);attempt.setFailureCode(failureCode);
-            attempt.setTerminalAt(now);interview.setStatus(InterviewStatus.DECLINED);
+            boolean noConsentReceived="CONSENT_NOT_RECEIVED".equals(failureCode);
+            Instant now=clock.instant();attempt.setStatus(noConsentReceived
+                    ?CallAttemptStatus.NO_ANSWER:CallAttemptStatus.DECLINED);attempt.setFailureCode(failureCode);
+            attempt.setTerminalAt(now);interview.setStatus(noConsentReceived
+                    ?InterviewStatus.NO_ANSWER:InterviewStatus.DECLINED);
             interview.setActiveCallAttemptId(null);interview.setCompletedAt(LocalDateTime.now(clock));
         }
         attempts.save(attempt);interviews.save(interview);
-        if(projectionEvents!=null)projectionEvents.interview(interview,accepted?"interview.started":"interview.declined");
+        if(!accepted)cancelPreparedRuntime(attempt,failureCode);
+        if(projectionEvents!=null)projectionEvents.interview(interview,accepted?"interview.started":
+                interview.getStatus()==InterviewStatus.NO_ANSWER?"interview.no_answer":"interview.declined");
         if(accepted&&recordings!=null)recordings.enqueueStart(attempt,interview);
     }
 
@@ -160,8 +171,16 @@ public class TwilioCallbackService {
     }
 
     public String disclosure(RecruitmentInterviewCallAttempt attempt) {
-        try{return mapper.readTree(attempt.getPreparedSession()).path("disclosureText").asText();}
-        catch(Exception exception){throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR);}
+        JsonNode prepared=preparedPayload(attempt);
+        String value=prepared==null?null:prepared.path("disclosureText").asText(null);
+        if(value==null||value.isBlank()) {metric("disclosure_fallback");return FALLBACK_DISCLOSURE;}
+        return value;
+    }
+    public String languageTag(RecruitmentInterviewCallAttempt attempt) {
+        JsonNode prepared=preparedPayload(attempt);
+        String value=prepared==null?null:prepared.path("sections").path(0).path("languageTag").asText(null);
+        if("vi-VN".equals(value)||"en-US".equals(value))return value;
+        metric("language_fallback");return "en-US";
     }
     public boolean isTerminal(RecruitmentInterviewCallAttempt attempt){return terminal(attempt.getStatus());}
     public String runtimeToken(RecruitmentInterviewCallAttempt attempt) {
@@ -195,8 +214,23 @@ public class TwilioCallbackService {
     }
 
     private void transportCompleted(RecruitmentInterviewCallAttempt attempt,RecruitmentInterview interview) {
+        if(attempt.getConsentedAt()==null) {
+            terminal(attempt,CallAttemptStatus.NO_ANSWER,InterviewStatus.NO_ANSWER,"CONSENT_NOT_RECEIVED",false);
+            return;
+        }
         attempt.setStatus(CallAttemptStatus.COMPLETED);attempt.setFailureCode(null);attempt.setTerminalAt(clock.instant());
+        attempt.setNextRetryAt(clock.instant().plusSeconds(60));
         interview.setActiveCallAttemptId(null);
+    }
+
+    @Scheduled(fixedDelayString="${app.recruitment.calling.reconcile-delay-ms:10000}")
+    @Transactional
+    public void reconcileCompletedTransportWithoutResult() {
+        List<UUID> reconciled=transportReconciliation.failCompletedTransportsWithoutResult();
+        for(UUID interviewId:reconciled)interviews.findById(interviewId).ifPresent(interview->
+                projectionEvents.interview(interview,"interview.failed"));
+        if(!reconciled.isEmpty())metrics.counter("recruitment.interview.transport_reconciliation",
+                "result","missing_runtime_result").increment(reconciled.size());
     }
 
     private void settleTerminalDuration(RecruitmentInterviewCallAttempt attempt,String rawDuration) {
@@ -222,6 +256,7 @@ public class TwilioCallbackService {
 
     private void terminal(RecruitmentInterviewCallAttempt attempt,CallAttemptStatus attemptStatus,
             InterviewStatus interviewStatus,String code,boolean release) {
+        if(attempt.getConsentedAt()==null)cancelPreparedRuntime(attempt,code);
         Instant now=clock.instant();attempt.setStatus(attemptStatus);attempt.setFailureCode(code);attempt.setTerminalAt(now);
         RecruitmentInterview interview=interviews.findForUpdate(attempt.getTenantId(),attempt.getInterviewId()).orElseThrow();
         interview.setStatus(interviewStatus);interview.setActiveCallAttemptId(null);interview.setCompletedAt(LocalDateTime.now(clock));
@@ -230,6 +265,17 @@ public class TwilioCallbackService {
         if(release&&attempt.getAnsweredAt()==null&&interview.getQuotaReservationId()!=null)try {
             quota.releaseInterviewSeconds(interview.getTenantId(),interview.getQuotaReservationId());
         } catch(HiringQuotaApi.HiringQuotaException ignored) {}
+    }
+
+    private void cancelPreparedRuntime(RecruitmentInterviewCallAttempt attempt,String reason) {
+        if(attempt.getPreparedSessionSha256()==null)return;
+        for(int number=1;number<=properties.cancellationMaxAttempts();number++) {
+            attempt.setCancellationAttempts(number);attempts.save(attempt);
+            try {
+                inference.cancel(new InterviewInferenceApi.CancelInterviewCommand(
+                        attempt.getSessionId(),attempt.getId(),reason,null));return;
+            } catch(RuntimeException ignored) {}
+        }
     }
 
     private void record(RecruitmentInterviewCallAttempt attempt,TwilioCallbackKind kind,Long sequence,
@@ -252,6 +298,12 @@ public class TwilioCallbackService {
             return sha256(mapper.writeValueAsString(values));}catch(Exception exception){throw new IllegalStateException(exception);}
     }
     private void rejectBinding(){metric("binding_rejected");throw new ResponseStatusException(HttpStatus.CONFLICT,"TWILIO_CALL_BINDING_MISMATCH");}
+    private JsonNode preparedPayload(RecruitmentInterviewCallAttempt attempt) {
+        try {
+            String value=attempt==null?null:attempt.getPreparedSession();
+            return value==null||value.isBlank()?null:mapper.readTree(value);
+        } catch(Exception ignored) {return null;}
+    }
     private void metric(String result){metrics.counter("recruitment.twilio.callback","result",result).increment();}
     private static long parseSequence(String value){try{long result=Long.parseLong(value);if(result<0)throw new NumberFormatException();return result;}
         catch(RuntimeException exception){throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"INVALID_SEQUENCE_NUMBER");}}

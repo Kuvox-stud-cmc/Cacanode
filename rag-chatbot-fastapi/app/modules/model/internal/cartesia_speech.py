@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 import time
 from collections.abc import AsyncIterator, Callable
+from contextlib import suppress
 from typing import Any, Protocol, cast
 
 from app.modules.model.api import (
@@ -20,6 +22,8 @@ CARTESIA_TTS_MODEL = "sonic-3.5-2026-05-04"
 CARTESIA_API_VERSION = "2026-03-01"
 CARTESIA_ENCODING = "pcm_mulaw"
 CARTESIA_SAMPLE_RATE = 8000
+STT_MAX_ATTEMPTS = 3
+STT_MAX_REPLAY_BYTES = 90 * CARTESIA_SAMPLE_RATE
 
 
 class CartesiaSttConnection(Protocol):
@@ -60,13 +64,12 @@ class SdkCartesiaSpeechSocketFactory:
         self, *, model: str, language: str, api_version: str
     ) -> CartesiaSttConnection:
         try:
-            socket = await self._client.stt.websocket(
+            socket = await self._client.stt.manual_finalize.websocket(
                 model=model,
                 language=language,
                 encoding=CARTESIA_ENCODING,
                 sample_rate=CARTESIA_SAMPLE_RATE,
-                api_version=api_version,
-            )
+            ).enter()
             return cast(CartesiaSttConnection, _SdkSttConnection(socket))
         except Exception as exception:
             raise ModelUnavailableError("Cartesia STT connection failed") from exception
@@ -81,8 +84,8 @@ class SdkCartesiaSpeechSocketFactory:
         api_version: str,
     ) -> AsyncIterator[bytes]:
         try:
-            socket = await self._client.tts.websocket(api_version=api_version)
-            stream = socket.send(
+            socket = await self._client.tts.websocket()
+            stream = await socket.send(
                 model_id=model,
                 transcript=text,
                 language=language,
@@ -124,20 +127,24 @@ class _SdkSttConnection:
         self._socket = socket
 
     async def send(self, data: bytes) -> None:
-        await self._socket.send(data)
+        await self._socket.send_raw(data)
 
     async def receive(self) -> dict[str, Any] | None:
-        value = await self._socket.receive()
+        value = await self._socket.recv()
         if value is None or isinstance(value, dict):
             return value
         if hasattr(value, "model_dump"):
-            return cast(dict[str, Any], value.model_dump())
+            result = cast(dict[str, Any], value.model_dump())
+            if result.get("type") in {"flush_done", "done"}:
+                result["done"] = True
+            return result
         return cast(dict[str, Any], value)
 
     async def finish(self) -> None:
-        await self._socket.finalize()
+        await self._socket.send("finalize")
 
     async def close(self) -> None:
+        await self._socket.send("close")
         await self._socket.close()
 
 
@@ -147,35 +154,90 @@ class CartesiaStreamingSpeechToTextSession(StreamingSpeechToTextSessionApi):
         factory: CartesiaSpeechSocketFactory,
         *,
         now_ms: Callable[[], int] = lambda: int(time.monotonic() * 1000),
+        retry_delay_seconds: float = 0.1,
     ) -> None:
         self._factory = factory
         self._now_ms = now_ms
         self._connection: CartesiaSttConnection | None = None
         self._language_tag = ""
+        self._audio: list[bytes] = []
+        self._audio_bytes = 0
+        self._retry_delay_seconds = retry_delay_seconds
 
     async def start(self, *, language_tag: str) -> None:
         self._language_tag = language_tag
-        self._connection = await self._factory.open_stt(
-            model=CARTESIA_STT_MODEL,
-            language=_language(language_tag),
-            api_version=CARTESIA_API_VERSION,
-        )
+        self._audio.clear()
+        self._audio_bytes = 0
+        await self._connect()
 
     async def send(self, frame: AudioFrame) -> tuple[TranscriptEvent | SpeechActivityEvent, ...]:
         _validate_frame(frame)
-        connection = self._require_connection()
-        await connection.send(frame.data)
-        return await self._receive_available(connection)
+        if self._audio_bytes + len(frame.data) > STT_MAX_REPLAY_BYTES:
+            raise ModelUnavailableError("Cartesia STT replay buffer exceeded")
+        self._audio.append(frame.data)
+        self._audio_bytes += len(frame.data)
+        try:
+            connection = self._require_connection()
+            await connection.send(frame.data)
+            return await self._receive_available(connection)
+        except Exception:
+            await self._reconnect_and_replay()
+            return ()
 
     async def finish(self) -> tuple[TranscriptEvent | SpeechActivityEvent, ...]:
-        connection = self._require_connection()
-        await connection.finish()
-        return await self._receive_available(connection, final=True)
+        for attempt in range(1, STT_MAX_ATTEMPTS + 1):
+            try:
+                connection = self._require_connection()
+                await connection.finish()
+                return await self._receive_available(connection, final=True)
+            except Exception:
+                if attempt == STT_MAX_ATTEMPTS:
+                    raise
+                await self._reconnect_and_replay()
+        return ()
 
     async def close(self) -> None:
         if self._connection is not None:
-            await self._connection.close()
+            with suppress(Exception):
+                await self._connection.close()
             self._connection = None
+        self._audio.clear()
+        self._audio_bytes = 0
+
+    async def _connect(self) -> None:
+        last_error: Exception | None = None
+        for attempt in range(1, STT_MAX_ATTEMPTS + 1):
+            try:
+                self._connection = await self._factory.open_stt(
+                    model=CARTESIA_STT_MODEL,
+                    language=_language(self._language_tag),
+                    api_version=CARTESIA_API_VERSION,
+                )
+                return
+            except Exception as exception:
+                last_error = exception
+                if attempt < STT_MAX_ATTEMPTS:
+                    await asyncio.sleep(self._retry_delay_seconds * attempt)
+        raise ModelUnavailableError("Cartesia STT connection failed") from last_error
+
+    async def _reconnect_and_replay(self) -> None:
+        last_error: Exception | None = None
+        for attempt in range(1, STT_MAX_ATTEMPTS + 1):
+            if self._connection is not None:
+                with suppress(Exception):
+                    await self._connection.close()
+            self._connection = None
+            try:
+                await self._connect()
+                connection = self._require_connection()
+                for frame in self._audio:
+                    await connection.send(frame)
+                return
+            except Exception as exception:
+                last_error = exception
+                if attempt < STT_MAX_ATTEMPTS:
+                    await asyncio.sleep(self._retry_delay_seconds * attempt)
+        raise ModelUnavailableError("Cartesia STT replay failed") from last_error
 
     async def _receive_available(
         self, connection: CartesiaSttConnection, *, final: bool = False

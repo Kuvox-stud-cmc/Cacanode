@@ -118,7 +118,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 }
             )
             interview_model = create_chat_model(
-                model_config(interview_model_settings), enforce_reasoning_minimum=False
+                model_config(interview_model_settings),
+                reasoning_effort="low",
+                enforce_reasoning_minimum=False,
             )
         app.state.interview_media_runtime = InterviewMediaRuntime(
             settings=settings,

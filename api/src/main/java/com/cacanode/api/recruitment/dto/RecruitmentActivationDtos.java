@@ -12,7 +12,7 @@ public final class RecruitmentActivationDtos {
     public record Capabilities(UUID tenantId,RolloutStage rolloutStage,boolean masterEnabled,
             boolean publicJobsEnabled,boolean automationEnabled,boolean cvAiEnabled,
             boolean callingEnabled,boolean recordingEnabled,boolean publicDiscoveryEnabled,
-            List<String> blockers) {}
+            int maxInterviewDurationSeconds,List<String> blockers) {}
 
     public record Activation(UUID tenantId,RolloutStage rolloutStage,boolean masterEnabled,
             boolean automationEnabled,boolean cvAiEnabled,boolean callingEnabled,

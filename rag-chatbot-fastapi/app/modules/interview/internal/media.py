@@ -6,6 +6,8 @@ import binascii
 import hashlib
 import hmac
 import json
+import logging
+import math
 import time
 from collections.abc import Callable, Mapping
 from contextlib import suppress
@@ -32,7 +34,11 @@ from app.modules.interview.internal.engine import (
     SpokenTurnKind,
     detect_candidate_command,
 )
-from app.modules.interview.internal.redis_state import InterviewRedisState, RuntimeTokenClaim
+from app.modules.interview.internal.redis_state import (
+    CheckpointRecovery,
+    InterviewRedisState,
+    RuntimeTokenClaim,
+)
 from app.modules.model.api import (
     AudioEncoding,
     AudioFrame,
@@ -68,6 +74,11 @@ WORKPLACE_BANDS = Counter(
 PROVIDER_FAILURES = Counter(
     "interview_speech_provider_failures_total", "Interview speech provider failures", ["provider"]
 )
+DURABILITY_FAILURES = Counter(
+    "interview_durability_failures_total",
+    "Failures while preserving or publishing interview runtime state",
+    ["operation"],
+)
 FIRST_AUDIO_SECONDS = Histogram(
     "interview_speech_end_to_first_audio_seconds",
     "Time from candidate speech completion to first AI audio",
@@ -79,6 +90,8 @@ TURN_FINALIZED = "interview.turn.finalized"
 SESSION_COMPLETED = "interview.session.completed"
 SESSION_FAILED = "interview.session.failed"
 PROVIDER_USAGE = "interview.provider.usage"
+STT_FINALIZE_MARGIN_MS = 1000
+LOGGER = logging.getLogger(__name__)
 
 
 class InterviewEventPublisher(Protocol):
@@ -97,7 +110,9 @@ class InterviewEventPublisher(Protocol):
         call_sid: str,
     ) -> int: ...
 
-    async def recover_checkpoint(self, session_id: str) -> int | None: ...
+    async def recover_checkpoint(
+        self, session_id: str, *, requested_event_id: str | None = None
+    ) -> CheckpointRecovery | None: ...
 
 
 class InterviewMediaRuntime:
@@ -173,9 +188,18 @@ class InterviewMediaRuntime:
             await session.run()
         except RuntimeError as exception:
             reason = _bounded_reason(str(exception))
+            try:
+                await session.publish_runtime_failure(reason)
+            except Exception:
+                DURABILITY_FAILURES.labels("runtime_failure_publication").inc()
             WS_CLOSURES.labels(reason).inc()
             await _safe_close(websocket, 1008, reason)
         except Exception:
+            LOGGER.exception("Unhandled interview media runtime failure")
+            try:
+                await session.publish_runtime_failure("INTERVIEW_RUNTIME_ERROR")
+            except Exception:
+                DURABILITY_FAILURES.labels("runtime_failure_publication").inc()
             WS_CLOSURES.labels("INTERNAL_ERROR").inc()
             await _safe_close(websocket, 1011, "INTERNAL_ERROR")
         finally:
@@ -226,7 +250,6 @@ class _MediaSession:
         self.clean_finished = False
         self.heartbeat_task: asyncio.Task[None] | None = None
         self.pending_model_task: asyncio.Task[Any] | None = None
-        self.pending_candidate_task: asyncio.Task[int] | None = None
         self.pending_candidate_turn_id: str | None = None
         self.pending_transcript = ""
         self.pending_speech_end: float | None = None
@@ -266,6 +289,23 @@ class _MediaSession:
             elif event_type == "stop":
                 self._stream_consistent(event)
                 WS_CLOSURES.labels("TWILIO_STOP").inc()
+                if self._durable and self.claim is not None and self.engine is not None:
+                    if self.partial_transcript.strip():
+                        try:
+                            await self._publish_candidate_turn(
+                                self.partial_transcript.strip(), interrupted=True
+                            )
+                        except Exception:
+                            DURABILITY_FAILURES.labels("stop_candidate_publication").inc()
+                    await self._publish_terminal_and_usage(
+                        interruption_failure=(
+                            "CANDIDATE_HANGUP",
+                            True,
+                            "The candidate ended the phone call before the interview completed.",
+                        )
+                    )
+                    self.clean_finished = True
+                    COMPLETIONS.labels("CANDIDATE_HANGUP").inc()
                 return
 
     async def cleanup(self) -> None:
@@ -278,10 +318,6 @@ class _MediaSession:
                 self.pending_model_task.cancel()
             with suppress(asyncio.CancelledError, Exception):
                 await self.pending_model_task
-        if self.pending_candidate_task is not None:
-            with suppress(Exception):
-                self.checkpoint_revision = await self.pending_candidate_task
-            self.pending_candidate_task = None
         await self._close_stt()
         if (
             not self.clean_finished
@@ -290,21 +326,20 @@ class _MediaSession:
             and self.engine is not None
         ):
             if self.partial_transcript.strip():
-                with suppress(Exception):
+                try:
                     await self._publish_candidate_turn(
                         self.partial_transcript.strip(), interrupted=True
                     )
-            with suppress(Exception):
+                except Exception:
+                    DURABILITY_FAILURES.labels("cleanup_candidate_publication").inc()
+            try:
                 await self._checkpoint(
                     "AI_AUDIO_AWAITING_MARK"
                     if self.awaiting_segments
                     else "INTERRUPTED_RECOVERY"
                 )
-                await self.state.mark_recoverable(
-                    self.claim.session_id,
-                    recover_at_epoch_seconds=int(time.time())
-                    + self.settings.INTERVIEW_SESSION_LEASE_SECONDS,
-                )
+            except Exception:
+                DURABILITY_FAILURES.labels("cleanup_checkpoint").inc()
         if self.engine is not None:
             self.engine.discard()
         if self.claim is not None:
@@ -318,6 +353,26 @@ class _MediaSession:
                 )
         if self.execution_lease is not None and self.claim is not None:
             await self.state.release_lease(self.claim.session_id, self.execution_lease)
+
+    async def publish_runtime_failure(self, reason: str) -> None:
+        if self.clean_finished or not self._durable or self.claim is None or self.engine is None:
+            return
+        if self.partial_transcript.strip():
+            try:
+                await self._publish_candidate_turn(
+                    self.partial_transcript.strip(), interrupted=True
+                )
+            except Exception:
+                DURABILITY_FAILURES.labels("failure_candidate_publication").inc()
+        await self._publish_terminal_and_usage(
+            interruption_failure=(
+                reason,
+                reason in {"TTS_FAILURE", "STT_FAILURE", "MEDIA_SEND_FAILURE", "LEASE_LOST"},
+                f"The interview media runtime stopped unexpectedly ({reason}).",
+            )
+        )
+        self.clean_finished = True
+        COMPLETIONS.labels(reason).inc()
 
     @property
     def _durable(self) -> bool:
@@ -375,7 +430,6 @@ class _MediaSession:
         self.execution_lease = await self.state.acquire_lease(self.claim.session_id)
         if self.execution_lease is None:
             raise RuntimeError("EXECUTION_LEASE_HELD")
-        await self.state.clear_recoverable(self.claim.session_id)
         self.connected_monotonic = self.monotonic()
         self.heartbeat_task = asyncio.create_task(self._heartbeat_loop())
         payload = self.prepared["payload"]
@@ -458,6 +512,10 @@ class _MediaSession:
             raise RuntimeError("MEDIA_PAYLOAD_SIZE")
         duration_ms = max(1, len(data) // 8)
         self.twilio_media_ms += duration_ms
+        # Twilio can queue many 20 ms frames while AI audio is playing. Yield even when those
+        # frames are intentionally ignored so heartbeat, checkpoint publication, and model tasks
+        # cannot be starved long enough for the execution lease to expire.
+        await asyncio.sleep(0)
         if not self.listening:
             return
         energy = _mulaw_energy(data)
@@ -480,9 +538,11 @@ class _MediaSession:
                 if self.settings.INTERVIEW_TRANSPORT_SMOKE_MODE
                 else self.settings.INTERVIEW_UTTERANCE_MAX_SECONDS
             ) * 1000
-            if (
-                self.silence_ms >= self.settings.INTERVIEW_END_OF_UTTERANCE_SILENCE_MS
-                or self.speech_ms >= limit
+            if _utterance_complete(
+                speech_ms=self.speech_ms,
+                silence_ms=self.silence_ms,
+                silence_limit_ms=self.settings.INTERVIEW_END_OF_UTTERANCE_SILENCE_MS,
+                utterance_limit_ms=limit,
             ):
                 await self._finish_utterance()
 
@@ -545,9 +605,11 @@ class _MediaSession:
         )
         self.awaiting_segments = (acknowledgement_segment,)
         if self._durable:
-            self.pending_candidate_task = asyncio.create_task(
-                self._publish_candidate_turn(transcript, interrupted=False)
-            )
+            try:
+                await self._publish_candidate_turn(transcript, interrupted=False)
+            except Exception:
+                DURABILITY_FAILURES.labels("candidate_publication").inc()
+                raise
         await self._send_audio_segments(
             self.awaiting_segments,
             "acknowledgement",
@@ -587,9 +649,6 @@ class _MediaSession:
         if not self.mark_waiting or name != self.mark_waiting:
             raise RuntimeError("UNEXPECTED_MARK")
         self.mark_waiting = ""
-        if self.pending_candidate_task is not None:
-            self.checkpoint_revision = await self.pending_candidate_task
-            self.pending_candidate_task = None
         if self._durable and self.awaiting_segments:
             await self._publish_awaiting_ai_segments()
         self.awaiting_segments = ()
@@ -710,13 +769,27 @@ class _MediaSession:
                             max(0.0, self.monotonic() - latency_started_at)
                         )
                     first = False
-                    await self.websocket.send_json(
-                        {
-                            "event": "media",
-                            "streamSid": self.stream_sid,
-                            "media": {"payload": base64.b64encode(frame.data).decode("ascii")},
-                        }
-                    )
+                    try:
+                        await self.websocket.send_json(
+                            {
+                                "event": "media",
+                                "streamSid": self.stream_sid,
+                                "media": {
+                                    "payload": base64.b64encode(
+                                        _amplify_mulaw(
+                                            frame.data, self.settings.INTERVIEW_TTS_OUTPUT_GAIN_DB
+                                        )
+                                    ).decode("ascii")
+                                },
+                            }
+                        )
+                    except Exception as exception:
+                        raise RuntimeError("MEDIA_SEND_FAILURE") from exception
+            except RuntimeError as exception:
+                if str(exception) == "MEDIA_SEND_FAILURE":
+                    raise
+                PROVIDER_FAILURES.labels("tts").inc()
+                raise RuntimeError("TTS_FAILURE") from exception
             except Exception as exception:
                 PROVIDER_FAILURES.labels("tts").inc()
                 raise RuntimeError("TTS_FAILURE") from exception
@@ -902,16 +975,54 @@ class _MediaSession:
                 payload=payload,
                 call_sid=self.call_sid,
             )
-        except Exception:
+        except Exception as initial_exception:
+            last_exception = initial_exception
             for _ in range(1, self.settings.INTERVIEW_PUBLISH_CONFIRM_MAX_ATTEMPTS):
-                recovered = await self.publisher.recover_checkpoint(self.claim.session_id)
+                recovered = await self.publisher.recover_checkpoint(
+                    self.claim.session_id, requested_event_id=event_id
+                )
                 if recovered is not None:
-                    return recovered
-            raise
+                    self.checkpoint_revision = recovered.revision
+                    if recovered.phase == "TERMINAL_COMPLETE":
+                        if (
+                            commit_phase == "TERMINAL_COMPLETE"
+                            and recovered.event_id == event_id
+                        ):
+                            return recovered.revision
+                        raise RuntimeError("CHECKPOINT_TERMINALIZED") from initial_exception
+                    if (
+                        phase != "TERMINAL_PUBLICATION"
+                        and recovered.phase == "TERMINAL_PUBLICATION"
+                    ):
+                        raise RuntimeError("CHECKPOINT_TERMINALIZED") from initial_exception
+                    if recovered.event_id == event_id:
+                        return recovered.revision
+                try:
+                    return await self.publisher.publish_checkpointed(
+                        session_id=self.claim.session_id,
+                        expected_revision=self.checkpoint_revision,
+                        phase=phase,
+                        commit_phase=commit_phase,
+                        current_runtime_state=current_state,
+                        next_runtime_state=next_state,
+                        event_id=event_id,
+                        routing_key=routing_key,
+                        payload=payload,
+                        call_sid=self.call_sid,
+                    )
+                except Exception as retry_exception:
+                    last_exception = retry_exception
+            if last_exception is initial_exception:
+                raise
+            raise last_exception from initial_exception
 
-    async def _publish_terminal_and_usage(self) -> None:
+    async def _publish_terminal_and_usage(
+        self, *, interruption_failure: tuple[str, bool, str] | None = None
+    ) -> None:
         assert self.claim is not None and self.engine is not None
-        partial = self.engine.terminal_reason is not CompletionReason.COMPLETED
+        partial = interruption_failure is not None or (
+            self.engine.terminal_reason is not CompletionReason.COMPLETED
+        )
         result = self.engine.result_snapshot(partial=partial)
         expected_turn_count = self.engine.next_turn_sequence - 1
         connected_seconds = int(
@@ -954,7 +1065,22 @@ class _MediaSession:
                 current_state=self._runtime_state(include_pending_audio=False),
                 next_state=self._runtime_state(include_pending_audio=False),
             )
-        if self.engine.terminal_reason is CompletionReason.MODEL_FAILURE_LIMIT:
+        if interruption_failure is not None:
+            failure_code, retryable, detail = interruption_failure
+            failed = failed_result(
+                tenant_id=self.claim.tenant_id,
+                session_id=self.claim.session_id,
+                call_attempt_id=self.claim.call_attempt_id,
+                failure_code=failure_code,
+                retryable=retryable,
+                detail=detail,
+                expected_turn_count=expected_turn_count,
+                connected_seconds=connected_seconds,
+                result=result,
+            )
+            routing_key = SESSION_FAILED
+            terminal: Any = failed
+        elif self.engine.terminal_reason is CompletionReason.MODEL_FAILURE_LIMIT:
             failed = failed_result(
                 tenant_id=self.claim.tenant_id,
                 session_id=self.claim.session_id,
@@ -967,7 +1093,7 @@ class _MediaSession:
                 result=result,
             )
             routing_key = SESSION_FAILED
-            terminal: Any = failed
+            terminal = failed
         else:
             reasons = {
                 CompletionReason.COMPLETED: "FINISHED",
@@ -1037,6 +1163,30 @@ def _mulaw_energy(data: bytes) -> float:
     return total / max(1, len(data))
 
 
+def _amplify_mulaw(data: bytes, gain_db: float) -> bytes:
+    if gain_db <= 0 or not data:
+        return data
+    gain = math.pow(10.0, gain_db / 20.0)
+    return bytes(_linear_to_mulaw(round(_mulaw_to_linear(value) * gain)) for value in data)
+
+
+def _mulaw_to_linear(value: int) -> int:
+    decoded = ~value & 0xFF
+    mantissa = decoded & 0x0F
+    exponent = (decoded >> 4) & 0x07
+    sample = ((mantissa << 3) + 0x84) << exponent
+    sample -= 0x84
+    return -sample if decoded & 0x80 else sample
+
+
+def _linear_to_mulaw(sample: int) -> int:
+    sign = 0x80 if sample < 0 else 0
+    magnitude = min(abs(sample), 32635) + 0x84
+    exponent = max(0, min(7, magnitude.bit_length() - 8))
+    mantissa = (magnitude >> (exponent + 3)) & 0x0F
+    return ~(sign | (exponent << 4) | mantissa) & 0xFF
+
+
 async def _safe_close(websocket: WebSocket, code: int, reason: str) -> None:
     try:
         await websocket.close(code=code, reason=reason)
@@ -1064,6 +1214,7 @@ def _bounded_reason(value: str) -> str:
         "CHECKPOINT_RECOVERY_FAILED",
         "CHECKPOINT_CALL_MISMATCH",
         "CHECKPOINT_PHASE_INVALID",
+        "CHECKPOINT_TERMINALIZED",
         "INVALID_MEDIA_PAYLOAD",
         "MEDIA_PAYLOAD_SIZE",
         "LEASE_LOST",
@@ -1073,6 +1224,14 @@ def _bounded_reason(value: str) -> str:
         "STT_NOT_STARTED",
         "STT_FAILURE",
         "TTS_FAILURE",
+        "MEDIA_SEND_FAILURE",
         "ACTIVE_QUESTION_MISSING",
     }
     return value if value in allowed else "PROTOCOL_ERROR"
+
+
+def _utterance_complete(
+    *, speech_ms: int, silence_ms: int, silence_limit_ms: int, utterance_limit_ms: int
+) -> bool:
+    soft_limit = max(1000, utterance_limit_ms - STT_FINALIZE_MARGIN_MS)
+    return silence_ms >= silence_limit_ms or speech_ms >= soft_limit

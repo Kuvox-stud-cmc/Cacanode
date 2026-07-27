@@ -10,6 +10,8 @@ import org.springframework.security.access.prepost.PreAuthorize;
 
 import java.util.List;
 import java.util.UUID;
+import java.time.LocalDateTime;
+import org.springframework.http.CacheControl;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -31,5 +33,20 @@ class RecruitmentControllerTest {
         when(queries.jobs(tenantId,0,20,null,null,null,null,null,null,null,null,null,null,null)).thenReturn(new RecruitmentDtos.PageResult<>(List.of(),42));
         var response=new RecruitmentController(service,queries).jobs(0,20,null,null,null,null,null,null,null,null,null,null,null,request);
         assertEquals("42",response.getHeaders().getFirst("X-Total-Count"));assertNotNull(response.getBody());assertTrue(response.getBody().isEmpty());
+    }
+
+    @Test
+    void previewIsTenantScopedAndNeverCacheable(){
+        RecruitmentService service=mock(RecruitmentService.class);RecruitmentQueryService queries=mock(RecruitmentQueryService.class);
+        HttpServletRequest request=mock(HttpServletRequest.class);UUID tenantId=UUID.randomUUID(),jobId=UUID.randomUUID(),publicId=UUID.randomUUID();
+        when(request.getAttribute("tenantId")).thenReturn(tenantId.toString());
+        var preview=new RecruitmentDtos.JobPreview(publicId,"acme","Acme","Engineer","Plain","<p>Plain</p>",
+                null,null,null,null,null,"en-US",com.cacanode.api.recruitment.model.RecruitmentEnums.CvPolicy.OPTIONAL,
+                com.cacanode.api.recruitment.model.RecruitmentEnums.JobStatus.DRAFT,null,LocalDateTime.now().plusDays(3));
+        when(service.preview(tenantId,jobId)).thenReturn(preview);
+        var response=new RecruitmentController(service,queries).preview(jobId,request);
+        assertEquals("no-store",response.getHeaders().getCacheControl());
+        assertSame(preview,response.getBody());
+        verify(service).preview(tenantId,jobId);
     }
 }

@@ -97,14 +97,15 @@ public class PublicJobQueryService {
     private Row row(ResultSet r, String sort) throws SQLException {
         var job = new PublicRecruitmentDtos.PublicJob(
                 r.getObject("public_id", UUID.class), r.getString("tenant_slug"), r.getString("company_name"),
-                r.getString("title"), r.getString("description"), r.getString("department"), r.getString("location"),
+                r.getString("title"), r.getString("description"), r.getString("description_html"), r.getString("department"), r.getString("location"),
                 enumOrNull(EmploymentType.class,r.getString("employment_type")),
                 enumOrNull(WorkMode.class,r.getString("work_mode")),
                 enumOrNull(ExperienceLevel.class,r.getString("experience_level")),
                 r.getString("language"), CvPolicy.valueOf(r.getString("cv_policy")),
                 CvAiMode.valueOf(r.getString("cv_ai_mode")),r.getBoolean("cv_ai_disclosed"),
                 screening.publicQuestions(r.getString("screening_questions")),
-                r.getObject("published_at",LocalDateTime.class), r.getObject("closing_at",LocalDateTime.class));
+                r.getObject("published_at",LocalDateTime.class), r.getObject("closing_at",LocalDateTime.class),
+                r.getBoolean("discoverable"));
         String value = switch (sort) {
             case "relevance" -> Double.toString(r.getDouble("relevance_score"));
             case "closing_soon" -> job.closingAt().toString();

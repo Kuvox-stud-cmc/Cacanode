@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Test;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -42,18 +43,21 @@ class InterviewEventContractTest {
                 String eventType = payload.get("event_type").asText();
                 UUID aggregateId = UUID.fromString(payload.get("aggregate_id").asText());
                 String semanticKey=semanticKeys.get(eventType);
-                if(payload.get("schema_version").asText().equals("1.1"))semanticKey=switch(eventType){
+                String version=payload.get("schema_version").asText();
+                if(Set.of("1.1","1.2").contains(version))semanticKey=switch(eventType){
                     case "interview.resume-analysis.requested"->"requested:v1.1";
                     case "interview.resume-analysis.outcome"->"outcome:v1.1";
-                    case "interview.turn.finalized"->"turn:"+payload.get("sequence").asInt()+":v1.1";
-                    case "interview.session.completed"->"completed:v1.1";
-                    case "interview.session.failed"->"failed:v1.1";
+                    case "interview.turn.finalized"->"turn:"+payload.get("sequence").asInt()+":v"+version;
+                    case "interview.session.completed"->"completed:v"+version;
+                    case "interview.session.failed"->"failed:v"+version;
                     case "interview.provider.usage"->payload.get("provider").asText().toLowerCase()+":"+
-                            payload.get("capability").asText().toLowerCase()+":v1.1";
+                            payload.get("capability").asText().toLowerCase()+":v"+version;
                     default->throw new IllegalStateException(eventType);};
-                assertEquals(
-                        InterviewEventIdentity.eventId(eventType, aggregateId, semanticKey),
-                        UUID.fromString(payload.get("event_id").asText()));
+                UUID expected="1.2".equals(version)
+                        ?InterviewEventIdentity.runtimeEventId(eventType,aggregateId,
+                                UUID.fromString(payload.get("call_attempt_id").asText()),semanticKey)
+                        :InterviewEventIdentity.eventId(eventType,aggregateId,semanticKey);
+                assertEquals(expected,UUID.fromString(payload.get("event_id").asText()));
             }
         }
     }
@@ -82,5 +86,18 @@ class InterviewEventContractTest {
                 UUID.fromString(payload.get("application_id").asText()),payload.get("cv_sha256").asText(),
                 payload.get("analysis_mode").asText(),payload.get("policy_version").asText(),
                 payload.get("model_version").asText()));
+    }
+
+    @Test
+    void runtimeIdentityIsAttemptScoped() {
+        UUID session=UUID.fromString("22222222-2222-4222-8222-222222222222");
+        UUID first=UUID.fromString("55555555-5555-4555-8555-555555555555");
+        UUID second=UUID.fromString("66666666-6666-4666-8666-666666666666");
+        assertEquals(UUID.fromString("75214588-6495-5f61-a066-653c46c16fe5"),
+                InterviewEventIdentity.runtimeEventId("interview.turn.finalized",session,first,
+                        "turn:1:v1.2"));
+        org.junit.jupiter.api.Assertions.assertNotEquals(
+                InterviewEventIdentity.runtimeTurnId(session,first,1),
+                InterviewEventIdentity.runtimeTurnId(session,second,1));
     }
 }

@@ -39,7 +39,8 @@ public final class RecruitmentDtos {
             @Size(min=2,max=10) List<@Valid ScreeningOption> options,
             @NotEmpty List<@NotNull UUID> acceptedOptionIds) {}
 
-    public record JobWrite(@NotBlank @Size(max=200) String title, @NotBlank String description,
+    public record JobWrite(@NotBlank @Size(max=200) String title, String description,
+            @Size(max=200000) String descriptionHtml,
             @Size(max=120) String department, @Size(max=160) String location,
             EmploymentType employmentType, WorkMode workMode, ExperienceLevel experienceLevel,
             @Pattern(regexp="vi-VN|en-US") String language, @NotNull CvPolicy cvPolicy,
@@ -49,10 +50,10 @@ public final class RecruitmentDtos {
         public JobWrite(String title,String description,String department,String location,EmploymentType employmentType,
                 WorkMode workMode,ExperienceLevel experienceLevel,String language,CvPolicy cvPolicy,
                 AutomationMode automationModeOverride,CvAiMode cvAiModeOverride,UUID templateRevisionId,
-                LocalDateTime closingAt){this(title,description,department,location,employmentType,workMode,experienceLevel,
+                LocalDateTime closingAt){this(title,description,null,department,location,employmentType,workMode,experienceLevel,
                 language,cvPolicy,automationModeOverride,cvAiModeOverride,templateRevisionId,closingAt,List.of());}
     }
-    public record JobResponse(UUID id, UUID publicId, String title, String description, String department,
+    public record JobResponse(UUID id, UUID publicId, String title, String description, String descriptionHtml, String department,
             String location, EmploymentType employmentType, WorkMode workMode, ExperienceLevel experienceLevel,
             String language, JobStatus status,
             CvPolicy cvPolicy, AutomationMode automationModeOverride, CvAiMode cvAiModeOverride,
@@ -62,6 +63,18 @@ public final class RecruitmentDtos {
             LocalDateTime pausedAt, LocalDateTime closedAt, LocalDateTime archivedAt,
             UUID activeJobReservationId, String companyName, String companySlug, long version,
             List<ScreeningQuestion> screeningQuestions, LocalDateTime createdAt, LocalDateTime updatedAt) {
+        public JobResponse(UUID id,UUID publicId,String title,String description,String descriptionHtml,String department,String location,
+                EmploymentType employmentType,WorkMode workMode,ExperienceLevel experienceLevel,String language,
+                JobStatus status,CvPolicy cvPolicy,AutomationMode automationModeOverride,CvAiMode cvAiModeOverride,
+                AutomationMode effectiveAutomationMode,CvAiMode effectiveCvAiMode,boolean recordingEnabled,
+                int recordingRetentionDays,UUID templateRevisionId,LocalDateTime closingAt,LocalDateTime publishedAt,
+                LocalDateTime pausedAt,LocalDateTime closedAt,LocalDateTime archivedAt,UUID activeJobReservationId,
+                String companyName,String companySlug,long version,LocalDateTime createdAt,LocalDateTime updatedAt){
+            this(id,publicId,title,description,descriptionHtml,department,location,employmentType,workMode,experienceLevel,
+                    language,status,cvPolicy,automationModeOverride,cvAiModeOverride,effectiveAutomationMode,effectiveCvAiMode,
+                    recordingEnabled,recordingRetentionDays,templateRevisionId,closingAt,publishedAt,pausedAt,closedAt,
+                    archivedAt,activeJobReservationId,companyName,companySlug,version,List.of(),createdAt,updatedAt);
+        }
         public JobResponse(UUID id,UUID publicId,String title,String description,String department,String location,
                 EmploymentType employmentType,WorkMode workMode,ExperienceLevel experienceLevel,String language,
                 JobStatus status,CvPolicy cvPolicy,AutomationMode automationModeOverride,CvAiMode cvAiModeOverride,
@@ -69,12 +82,18 @@ public final class RecruitmentDtos {
                 int recordingRetentionDays,UUID templateRevisionId,LocalDateTime closingAt,LocalDateTime publishedAt,
                 LocalDateTime pausedAt,LocalDateTime closedAt,LocalDateTime archivedAt,UUID activeJobReservationId,
                 String companyName,String companySlug,long version,LocalDateTime createdAt,LocalDateTime updatedAt){
-            this(id,publicId,title,description,department,location,employmentType,workMode,experienceLevel,language,status,
+            this(id,publicId,title,description,null,department,location,employmentType,workMode,experienceLevel,language,status,
                     cvPolicy,automationModeOverride,cvAiModeOverride,effectiveAutomationMode,effectiveCvAiMode,
                     recordingEnabled,recordingRetentionDays,templateRevisionId,closingAt,publishedAt,pausedAt,closedAt,
                     archivedAt,activeJobReservationId,companyName,companySlug,version,List.of(),createdAt,updatedAt);
         }
     }
+
+    public record JobPreview(UUID publicId, String tenantSlug, String companyName, String title,
+            String description, String descriptionHtml, String department, String location,
+            EmploymentType employmentType, WorkMode workMode, ExperienceLevel experienceLevel,
+            String language, CvPolicy cvPolicy, JobStatus status, LocalDateTime publishedAt,
+            LocalDateTime closingAt) {}
 
     public record InteractionLimits(@Min(0) int repetitionLimit, @Min(0) int clarificationLimit,
             @Min(1) int silenceTimeoutSeconds, @Min(0) int silencePromptLimit) {}
@@ -99,7 +118,7 @@ public final class RecruitmentDtos {
 
     public record CandidateWrite(@NotBlank @Size(max=200) String fullName,
             @NotBlank @Email @Size(max=320) String email,
-            @Pattern(regexp="^\\+84[0-9]{9,10}$") String phone, String notes) {}
+            @Pattern(regexp="^\\+[1-9][0-9]{7,14}$") String phone, String notes) {}
     public record CandidateResponse(UUID id, String fullName, String email, String phone, String notes,
             long version, LocalDateTime createdAt, LocalDateTime updatedAt) {}
 
@@ -126,7 +145,8 @@ public final class RecruitmentDtos {
             String templateSnapshotSha256, String templateSnapshotVersion, LocalDateTime scheduledAt,
             Instant scheduledStartAt, Instant scheduledEndAt, String schedulingTimezone, int rescheduleCount,
             LocalDateTime startedAt, LocalDateTime completedAt, BigDecimal overallScore,
-            String englishBand, long version, LocalDateTime createdAt, LocalDateTime updatedAt) {}
+            String englishBand, boolean recordingEnabled, int recordingRetentionDays,
+            long version, LocalDateTime createdAt, LocalDateTime updatedAt) {}
     public record CallAttemptResponse(int attemptNumber, CallAttemptStatus status,
             LocalDateTime createdAt, LocalDateTime updatedAt, Instant answeredAt, Instant consentedAt,
             Instant terminalAt, String failureCode) {}
@@ -139,6 +159,8 @@ public final class RecruitmentDtos {
         }
     }
     public record DialResponse(UUID attemptId,CallAttemptStatus status,String failureCode,Instant acceptedAt) {}
+    public record DialEligibilityResponse(boolean allowed,String reason,Instant windowOpensAt,
+            Instant windowClosesAt,Instant serverTime) {}
 
     public record PageResult<T>(List<T> items, long totalCount) {}
 

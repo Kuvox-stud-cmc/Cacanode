@@ -1,12 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useFormatter, useTranslations } from "next-intl";
+import { useFormatter, useLocale, useTranslations } from "next-intl";
 import { useSearchParams } from "next/navigation";
 import { Link, useRouter } from "@/i18n/navigation";
 import { useApiClient } from "@/hooks/useApiClient";
 import { Badge } from "@/components/ui/badge"; import { Button } from "@/components/ui/button"; import { Card, CardContent } from "@/components/ui/card"; import { Input } from "@/components/ui/input"; import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"; import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { getApplicationDetail, getInterviewAttempts, inviteApplication, jobAction, listRecruitmentApplications, listRecruitmentCandidates, listRecruitmentInterviews, listRecruitmentJobs, listRecruitmentTemplates, saveCandidate, transitionApplication, type ApplicationDetail, type CallAttempt, type RecruitmentApplication, type RecruitmentCandidate, type RecruitmentInterview, type RecruitmentJob, type RecruitmentTemplate } from "@/lib/recruitment-admin-api";
+import { callFailureText } from "@/lib/recruitment-call-failures";
+import { formatEnumLabel } from "@/lib/recruitment-formatters";
 
 type Kind = "jobs" | "applications" | "candidates" | "templates" | "interviews" | "schedule";
 type Row = RecruitmentJob | RecruitmentApplication | RecruitmentCandidate | RecruitmentTemplate | RecruitmentInterview;
@@ -41,4 +43,4 @@ export function RecruitmentListPage({ kind }: { kind: Kind }) {
 }
 
 function ApplicationEvidence({ detail }: { detail: ApplicationDetail | null }) { const t = useTranslations("Recruitment"); if (!detail) return <p className="text-sm text-slate-500">{t("loading")}</p>; const selected = new Map(detail.screeningAnswers.map((answer) => [answer.questionId, answer.optionId])); return <div className="space-y-3 text-sm"><div><p className="font-medium">{detail.candidate.fullName}</p><p className="text-slate-500">{detail.candidate.email} · {detail.candidate.phone}</p></div>{detail.screeningQuestions.map((question) => <div key={question.questionId} className="rounded-md bg-slate-50 p-2"><p>{question.prompt}</p><p className="font-medium text-indigo-700">{question.options.find((option) => option.optionId === selected.get(question.questionId))?.label ?? "—"}</p></div>)}<p className="rounded-md bg-amber-50 p-2 text-xs text-amber-800">{t("advisory")}</p></div>; }
-function AttemptList({ attempts }: { attempts: CallAttempt[] }) { const t = useTranslations("Recruitment"); return <div className="space-y-2"><h5 className="text-sm font-semibold">{t("callAttempts")}</h5>{attempts.map((attempt) => <div key={attempt.attemptNumber} className="rounded-md border p-2 text-xs"><div className="flex justify-between"><span>#{attempt.attemptNumber}</span><strong>{attempt.status}</strong></div>{attempt.failureCode && <p className="text-red-700">{attempt.failureCode}</p>}</div>)}{attempts.length === 0 && <p className="text-sm text-slate-500">{t("noAttempts")}</p>}</div>; }
+function AttemptList({ attempts }: { attempts: CallAttempt[] }) { const t = useTranslations("Recruitment"); const i = useTranslations("Recruitment.interviewPages"); const locale = useLocale(); return <div className="space-y-2"><h5 className="text-sm font-semibold">{t("callAttempts")}</h5>{attempts.map((attempt) => <div key={attempt.attemptNumber} className="rounded-md border p-2 text-xs"><div className="flex justify-between"><span>#{attempt.attemptNumber}</span><strong>{formatEnumLabel(attempt.status,locale)}</strong></div>{attempt.failureCode && <p className="text-red-700">{i("failureReason")}: {callFailureText(attempt.failureCode,i,locale)}</p>}</div>)}{attempts.length === 0 && <p className="text-sm text-slate-500">{t("noAttempts")}</p>}</div>; }

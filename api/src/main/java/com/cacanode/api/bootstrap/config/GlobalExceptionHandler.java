@@ -11,6 +11,7 @@ import com.cacanode.api.recruitment.exception.PublicRecruitmentRateLimitExceptio
 import com.cacanode.api.recruitment.exception.PublicRecruitmentUnavailableException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.HttpStatusCode;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.validation.FieldError;
@@ -22,6 +23,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.context.request.WebRequest;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -196,6 +198,17 @@ public class GlobalExceptionHandler {
                 .error(HttpStatus.BAD_GATEWAY.getReasonPhrase())
                 .message(e.getMessage())
                 .build();
+    }
+
+    @ExceptionHandler(ResponseStatusException.class)
+    public ResponseEntity<ErrorResponse> handleResponseStatusException(
+            ResponseStatusException e, WebRequest request) {
+        HttpStatusCode status=e.getStatusCode();
+        String error=status instanceof HttpStatus httpStatus?httpStatus.getReasonPhrase():"Request failed";
+        ErrorResponse body=ErrorResponse.builder().timestamp(LocalDateTime.now()).status(status.value())
+                .path(safePath(request)).error(error)
+                .message(e.getReason()==null?error:e.getReason()).build();
+        return ResponseEntity.status(status).body(body);
     }
 
     // 500 - catch all unexpected exceptions

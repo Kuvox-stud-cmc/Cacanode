@@ -18,15 +18,23 @@ import java.util.UUID;
 
 final class TemplateSnapshotSupport {
     private final ObjectMapper mapper;
+    private final int maximumDurationSeconds;
 
     TemplateSnapshotSupport(ObjectMapper source) {
+        this(source,14400);
+    }
+
+    TemplateSnapshotSupport(ObjectMapper source,int maximumDurationSeconds) {
         this.mapper = source.copy()
                 .configure(MapperFeature.SORT_PROPERTIES_ALPHABETICALLY, true)
                 .configure(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS, true);
+        this.maximumDurationSeconds=maximumDurationSeconds;
     }
 
     Snapshot validateAndCreate(String locale, RecruitmentDtos.RevisionContent content) {
         if (content == null) throw new BadRequestException("Template content is required");
+        if(content.durationLimitSeconds()>maximumDurationSeconds)
+            throw new BadRequestException("Interview duration cannot exceed "+maximumDurationSeconds+" seconds");
         if (blank(content.introductionText()) || blank(content.disclosureText())
                 || blank(content.closingText()) || content.durationLimitSeconds() <= 0) {
             throw new BadRequestException("Template texts and a positive duration are required");

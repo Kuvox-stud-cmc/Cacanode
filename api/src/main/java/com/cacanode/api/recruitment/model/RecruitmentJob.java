@@ -17,6 +17,7 @@ public class RecruitmentJob extends BaseEntity {
     @Column(name = "public_id", nullable = false, updatable = false) private UUID publicId;
     @Column(name = "title", nullable = false) private String title;
     @Column(name = "description", nullable = false, columnDefinition = "text") private String description;
+    @Column(name = "description_html", columnDefinition = "text") private String descriptionHtml;
     private String department;
     private String location;
     @Enumerated(EnumType.STRING) @Column(name = "employment_type") private RecruitmentEnums.EmploymentType employmentType;

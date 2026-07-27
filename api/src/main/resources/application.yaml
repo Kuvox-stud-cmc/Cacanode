@@ -85,7 +85,7 @@ app:
       twilio-from-number: ${TWILIO_FROM_NUMBER:}
       callback-base-url: ${TWILIO_CALLBACK_BASE_URL:}
       media-stream-wss-url: ${TWILIO_MEDIA_STREAM_WSS_URL:}
-      consent-voice-english: ${TWILIO_CONSENT_VOICE_ENGLISH:Google.en-US-Standard-C}
+      consent-voice-english: ${TWILIO_CONSENT_VOICE_ENGLISH:alice}
       consent-voice-vietnamese: ${TWILIO_CONSENT_VOICE_VIETNAMESE:Google.vi-VN-Standard-A}
       cartesia-api-key: ${CARTESIA_API_KEY:}
       cartesia-english-voice-id: ${CARTESIA_ENGLISH_VOICE_ID:}
@@ -95,6 +95,7 @@ app:
       interview-engine-enabled: ${INTERVIEW_ENGINE_ENABLED:false}
       durable-results-enabled: ${INTERVIEW_DURABLE_RESULTS_ENABLED:false}
       app-environment: ${APP_ENV:development}
+      call-for-more-than-600: ${CALL_FOR_MORE_THAN_600:false}
       fraud:
         destination-attempts-per-day: ${RECRUITMENT_PHONE_DESTINATION_ATTEMPTS_PER_DAY:3}
         tenant-attempts-per-day: ${RECRUITMENT_PHONE_TENANT_ATTEMPTS_PER_DAY:100}

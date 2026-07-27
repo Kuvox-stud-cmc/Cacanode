@@ -115,6 +115,13 @@ class RuntimeCheckpoint:
     recovery_deadline_epoch_seconds: int | None
 
 
+@dataclass(frozen=True, slots=True)
+class CheckpointRecovery:
+    event_id: str | None
+    revision: int
+    phase: str
+
+
 _CLAIM_TOKEN = """
 local token = redis.call('GET', KEYS[1])
 if not token then return {-1} end
@@ -131,6 +138,7 @@ if session.claimed_call_sid and session.claimed_call_sid ~= '' then
   if session.claimed_call_sid ~= ARGV[2] then return {-2} end
   redis.call('ZADD', KEYS[3], tonumber(ARGV[1]) + tonumber(ARGV[3]), metadata.call_attempt_id)
   redis.call('ZADD', KEYS[4], tonumber(ARGV[1]) + tonumber(ARGV[3]), metadata.call_attempt_id)
+  redis.call('ZADD', KEYS[5], tonumber(ARGV[1]) + tonumber(ARGV[3]), metadata.session_id)
   return {2}
 end
 redis.call('ZREMRANGEBYSCORE', KEYS[3], '-inf', ARGV[1])
@@ -142,6 +150,7 @@ session.status = 'claimed'
 redis.call('SET', KEYS[2], cjson.encode(session), 'EX', ARGV[6])
 redis.call('ZADD', KEYS[3], tonumber(ARGV[1]) + tonumber(ARGV[3]), metadata.call_attempt_id)
 redis.call('ZADD', KEYS[4], tonumber(ARGV[1]) + tonumber(ARGV[3]), metadata.call_attempt_id)
+redis.call('ZADD', KEYS[5], tonumber(ARGV[1]) + tonumber(ARGV[3]), metadata.session_id)
 return {1}
 """
 
@@ -153,6 +162,7 @@ if session.claimed_call_sid ~= ARGV[1] or session.status == 'terminal' then retu
 redis.call('EXPIRE', KEYS[1], ARGV[4])
 redis.call('ZADD', KEYS[2], tonumber(ARGV[2]) + tonumber(ARGV[3]), session.call_attempt_id)
 redis.call('ZADD', KEYS[3], tonumber(ARGV[2]) + tonumber(ARGV[3]), session.call_attempt_id)
+redis.call('ZADD', KEYS[4], tonumber(ARGV[2]) + tonumber(ARGV[3]), session.session_id)
 return 1
 """
 
@@ -167,6 +177,8 @@ redis.call('SET', KEYS[1], cjson.encode(session), 'EX', ARGV[3])
 if session.token_sha256 and session.token_sha256 ~= '' then redis.call('DEL', KEYS[2]) end
 redis.call('ZREM', KEYS[3], ARGV[1])
 redis.call('ZREM', KEYS[4], ARGV[1])
+redis.call('ZREM', KEYS[5], session.session_id)
+redis.call('DEL', KEYS[6])
 return 1
 """
 
@@ -358,7 +370,6 @@ class InterviewRedisState:
 
     async def delete_checkpoint(self, session_id: str) -> None:
         await self._redis.delete(self.keys.checkpoint(session_id))
-        await self.clear_recoverable(session_id)
 
     async def store_runtime_token(self, token: str, session_id: str) -> None:
         await self._redis.set(
@@ -385,6 +396,8 @@ class InterviewRedisState:
                 await self._redis.delete(key)
                 if old_token_hash:
                     await self._redis.delete(self.keys.token_hash(str(old_token_hash)))
+                await self.delete_checkpoint(session_id)
+                await self.clear_recoverable(session_id)
                 existing = None
             else:
                 if (
@@ -487,11 +500,12 @@ class InterviewRedisState:
             Awaitable[Any],
             self._redis.eval(
                 _CLAIM_TOKEN,
-                4,
+                5,
                 token_key,
                 self.keys.session(session_id),
                 self.keys.global_concurrency(),
                 self.keys.tenant_concurrency(tenant_id),
+                self.keys.recovery_index(),
                 int(time.time()),
                 call_sid,
                 lease_seconds,
@@ -529,10 +543,11 @@ class InterviewRedisState:
             Awaitable[Any],
             self._redis.eval(
                 _RENEW_SESSION,
-                3,
+                4,
                 self.keys.session(session_id),
                 self.keys.global_concurrency(),
                 self.keys.tenant_concurrency(tenant_id),
+                self.keys.recovery_index(),
                 call_sid,
                 int(time.time()),
                 lease_seconds,
@@ -561,6 +576,7 @@ class InterviewRedisState:
             self.keys.tenant_concurrency(str(session["tenant_id"])), call_attempt_id
         )
         await self.delete_checkpoint(session_id)
+        await self.clear_recoverable(session_id)
         return True
 
     async def release_runtime_claim(self, session_id: str, call_attempt_id: str) -> None:
@@ -582,11 +598,13 @@ class InterviewRedisState:
             Awaitable[Any],
             self._redis.eval(
                 _TERMINALIZE_SESSION,
-                4,
+                6,
                 self.keys.session(session_id),
                 self.keys.token_hash(str(session.get("token_sha256", ""))),
                 self.keys.global_concurrency(),
                 self.keys.tenant_concurrency(str(session["tenant_id"])),
+                self.keys.recovery_index(),
+                self.keys.checkpoint(session_id),
                 call_attempt_id,
                 call_sid,
                 SESSION_RETENTION_SECONDS,
@@ -594,8 +612,6 @@ class InterviewRedisState:
         )
         if int(result) < 0:
             raise ValueError("Interview terminalization binding mismatch")
-        if result:
-            await self.delete_checkpoint(session_id)
         return bool(result)
 
     async def claim_resume_request(self, analysis_id: str, payload_hash: str) -> bool:
@@ -659,7 +675,6 @@ class InterviewRedisState:
 
     async def publication_confirmed(self, event_id: str) -> bool:
         return bool(await self._redis.exists(self.keys.event(event_id)))
-
 
 def _text(value: object) -> str:
     if isinstance(value, bytes):

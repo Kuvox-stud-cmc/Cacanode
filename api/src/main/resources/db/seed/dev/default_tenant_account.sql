@@ -122,6 +122,34 @@ SET
     status = EXCLUDED.status,
     updated_at = NOW();
 
+-- Development seed data is loaded after Flyway, so keep analytics projections in sync explicitly.
+INSERT INTO analytics_tenant_projection (
+    tenant_id, name, status, plan, max_storage_mb, created_at, updated_at
+)
+SELECT id, name, status, plan, COALESCE(max_storage_mb, 0), created_at, updated_at
+FROM tenants
+WHERE slug = 'cacanode-demo'
+ON CONFLICT (tenant_id) DO UPDATE
+SET
+    name = EXCLUDED.name,
+    status = EXCLUDED.status,
+    plan = EXCLUDED.plan,
+    max_storage_mb = EXCLUDED.max_storage_mb,
+    updated_at = EXCLUDED.updated_at;
+
+INSERT INTO analytics_user_projection (
+    user_id, tenant_id, status, role, created_at, updated_at
+)
+SELECT id, tenant_id, status, role, created_at, updated_at
+FROM users
+WHERE email = 'admin@cacanode.local'
+ON CONFLICT (user_id) DO UPDATE
+SET
+    tenant_id = EXCLUDED.tenant_id,
+    status = EXCLUDED.status,
+    role = EXCLUDED.role,
+    updated_at = EXCLUDED.updated_at;
+
 INSERT INTO model_config_versions (
     id,
     name,
@@ -344,4 +372,32 @@ SET
     grace_ends_at = EXCLUDED.grace_ends_at,
     cancel_at_period_end = FALSE,
     entitlement_snapshot = EXCLUDED.entitlement_snapshot,
+    updated_at = NOW();
+
+-- Keep the demo recruitment scheduling flow usable out of the box.
+INSERT INTO recruitment_tenant_settings (tenant_id)
+SELECT id FROM tenants WHERE slug = 'cacanode-demo'
+ON CONFLICT (tenant_id) DO NOTHING;
+
+INSERT INTO recruitment_availability_windows (
+    id,
+    tenant_id,
+    day_of_week,
+    start_local,
+    end_local,
+    created_at,
+    updated_at
+)
+VALUES
+    ('00000000-0000-0000-0000-000000000071', (SELECT id FROM tenants WHERE slug = 'cacanode-demo'), 1, '09:00', '17:00', NOW(), NOW()),
+    ('00000000-0000-0000-0000-000000000072', (SELECT id FROM tenants WHERE slug = 'cacanode-demo'), 2, '09:00', '17:00', NOW(), NOW()),
+    ('00000000-0000-0000-0000-000000000073', (SELECT id FROM tenants WHERE slug = 'cacanode-demo'), 3, '09:00', '17:00', NOW(), NOW()),
+    ('00000000-0000-0000-0000-000000000074', (SELECT id FROM tenants WHERE slug = 'cacanode-demo'), 4, '09:00', '17:00', NOW(), NOW()),
+    ('00000000-0000-0000-0000-000000000075', (SELECT id FROM tenants WHERE slug = 'cacanode-demo'), 5, '09:00', '17:00', NOW(), NOW())
+ON CONFLICT (id) DO UPDATE
+SET
+    tenant_id = EXCLUDED.tenant_id,
+    day_of_week = EXCLUDED.day_of_week,
+    start_local = EXCLUDED.start_local,
+    end_local = EXCLUDED.end_local,
     updated_at = NOW();

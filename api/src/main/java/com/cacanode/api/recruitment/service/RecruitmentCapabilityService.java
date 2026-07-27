@@ -6,6 +6,7 @@ import com.cacanode.api.common.enums.LogAction;
 import com.cacanode.api.common.event.AuditLogEvent;
 import com.cacanode.api.common.exception.custom.ConflictException;
 import com.cacanode.api.recruitment.config.RecruitmentActivationProperties;
+import com.cacanode.api.recruitment.config.RecruitmentCallingProperties;
 import com.cacanode.api.recruitment.config.RecruitmentProperties;
 import com.cacanode.api.recruitment.dto.RecruitmentActivationDtos;
 import com.cacanode.api.recruitment.model.RecruitmentEnums.*;
@@ -38,6 +39,7 @@ public class RecruitmentCapabilityService {
     private final RecruitmentJobRepository jobs;
     private final BillingModuleApi billing;
     private final RecruitmentProperties global;
+    private final RecruitmentCallingProperties calling;
     private final RecruitmentActivationProperties rollout;
     private final ApplicationEventPublisher events;
     private final RecruitmentActivationOperationsRepository activationOperations;
@@ -64,7 +66,8 @@ public class RecruitmentCapabilityService {
         if(master&&!global.publicJobsEnabled())blockers.add("PUBLIC_JOBS_DEPLOYMENT_DISABLED");
         if(activation.getRolloutStage()==RolloutStage.GA&&!rollout.gaUnlocked())blockers.add("GA_LOCKED");
         return new RecruitmentActivationDtos.Capabilities(tenantId,activation.getRolloutStage(),master,
-                publicEnabled,automation,cvAi,calling,recording,discovery,List.copyOf(blockers));
+                publicEnabled,automation,cvAi,calling,recording,discovery,
+                this.calling.callForMoreThan600()?14400:600,List.copyOf(blockers));
     }
 
     @Transactional(readOnly=true)
