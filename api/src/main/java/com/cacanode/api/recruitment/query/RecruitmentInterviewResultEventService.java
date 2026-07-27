@@ -269,8 +269,29 @@ public class RecruitmentInterviewResultEventService {
     }
 
     private void mirrorBusinessState(Binding binding,Terminal terminal,boolean failed) {
-        jdbc.update("UPDATE recruitment_interviews SET overall_score=?,english_band=?,status=CASE WHEN status IN ('INVITED','SCHEDULED','PREPARING','CALLING','RINGING','CONSENT_PENDING','IN_PROGRESS') THEN ? ELSE status END,completed_at=CASE WHEN status IN ('INVITED','SCHEDULED','PREPARING','CALLING','RINGING','CONSENT_PENDING','IN_PROGRESS') THEN NOW() ELSE completed_at END,active_call_attempt_id=NULL,updated_at=NOW() WHERE tenant_id=? AND id=?",
-                terminal.overall,terminal.band,failed?"FAILED":"COMPLETED",binding.tenantId,binding.sessionId);
+        boolean recoveredMissingResult=false;
+        if(!failed&&"FAILED".equals(binding.callAttemptStatus)
+                &&"INTERVIEW_RESULT_MISSING".equals(binding.callAttemptFailureCode)) {
+            recoveredMissingResult=jdbc.update("""
+                    UPDATE recruitment_interview_call_attempts
+                    SET status='COMPLETED',failure_code=NULL,next_retry_at=NULL,
+                        updated_at=NOW(),version=version+1
+                    WHERE tenant_id=? AND id=? AND session_id=? AND status='FAILED'
+                      AND failure_code='INTERVIEW_RESULT_MISSING'
+                    """,binding.tenantId,binding.callAttemptId,binding.sessionId)==1;
+        }
+        jdbc.update("""
+                UPDATE recruitment_interviews
+                SET overall_score=?,english_band=?,
+                    status=CASE WHEN status IN ('INVITED','SCHEDULED','PREPARING','CALLING','RINGING',
+                        'CONSENT_PENDING','IN_PROGRESS') OR (?=true AND status='FAILED') THEN ? ELSE status END,
+                    completed_at=CASE WHEN status IN ('INVITED','SCHEDULED','PREPARING','CALLING','RINGING',
+                        'CONSENT_PENDING','IN_PROGRESS') OR (?=true AND status='FAILED')
+                        THEN COALESCE(completed_at,NOW()) ELSE completed_at END,
+                    active_call_attempt_id=NULL,updated_at=NOW()
+                WHERE tenant_id=? AND id=?
+                """,terminal.overall,terminal.band,recoveredMissingResult,failed?"FAILED":"COMPLETED",
+                recoveredMissingResult,binding.tenantId,binding.sessionId);
         jdbc.update("UPDATE recruitment_applications SET overall_score=?,english_band=?,status=CASE WHEN ?=false AND status IN ('INTERVIEW_INVITED','INTERVIEW_SCHEDULED') THEN 'INTERVIEW_COMPLETED' ELSE status END,updated_at=NOW() WHERE tenant_id=? AND id=?",
                 terminal.overall,terminal.band,failed,binding.tenantId,binding.applicationId);
         if(projectionEvents!=null&&interviews!=null&&applications!=null){
@@ -288,11 +309,14 @@ public class RecruitmentInterviewResultEventService {
         return new Common(version,event,type,tenant,session,attempt,occurred);
     }
     private Binding binding(Common common) {Binding value=jdbc.query("""
-            SELECT i.application_id,i.status,a.status,ca.prepared_session FROM recruitment_interviews i
+            SELECT i.application_id,i.status,a.status,ca.prepared_session,ca.status,ca.failure_code
+            FROM recruitment_interviews i
             JOIN recruitment_applications a ON a.tenant_id=i.tenant_id AND a.id=i.application_id
             JOIN recruitment_interview_call_attempts ca ON ca.tenant_id=i.tenant_id AND ca.interview_id=i.id
             WHERE i.tenant_id=? AND i.id=? AND ca.id=? AND ca.session_id=?
-            """,rs->{if(!rs.next())return null;return new Binding(common.tenantId,common.sessionId,rs.getObject(1,UUID.class),rs.getString(2),rs.getString(3),rs.getString(4));},
+            """,rs->{if(!rs.next())return null;return new Binding(common.tenantId,common.sessionId,
+                    common.callAttemptId,rs.getObject(1,UUID.class),rs.getString(2),rs.getString(3),
+                    rs.getString(4),rs.getString(5),rs.getString(6));},
             common.tenantId,common.sessionId,common.callAttemptId,common.sessionId);expect(value!=null,"Interview event binding mismatch");return value;}
     private Snapshot snapshot(String raw) {try{JsonNode root=mapper.readTree(raw);Map<UUID,String> sections=new LinkedHashMap<>();Map<UUID,JsonNode> questions=new LinkedHashMap<>();Map<UUID,UUID> questionSections=new HashMap<>();
         for(JsonNode section:root.path("sections")){UUID sectionId=UUID.fromString(section.path("sectionId").asText());sections.put(sectionId,section.path("kind").asText());for(JsonNode question:section.path("questions")){UUID questionId=UUID.fromString(question.path("questionId").asText());questions.put(questionId,question);questionSections.put(questionId,sectionId);}}
@@ -341,7 +365,9 @@ public class RecruitmentInterviewResultEventService {
     private static void reject(String message){throw new AmqpRejectAndDontRequeueException(message);}
 
     private record Common(String version,UUID eventId,String type,UUID tenantId,UUID sessionId,UUID callAttemptId,OffsetDateTime occurredAt){}
-    private record Binding(UUID tenantId,UUID sessionId,UUID applicationId,String interviewStatus,String applicationStatus,String preparedSession){}
+    private record Binding(UUID tenantId,UUID sessionId,UUID callAttemptId,UUID applicationId,
+                           String interviewStatus,String applicationStatus,String preparedSession,
+                           String callAttemptStatus,String callAttemptFailureCode){}
     private record Snapshot(Map<UUID,String> sections,Map<UUID,JsonNode> questions,Map<UUID,UUID> questionSections){}
     private record Terminal(int expectedTurns,int connectedSeconds,boolean partial,String policy,BigDecimal overall,JsonNode english,String band,String completionReason,String failureCode,Boolean retryable,String detail){}
 }

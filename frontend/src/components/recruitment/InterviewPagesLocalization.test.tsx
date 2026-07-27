@@ -149,6 +149,20 @@ describe("Vietnamese recruitment interview pages",()=>{
     expect(screen.queryByText("1/100")).not.toBeInTheDocument();
   });
 
+  it("loads an available transcript when result reconciliation marked the interview failed",async()=>{
+    api.getRecruitmentInterview.mockResolvedValue({...interview,status:"FAILED",overallScore:null,englishBand:null});
+    api.getInterviewTranscript.mockResolvedValue({deliveryStatus:"PENDING_RESULT",expectedTurnCount:0,persistedTurnCount:1,page:0,size:100,turns:[
+      {turnId:"turn-candidate",sequence:1,speaker:"CANDIDATE",turnKind:"CANDIDATE_UTTERANCE",sectionId:"section",questionId:"question",languageTag:"vi-VN",transcript:"Tôi đã hoàn thành phần trả lời."},
+    ]});
+
+    render(<InterviewDetailPage interviewId="interview-id"/>);
+    await screen.findByText("Thông tin lịch");
+    fireEvent.click(screen.getByRole("tab",{name:"Bản ghi lời thoại"}));
+
+    expect(await screen.findByText("Tôi đã hoàn thành phần trả lời.")).toBeInTheDocument();
+    expect(api.getInterviewTranscript).toHaveBeenCalledWith(api.request,"interview-id");
+  });
+
   it("offers the development redial when completed eligibility allows it",async()=>{
     api.getDialEligibility.mockResolvedValue({allowed:true,reason:null,windowOpensAt:null,windowClosesAt:null,serverTime:"2026-07-26T12:45:00Z"});
 

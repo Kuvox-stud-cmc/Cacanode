@@ -38,7 +38,7 @@ public class RecruitmentApplication extends BaseEntity {
     @Column(name = "template_snapshot_sha256", nullable = false, length = 64) private String templateSnapshotSha256;
     @Column(name = "template_snapshot_version", nullable = false) private String templateSnapshotVersion;
     @Column(name = "overall_score") private BigDecimal overallScore;
-    @Column(name = "english_band") private String englishBand;
+    @Column(name = "english_band", length = 30) private String englishBand;
     @JdbcTypeCode(SqlTypes.JSON) @Column(name = "screening_config_snapshot", nullable = false, updatable=false, columnDefinition = "jsonb")
     private String screeningConfigSnapshot = "[]";
     @JdbcTypeCode(SqlTypes.JSON) @Column(name = "screening_answers", nullable = false, updatable=false, columnDefinition = "jsonb")

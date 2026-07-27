@@ -27,7 +27,7 @@ public class RecruitmentInterview extends BaseEntity {
     @Column(name = "started_at") private LocalDateTime startedAt;
     @Column(name = "completed_at") private LocalDateTime completedAt;
     @Column(name = "overall_score") private BigDecimal overallScore;
-    @Column(name = "english_band") private String englishBand;
+    @Column(name = "english_band", length = 30) private String englishBand;
     @Column(name = "recording_enabled", nullable = false) private boolean recordingEnabled;
     @Column(name = "recording_retention_days", nullable = false) private int recordingRetentionDays;
     @Column(name = "recording_expires_at") private LocalDateTime recordingExpiresAt;

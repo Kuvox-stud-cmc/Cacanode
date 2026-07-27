@@ -107,17 +107,12 @@ export function InterviewDetailPage({ interviewId }: { interviewId: string }) {
       setRecordings(recRes);
       setDialEligibility(dialRes);
 
-      if (inv.status === "COMPLETED" || inv.status === "IN_PROGRESS") {
-        const [transRes, resRes] = await Promise.all([
-          getInterviewTranscript(request, interviewId).catch(() => null),
-          getInterviewResult(request, interviewId).catch(() => null),
-        ]);
-        setTranscript(transRes);
-        setResult(resRes);
-      } else {
-        setTranscript(null);
-        setResult(null);
-      }
+      const [transRes, resRes] = await Promise.all([
+        getInterviewTranscript(request, interviewId).catch(() => null),
+        getInterviewResult(request, interviewId).catch(() => null),
+      ]);
+      setTranscript(transRes);
+      setResult(resRes);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : t("loadError"));
     } finally {
