@@ -8,6 +8,8 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 import com.cacanode.api.common.exception.custom.UnauthorizedException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.http.HttpStatus;
+import com.cacanode.api.ai.api.AiInferenceException;
+import com.cacanode.api.billing.api.MessageQuotaExceededException;
 
 import java.util.Map;
 import java.util.UUID;
@@ -18,6 +20,19 @@ public class ChatApiExceptionHandler {
     public ResponseEntity<Map<String, Object>> handle(ChatApiException exception, HttpServletRequest request) {
         return ResponseEntity.status(exception.getStatus()).body(envelope(
                 exception.getCode(), exception.getMessage(), request));
+    }
+
+    @ExceptionHandler(AiInferenceException.class)
+    public ResponseEntity<Map<String, Object>> handleAi(AiInferenceException exception, HttpServletRequest request) {
+        return ResponseEntity.status(exception.getStatus()).body(envelope(
+                exception.getCode(), exception.getMessage(), request));
+    }
+
+    @ExceptionHandler(MessageQuotaExceededException.class)
+    public ResponseEntity<Map<String, Object>> handleQuota(
+            MessageQuotaExceededException exception, HttpServletRequest request) {
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS).body(envelope(
+                "MESSAGE_QUOTA_EXCEEDED", exception.getMessage(), request));
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)

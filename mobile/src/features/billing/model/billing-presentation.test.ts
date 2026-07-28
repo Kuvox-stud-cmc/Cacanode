@@ -6,6 +6,8 @@ describe('getBillingPresentation', () => {
     ['STARTER', 'STARTER', 'Starter', 'neutral'],
     ['PRO', 'ACTIVE', 'Pro', 'primary'],
     ['PRO', 'GRACE', 'Pro · Grace', 'danger'],
+    ['BUSINESS', 'ACTIVE', 'Business', 'success'],
+    ['BUSINESS', 'GRACE', 'Business · Grace', 'danger'],
     ['ENTERPRISE', 'ENTERPRISE', 'Enterprise', 'success'],
   ])('maps %s/%s to the expected plan visual', (plan, status, label, tone) => {
     expect(getBillingPresentation(plan, status)).toEqual({ label, tone });

@@ -56,4 +56,13 @@ public class UsageMetrics extends BaseEntity {
     @Column(name = "token_count", nullable = false)
     private Long tokenCount = 0L;
 
+    @Column(name = "verified_application_count", nullable = false)
+    private long verifiedApplicationCount;
+
+    @Column(name = "cv_analysis_count", nullable = false)
+    private long cvAnalysisCount;
+
+    @Column(name = "interview_seconds", nullable = false)
+    private long interviewSeconds;
+
 }

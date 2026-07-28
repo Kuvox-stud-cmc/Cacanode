@@ -1,0 +1,7 @@
+{
+  "schema_version":"1.1","event_id":"cde54c45-b833-51aa-b5b6-54c11e5cbdbf","event_type":"interview.resume-analysis.requested","occurred_at":"2026-07-24T08:00:00Z",
+  "tenant_id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","aggregate_id":"a0a33694-cb7b-526c-bb6a-8b0bd88c094a","analysis_id":"a0a33694-cb7b-526c-bb6a-8b0bd88c094a","application_id":"33333333-3333-4333-8333-333333333333",
+  "document_id":"44444444-4444-4444-8444-444444444444","storage_key":"recruitment/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/applications/33333333-3333-4333-8333-333333333333/cv/44444444-4444-4444-8444-444444444444","file_name":"candidate-cv.pdf","content_type":"application/pdf","file_size_bytes":245760,"requested_language_tag":"vi-VN",
+  "cv_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","analysis_mode":"PERSONALIZED_QUESTIONS","policy_version":"cv-redaction-v1","model_version":"resume-analysis-v1","job_title":"Backend Engineer","job_description":"Build reliable Java services.",
+  "allowed_core_section_ids":["55555555-5555-4555-8555-555555555555"],"template_questions":[{"question_id":"66666666-6666-4666-8666-666666666666","section_id":"55555555-5555-4555-8555-555555555555","prompt":"Describe a reliable service you built.","competency":"Distributed systems"}],"personalized_question_limit":2
+}

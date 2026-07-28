@@ -1,6 +1,6 @@
 package com.cacanode.api.billing.repository;
 
-import com.cacanode.api.billing.enums.BillingStatus;
+import com.cacanode.api.billing.api.BillingStatus;
 import com.cacanode.api.billing.model.BillingSubscription;
 import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;

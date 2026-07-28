@@ -12,6 +12,7 @@ const navigation = [
   { href: "/", labelKey: "chatPlayground" as const },
   { href: "/documentation", labelKey: "documentation" as const },
   { href: "/pricing", labelKey: "pricing" as const },
+  { href: "/jobs", labelKey: "jobs" as const },
 ];
 
 export default function PublicNavbar() {

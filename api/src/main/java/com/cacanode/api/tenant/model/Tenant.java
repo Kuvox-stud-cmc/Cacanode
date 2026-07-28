@@ -2,8 +2,8 @@ package com.cacanode.api.tenant.model;
 
 import com.cacanode.api.common.model.BaseEntity;
 import com.cacanode.api.tenant.CustomerAnswerPromptDefaults;
-import com.cacanode.api.tenant.enums.TenantPlan;
-import com.cacanode.api.tenant.enums.TenantStatus;
+import com.cacanode.api.tenant.api.TenantPlan;
+import com.cacanode.api.tenant.api.TenantStatus;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.Setter;
@@ -21,6 +21,10 @@ public class Tenant extends BaseEntity {
 
     @Column(name = "slug", unique = true, nullable = false, length = 100)
     private String slug;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "kind", nullable = false, length = 32)
+    private com.cacanode.api.tenant.api.TenantKind kind = com.cacanode.api.tenant.api.TenantKind.CUSTOMER;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "plan", nullable = false, length = 50)

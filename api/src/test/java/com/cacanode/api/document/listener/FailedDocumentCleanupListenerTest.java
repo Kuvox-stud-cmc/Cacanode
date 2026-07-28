@@ -10,7 +10,7 @@ import org.junit.jupiter.api.Test;
 
 import com.cacanode.api.document.event.FailedDocumentCleanupRequestedEvent;
 import com.cacanode.api.document.service.DocumentIndexCleanup;
-import com.cacanode.api.document.storage.DocumentStorage;
+import com.cacanode.api.common.storage.DocumentStorage;
 
 class FailedDocumentCleanupListenerTest {
 

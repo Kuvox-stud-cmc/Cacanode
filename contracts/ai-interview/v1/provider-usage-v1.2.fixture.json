@@ -1,0 +1,5 @@
+{
+  "schema_version":"1.2","event_id":"40ab0040-7edf-5025-a835-652ea26183a7","event_type":"interview.provider.usage","occurred_at":"2026-07-23T08:25:01Z",
+  "tenant_id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","aggregate_id":"22222222-2222-4222-8222-222222222222","usage_id":"40ab0040-7edf-5025-a835-652ea26183a7","session_id":"22222222-2222-4222-8222-222222222222","call_attempt_id":"55555555-5555-4555-8555-555555555555",
+  "provider":"OLLAMA","capability":"LLM","quantity":347,"unit":"TOKEN","provider_request_id":null
+}

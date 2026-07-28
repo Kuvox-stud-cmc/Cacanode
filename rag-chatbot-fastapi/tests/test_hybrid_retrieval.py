@@ -6,12 +6,12 @@ from typing import Any
 
 import pytest
 
-from app.core.config import Settings
-from app.ingestion.chunking import DeterministicChunker
-from app.ingestion.extraction import KnowledgeBlock, ParsedDocument
-from app.rag.models import RetrievedChunk
-from app.rag.reranking import TeiReranker
-from app.rag.retrieval import (
+from app.bootstrap.settings import Settings
+from app.modules.generation.internal.models import RetrievedChunk
+from app.modules.ingestion.internal.chunking import DeterministicChunker
+from app.modules.ingestion.internal.extraction import KnowledgeBlock, ParsedDocument
+from app.modules.retrieval.internal.reranking import TeiReranker
+from app.modules.retrieval.internal.retrieval import (
     HybridRetriever,
     QueryProfile,
     QueryRouter,
@@ -149,7 +149,9 @@ class FakeHttpClient:
 async def test_tei_reranker_maps_scores_and_keeps_equal_scores_deterministic(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr("app.rag.reranking.httpx.AsyncClient", FakeHttpClient)
+    monkeypatch.setattr(
+        "app.modules.retrieval.internal.reranking.httpx.AsyncClient", FakeHttpClient
+    )
     reranker = TeiReranker(Settings(RERANKER_URL="http://reranker", RERANKER_TIMEOUT_SECONDS=3))
     candidates: Sequence[RetrievedChunk] = [
         chunk("doc-a", "u1"),

@@ -1,0 +1,6 @@
+:8088 {
+	@twilioMedia path /ws/v1/interviews/twilio/media
+	reverse_proxy @twilioMedia localhost:18000
+
+	reverse_proxy localhost:8080
+}

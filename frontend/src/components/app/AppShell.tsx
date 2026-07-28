@@ -15,6 +15,8 @@ import { LanguageSwitcher } from "@/components/i18n/LanguageSwitcher"
 import { Link, usePathname, useRouter } from "@/i18n/navigation"
 import { withNext } from "@/lib/auth-redirect"
 import { cn } from "@/lib/utils"
+import { publicConfig } from "@/lib/public-config"
+import { getRecruitmentCapabilities } from "@/lib/recruitment-admin-api"
 
 function initialsFrom(fullName: string | undefined): string {
   if (!fullName?.trim()) return "?"
@@ -41,8 +43,10 @@ export function AppShell({ children, contentClassName, mobileNavContent }: AppSh
   const { request } = useApiClient()
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [billingAccount, setBillingAccount] = useState<BillingAccount | null>(null)
+  const [activeRecruitmentTenant, setActiveRecruitmentTenant] = useState<string | null>(null)
   const visibleNavigation = appNavigation.filter(
-    (item) => !item.tenantAdminOnly || user?.role === "TENANT_ADMIN",
+    (item) => (!item.tenantAdminOnly || user?.role === "TENANT_ADMIN")
+      && (!item.recruitmentOnly || (publicConfig.recruitmentEnabled && activeRecruitmentTenant === user?.tenantId)),
   )
   const primaryNavigation = visibleNavigation.filter((item) => item.placement !== "footer")
   const footerNavigation = visibleNavigation.filter((item) => item.placement === "footer")
@@ -67,6 +71,14 @@ export function AppShell({ children, contentClassName, mobileNavContent }: AppSh
       cancelled = true
     }
   }, [request, setPlan, user?.tenantId])
+
+  useEffect(() => {
+    if (!user?.tenantId || !publicConfig.recruitmentEnabled) return
+    const controller=new AbortController()
+    const tenantId=user.tenantId
+    getRecruitmentCapabilities(request,controller.signal).then(value=>setActiveRecruitmentTenant(value.masterEnabled?tenantId:null)).catch(()=>setActiveRecruitmentTenant(null))
+    return()=>controller.abort()
+  },[request,user?.tenantId])
 
   async function handleLogout() {
     try {
@@ -102,8 +114,8 @@ export function AppShell({ children, contentClassName, mobileNavContent }: AppSh
         </div>
 
         <nav className="flex-1 space-y-1 overflow-y-auto p-3">
-          {primaryNavigation.map(({ href, labelKey, icon: Icon }) => {
-            const isActive = pathname === href
+          {primaryNavigation.map(({ href, labelKey, icon: Icon, beta }) => {
+            const isActive = pathname === href || (href !== "/" && pathname.startsWith(`${href}/`))
             return (
               <Link
                 key={href}
@@ -118,6 +130,7 @@ export function AppShell({ children, contentClassName, mobileNavContent }: AppSh
               >
                 <Icon className="size-4" />
                 {t(labelKey)}
+                {beta && <span className="ml-auto rounded-full bg-slate-950 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white">{t("beta")}</span>}
               </Link>
             )
           })}
@@ -224,13 +237,17 @@ export function ProtectedAppShell({ children }: { children: ReactNode }) {
   const common = useTranslations("Common")
   const router = useRouter()
   const status = useTokenRehydration()
+  const user = useAuthStore((state) => state.user)
 
   useEffect(() => {
     if (status === "unauthenticated") {
       const destination = `${window.location.pathname}${window.location.search}${window.location.hash}`
       router.replace(withNext("/login", destination))
     }
-  }, [router, status])
+    if (status === "authenticated" && user?.role === "PLATFORM_ADMIN") {
+      router.replace("/platform")
+    }
+  }, [router, status, user?.role])
 
   if (status === "rehydrating") {
     return (
@@ -240,7 +257,7 @@ export function ProtectedAppShell({ children }: { children: ReactNode }) {
     )
   }
 
-  if (status === "unauthenticated") {
+  if (status === "unauthenticated" || user?.role === "PLATFORM_ADMIN") {
     return null
   }
 

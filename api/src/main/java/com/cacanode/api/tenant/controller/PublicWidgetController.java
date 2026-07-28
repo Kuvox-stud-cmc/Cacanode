@@ -45,14 +45,11 @@ public class PublicWidgetController {
     }
 
     private AuthorizedWidget authorize(String authorization, String parentOrigin) {
-        var principal = tokenService.authenticate(authorization, IntegrationTokenService.WIDGET_SCOPE);
+        var principal = tokenService.authenticate(
+                authorization, IntegrationTokenService.WIDGET_SCOPE, parentOrigin);
         WidgetConfigDtos.Response response = widgetConfigService.get(principal.tenantId());
         if (!response.active()) {
             throw new UnauthorizedException("Widget is inactive");
-        }
-        if (!response.allowedOrigins().isEmpty()
-                && (parentOrigin == null || !response.allowedOrigins().contains(parentOrigin))) {
-            throw new UnauthorizedException("Website origin is not allowed");
         }
         return new AuthorizedWidget(principal, response);
     }

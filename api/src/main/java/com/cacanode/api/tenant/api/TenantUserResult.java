@@ -15,4 +15,5 @@ public class TenantUserResult {
     private String role;
     private String plan;
     private String status;
+    private TenantKind tenantKind;
 }

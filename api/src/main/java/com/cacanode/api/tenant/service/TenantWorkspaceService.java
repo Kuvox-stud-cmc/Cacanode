@@ -1,12 +1,9 @@
 package com.cacanode.api.tenant.service;
 
-import com.cacanode.api.ai.enums.ModelConfigStatus;
+import com.cacanode.api.ai.api.ModelConfigurationApi;
 import com.cacanode.api.common.cache.BusinessCache;
 import com.cacanode.api.common.cache.CacheKeyFactory;
 import com.cacanode.api.common.cache.VersionedJsonCache;
-import com.cacanode.api.ai.model.ModelConfigVersion;
-import com.cacanode.api.ai.repository.ModelConfigVersionRepository;
-import com.cacanode.api.common.exception.custom.InternalServerErrorException;
 import com.cacanode.api.common.exception.custom.ResourceNotFoundException;
 import com.cacanode.api.tenant.CustomerAnswerPromptDefaults;
 import com.cacanode.api.tenant.dto.TenantWorkspaceResponse;
@@ -16,6 +13,7 @@ import com.cacanode.api.tenant.model.Chatbot;
 import com.cacanode.api.tenant.model.KnowledgeBase;
 import com.cacanode.api.tenant.model.Tenant;
 import com.cacanode.api.tenant.model.WidgetConfig;
+import com.cacanode.api.tenant.api.TenantKind;
 import com.cacanode.api.tenant.repository.ChatbotRepository;
 import com.cacanode.api.tenant.repository.KnowledgeBaseRepository;
 import com.cacanode.api.tenant.repository.TenantRepository;
@@ -41,7 +39,7 @@ public class TenantWorkspaceService {
     private final KnowledgeBaseRepository knowledgeBaseRepository;
     private final ChatbotRepository chatbotRepository;
     private final WidgetConfigRepository widgetConfigRepository;
-    private final ModelConfigVersionRepository modelConfigVersionRepository;
+    private final ModelConfigurationApi modelConfigurationApi;
     @Autowired(required = false)
     private VersionedJsonCache businessCache;
     @Autowired(required = false)
@@ -63,6 +61,7 @@ public class TenantWorkspaceService {
     private TenantWorkspaceResponse loadOrProvisionAuthoritative(UUID tenantId) {
         Tenant tenant = tenantRepository.findById(tenantId)
                 .orElseThrow(() -> new ResourceNotFoundException("Tenant workspace was not found"));
+        requireCustomer(tenant);
 
         KnowledgeBase knowledgeBase = getOrCreateKnowledgeBase(tenant);
         Chatbot chatbot = getOrCreateChatbot(tenant, knowledgeBase);
@@ -73,9 +72,16 @@ public class TenantWorkspaceService {
 
     @Transactional
     public void provisionDefaultWorkspace(Tenant tenant) {
+        requireCustomer(tenant);
         KnowledgeBase knowledgeBase = getOrCreateKnowledgeBase(tenant);
         Chatbot chatbot = getOrCreateChatbot(tenant, knowledgeBase);
         ensureWidgetConfig(tenant, chatbot);
+    }
+
+    private void requireCustomer(Tenant tenant) {
+        if (tenant.getKind() != TenantKind.CUSTOMER) {
+            throw new ResourceNotFoundException("Tenant workspace was not found");
+        }
     }
 
     private KnowledgeBase getOrCreateKnowledgeBase(Tenant tenant) {
@@ -106,16 +112,10 @@ public class TenantWorkspaceService {
                         ChatbotStatus.ACTIVE
                 )
                 .orElseGet(() -> {
-                    ModelConfigVersion modelConfigVersion = modelConfigVersionRepository
-                            .findFirstByStatusOrderByCreatedAtDesc(ModelConfigStatus.ACTIVE)
-                            .orElseThrow(() -> new InternalServerErrorException(
-                                    "Cannot provision tenant workspace: no active model configuration exists"
-                            ));
-
                     Chatbot chatbot = new Chatbot();
                     chatbot.setTenant(tenant);
                     chatbot.setKnowledgeBase(knowledgeBase);
-                    chatbot.setModelConfigVersion(modelConfigVersion);
+                    chatbot.setModelConfigVersionId(modelConfigurationApi.activeModelConfigurationId());
                     chatbot.setDisplayName(DEFAULT_CHATBOT_NAME);
                     chatbot.setDefaultLocale(knowledgeBase.getDefaultLocale());
                     chatbot.setWelcomeMessage(DEFAULT_WELCOME_MESSAGE);

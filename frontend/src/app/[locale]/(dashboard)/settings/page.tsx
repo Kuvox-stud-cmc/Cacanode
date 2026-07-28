@@ -46,6 +46,7 @@ import {
 } from "@/lib/tenant-settings-api";
 import { Badge } from "@/components/ui/badge";
 import { PlanStatusBadge } from "@/components/billing/PlanStatusBadge";
+import { BillingUsageGroups } from "@/components/billing/BillingUsageGroups";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -59,7 +60,6 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Progress } from "@/components/ui/progress";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   createBillingCheckout,
@@ -70,10 +70,14 @@ import {
   type BillingAccount,
   type BillingInterval,
   type BillingPlan,
-  type BillingUsage,
 } from "@/lib/billing-api";
 
-const WEBHOOK_EVENTS = ["conversation.started", "conversation.closed", "ticket.created"];
+const WEBHOOK_EVENTS = ["conversation.started", "conversation.closed", "ticket.created",
+  "job.published","job.paused","job.closed","job.archived","application.submitted",
+  "application.withdrawn","application.under_review","application.shortlisted","application.rejected",
+  "interview.invited","interview.scheduled","interview.rescheduled","interview.started",
+  "interview.completed","interview.failed","interview.no_answer","interview.declined",
+  "interview.cancelled","interview.expired","recording.ready"];
 const WIDGET_ICON_STYLES: WidgetSettings["iconStyle"][] = [
   "STANDARD",
   "GLOW",
@@ -87,11 +91,6 @@ function widgetIconStyleClass(style: WidgetSettings["iconStyle"]): string {
 
 function widgetIconStyleVars(color: string): CSSProperties {
   return { backgroundColor: color, "--widget-launcher-color": color } as CSSProperties;
-}
-
-function usagePercent(usage: BillingUsage): number {
-  if (usage.limit === null || usage.limit === 0) return 0;
-  return Math.min(100, Math.round((usage.used / usage.limit) * 100));
 }
 
 function SettingsPageContent() {
@@ -136,16 +135,27 @@ function SettingsPageContent() {
   const [billingPlans, setBillingPlans] = useState<BillingPlan[]>([]);
   const [billingInterval, setBillingInterval] = useState<BillingInterval>("MONTHLY");
   const [billingBusy, setBillingBusy] = useState(false);
+  const [planConfirmation, setPlanConfirmation] = useState<{
+    plan: PlanId;
+    interval: BillingInterval;
+    description: string;
+    confirmLabel: string;
+    destructive: boolean;
+  } | null>(null);
   const formatDate = (value: string | null) => value ? format.dateTime(new Date(value), { dateStyle: "medium", timeStyle: "short" }) : t("never");
-  const usageLabel = (usage: BillingUsage, suffix = "") => `${format.number(usage.used)}${suffix} / ${usage.limit === null ? t("unlimited") : `${format.number(usage.limit)}${suffix}`}`;
+  const formatBytes = (bytes: number) => bytes >= 1024 ** 3
+    ? `${format.number(bytes / 1024 ** 3)} GB`
+    : `${format.number(bytes / 1024 ** 2)} MB`;
   const planLabel = (plan: string | null | undefined, status?: string | null) => {
-    if (status?.trim().toUpperCase() === "GRACE") return planT("grace");
+    if (status?.trim().toUpperCase() === "GRACE") {
+      return plan?.trim().toUpperCase() === "BUSINESS" ? planT("businessGrace") : planT("proGrace");
+    }
     switch (plan?.trim().toUpperCase()) {
       case "TRIAL": return planT("trial");
       case "FREE":
       case "STARTER": return planT("starter");
       case "PRO": return planT("pro");
-      case "BUSINESS":
+      case "BUSINESS": return planT("business");
       case "ENTERPRISE": return planT("enterprise");
       default: return planT("current");
     }
@@ -509,11 +519,46 @@ function SettingsPageContent() {
     window.setTimeout(() => setCopied(false), 1500);
   }
 
-  async function selectPlan(plan: PlanId, interval: BillingInterval) {
+  function selectPlan(plan: PlanId, interval: BillingInterval) {
+    if (plan === "pro" || plan === "business") {
+      const targetPlan = plan === "business" ? "BUSINESS" : "PRO";
+      const switchingPaidPlan = ["PRO", "BUSINESS"].includes(billingAccount?.planCode ?? "")
+        && billingAccount?.planCode !== targetPlan;
+      if (switchingPaidPlan) {
+        setPlanConfirmation({
+          plan,
+          interval,
+          description: t("billing.confirmPaidSwitch", {
+            current: planLabel(billingAccount?.planCode),
+            target: plan === "business" ? planT("business") : planT("pro"),
+          }),
+          confirmLabel: t("billing.continueCheckout"),
+          destructive: false,
+        });
+        return;
+      }
+    }
+    if (plan === "starter") {
+      setPlanConfirmation({
+        plan,
+        interval,
+        description: billingAccount?.planCode === "TRIAL"
+          ? t("billing.confirmTrialDowngrade")
+          : t("billing.confirmPaidDowngrade", { date: formatDate(billingAccount?.graceEndsAt ?? null) }),
+        confirmLabel: t("billing.confirmDowngradeAction"),
+        destructive: true,
+      });
+      return;
+    }
+    void applyPlan(plan, interval);
+  }
+
+  async function applyPlan(plan: PlanId, interval: BillingInterval) {
     setBillingBusy(true);
     try {
-      if (plan === "pro") {
-        const checkout = await createBillingCheckout(request, interval);
+      if (plan === "pro" || plan === "business") {
+        const targetPlan = plan === "business" ? "BUSINESS" : "PRO";
+        const checkout = await createBillingCheckout(request, targetPlan, interval);
         window.location.assign(checkout.checkoutUrl);
         return;
       }
@@ -522,12 +567,10 @@ function SettingsPageContent() {
         window.location.assign(enterprise?.salesUrl ?? "mailto:sales@cacanode.com");
         return;
       }
-      if (!window.confirm(billingAccount?.planCode === "TRIAL"
-        ? t("billing.confirmTrialDowngrade")
-        : t("billing.confirmPaidDowngrade", { date: formatDate(billingAccount?.graceEndsAt ?? null) }))) return;
       const result = await downgradeBilling(request);
       setBillingAccount(result.account);
       setPlan(result.account.planCode);
+      setPlanConfirmation(null);
       setPlanDialog(false);
       toast.success(result.scheduled
         ? t("billing.starterScheduledFor", { date: formatDate(result.effectiveAt) })
@@ -736,7 +779,7 @@ function SettingsPageContent() {
                   <CardTitle className="text-base">{t("billing.currentPlan")}</CardTitle>
                   <p className="text-sm text-slate-500">
                     {billingAccount?.status === "GRACE"
-                      ? t("billing.graceDescription", { date: formatDate(billingAccount.graceEndsAt) })
+                      ? t("billing.graceDescription", { plan: planLabel(billingAccount.planCode), date: formatDate(billingAccount.graceEndsAt) })
                       : t("billing.planDescription", { plan: planLabel(billingAccount?.planCode ?? user?.plan, billingAccount?.status) })}
                   </p>
                 </div>
@@ -765,23 +808,31 @@ function SettingsPageContent() {
               <p className="text-sm text-slate-500">{t("billing.quotaDescription")}</p>
             </CardHeader>
             <CardContent className="space-y-5">
-              <div className="grid gap-4 sm:grid-cols-2">
-                {billingAccount && [
-                  { label: t("billing.quotaLabels.messages"), usage: billingAccount.messages, suffix: "" },
-                  { label: t("billing.quotaLabels.documents"), usage: billingAccount.documents, suffix: "" },
-                  { label: t("billing.quotaLabels.teamMembers"), usage: billingAccount.teamMembers, suffix: "" },
-                  { label: t("billing.quotaLabels.storage"), usage: billingAccount.storageMb, suffix: " MB" },
-                ].map((quota) => (
-                  <div key={quota.label} className={`rounded-lg border p-4 ${quota.usage.overLimit ? "border-red-200 bg-red-50" : "border-slate-200 bg-slate-50"}`}>
-                    <div className="mb-3 flex items-center justify-between gap-3">
-                      <p className="text-xs font-medium uppercase tracking-wide text-slate-500">{quota.label}</p>
-                      <p className="text-sm font-semibold text-slate-900">{usageLabel(quota.usage, quota.suffix)}</p>
-                    </div>
-                    <Progress value={usagePercent(quota.usage)} />
-                    {quota.usage.overLimit && <p className="mt-2 text-xs text-red-700">{t("billing.overLimit")}</p>}
-                  </div>
-                ))}
-              </div>
+              {billingAccount && (
+                <BillingUsageGroups
+                  account={billingAccount}
+                  copy={{
+                    platformUsage: t("billing.platformUsage"),
+                    hiringUsage: t("billing.hiringUsage"),
+                    unlimited: t("unlimited"),
+                    overLimit: t("billing.overLimit"),
+                    reserved: (amount) => t("billing.reserved", { amount }),
+                    labels: {
+                      messages: t("billing.quotaLabels.messages"),
+                      documents: t("billing.quotaLabels.documents"),
+                      teamMembers: t("billing.quotaLabels.teamMembers"),
+                      storage: t("billing.quotaLabels.storage"),
+                      activeJobs: t("billing.quotaLabels.activeJobs"),
+                      verifiedApplications: t("billing.quotaLabels.verifiedApplications"),
+                      interviews: t("billing.quotaLabels.interviews"),
+                      cvAnalyses: t("billing.quotaLabels.cvAnalyses"),
+                      recruitmentStorage: t("billing.quotaLabels.recruitmentStorage"),
+                    },
+                  }}
+                  formatNumber={(value) => format.number(value)}
+                  formatBytes={formatBytes}
+                />
+              )}
               <div className="grid gap-3 rounded-lg border border-slate-200 bg-white p-4 text-sm sm:grid-cols-2">
                 <p><span className="text-slate-500">{t("billing.nextQuotaReset")}</span> <strong>{formatDate(billingAccount?.nextQuotaResetAt ?? null)}</strong></p>
                 {billingAccount?.trialEndsAt && <p><span className="text-slate-500">{t("billing.trialEnds")}</span> <strong>{formatDate(billingAccount.trialEndsAt)}</strong></p>}
@@ -791,6 +842,7 @@ function SettingsPageContent() {
               {billingAccount?.pendingPayment && (
                 <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
                   {t("billing.pendingPayment", {
+                    plan: planLabel(billingAccount.pendingPayment.planCode),
                     interval: billingIntervalLabel(billingAccount.pendingPayment.interval),
                     status: t(`billing.statuses.${billingAccount.pendingPayment.status}` as "billing.statuses.PENDING"),
                   })}
@@ -846,9 +898,30 @@ function SettingsPageContent() {
           <div className="min-h-0 flex-1 overflow-y-auto bg-transparent px-4 py-12 sm:px-8 sm:py-16">
             <div className="mx-auto max-w-6xl">
               <PlanCardGrid plans={billingPlans} currentPlan={backendPlan} interval={billingInterval}
-                onIntervalChange={setBillingInterval} onSelectPlan={(plan, interval) => void selectPlan(plan, interval)} />
+                onIntervalChange={setBillingInterval} onSelectPlan={selectPlan} />
             </div>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={Boolean(planConfirmation)} onOpenChange={(open) => {
+        if (!open && !billingBusy) setPlanConfirmation(null);
+      }}>
+        <DialogContent showCloseButton={false}>
+          <DialogHeader>
+            <DialogTitle>{t("billing.confirmPlanChangeTitle")}</DialogTitle>
+            <DialogDescription>{planConfirmation?.description}</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button type="button" variant="outline" disabled={billingBusy} onClick={() => setPlanConfirmation(null)}>
+              {t("actions.cancel")}
+            </Button>
+            <Button type="button" variant={planConfirmation?.destructive ? "destructive" : "default"}
+              disabled={billingBusy || !planConfirmation}
+              onClick={() => planConfirmation && void applyPlan(planConfirmation.plan, planConfirmation.interval)}>
+              {billingBusy && <Loader2 className="animate-spin" />}{planConfirmation?.confirmLabel}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 

@@ -5,6 +5,7 @@ INSERT INTO tenants (
     id,
     name,
     slug,
+    kind,
     plan,
     status,
     max_documents,
@@ -23,6 +24,7 @@ VALUES (
     '00000000-0000-0000-0000-000000000001',
     'CacaNode Demo',
     'cacanode-demo',
+    'CUSTOMER',
     'PRO',
     'ACTIVE',
     150,
@@ -40,6 +42,7 @@ VALUES (
 ON CONFLICT (slug) DO UPDATE
 SET
     name = EXCLUDED.name,
+    kind = EXCLUDED.kind,
     plan = EXCLUDED.plan,
     status = EXCLUDED.status,
     max_documents = EXCLUDED.max_documents,
@@ -51,6 +54,44 @@ SET
     webhooks_enabled = EXCLUDED.webhooks_enabled,
     advanced_analytics_enabled = EXCLUDED.advanced_analytics_enabled,
     custom_branding_enabled = EXCLUDED.custom_branding_enabled,
+    updated_at = NOW();
+
+-- The local development tenant always has Recruitment and AI Interview access.
+-- This deliberately overrides an OFF state whenever the development seed is rerun.
+INSERT INTO recruitment_tenant_activation (
+    tenant_id,
+    rollout_stage,
+    master_enabled,
+    automation_enabled,
+    cv_ai_enabled,
+    calling_enabled,
+    recording_enabled,
+    public_discovery_enabled,
+    created_at,
+    updated_at
+)
+VALUES (
+    (SELECT id FROM tenants WHERE slug = 'cacanode-demo'),
+    'AUTO',
+    TRUE,
+    TRUE,
+    TRUE,
+    TRUE,
+    TRUE,
+    FALSE,
+    NOW(),
+    NOW()
+)
+ON CONFLICT (tenant_id) DO UPDATE
+SET
+    rollout_stage = EXCLUDED.rollout_stage,
+    master_enabled = EXCLUDED.master_enabled,
+    automation_enabled = EXCLUDED.automation_enabled,
+    cv_ai_enabled = EXCLUDED.cv_ai_enabled,
+    calling_enabled = EXCLUDED.calling_enabled,
+    recording_enabled = EXCLUDED.recording_enabled,
+    public_discovery_enabled = EXCLUDED.public_discovery_enabled,
+    version = recruitment_tenant_activation.version + 1,
     updated_at = NOW();
 
 INSERT INTO users (
@@ -83,6 +124,35 @@ SET
     role = EXCLUDED.role,
     status = EXCLUDED.status,
     updated_at = NOW();
+
+-- Development seed data is loaded after Flyway, so keep analytics projections in sync explicitly.
+INSERT INTO analytics_tenant_projection (
+    tenant_id, name, status, plan, max_storage_mb, created_at, updated_at, tenant_kind
+)
+SELECT id, name, status, plan, COALESCE(max_storage_mb, 0), created_at, updated_at, kind
+FROM tenants
+WHERE slug = 'cacanode-demo'
+ON CONFLICT (tenant_id) DO UPDATE
+SET
+    name = EXCLUDED.name,
+    status = EXCLUDED.status,
+    plan = EXCLUDED.plan,
+    max_storage_mb = EXCLUDED.max_storage_mb,
+    tenant_kind = EXCLUDED.tenant_kind,
+    updated_at = EXCLUDED.updated_at;
+
+INSERT INTO analytics_user_projection (
+    user_id, tenant_id, status, role, created_at, updated_at
+)
+SELECT id, tenant_id, status, role, created_at, updated_at
+FROM users
+WHERE email = 'admin@cacanode.local'
+ON CONFLICT (user_id) DO UPDATE
+SET
+    tenant_id = EXCLUDED.tenant_id,
+    status = EXCLUDED.status,
+    role = EXCLUDED.role,
+    updated_at = EXCLUDED.updated_at;
 
 INSERT INTO model_config_versions (
     id,
@@ -274,7 +344,7 @@ VALUES (
     'PRO',
     'ACTIVE',
     'MONTHLY',
-    '2026-07-15',
+    '2026-07-23',
     NOW(),
     NOW() + INTERVAL '1 year',
     NOW() + INTERVAL '1 year 3 days',
@@ -283,6 +353,11 @@ VALUES (
         'maxDocuments', 150,
         'maxTeamMembers', 5,
         'maxStorageMb', 5120,
+        'maxActiveJobs', 3,
+        'maxVerifiedApplications', 150,
+        'maxInterviewSeconds', 3600,
+        'maxCvAnalyses', 100,
+        'maxRecruitmentStorageBytes', 1073741824,
         'apiAccess', TRUE,
         'webhooks', TRUE,
         'advancedAnalytics', TRUE,
@@ -301,4 +376,32 @@ SET
     grace_ends_at = EXCLUDED.grace_ends_at,
     cancel_at_period_end = FALSE,
     entitlement_snapshot = EXCLUDED.entitlement_snapshot,
+    updated_at = NOW();
+
+-- Keep the demo recruitment scheduling flow usable out of the box.
+INSERT INTO recruitment_tenant_settings (tenant_id)
+SELECT id FROM tenants WHERE slug = 'cacanode-demo'
+ON CONFLICT (tenant_id) DO NOTHING;
+
+INSERT INTO recruitment_availability_windows (
+    id,
+    tenant_id,
+    day_of_week,
+    start_local,
+    end_local,
+    created_at,
+    updated_at
+)
+VALUES
+    ('00000000-0000-0000-0000-000000000071', (SELECT id FROM tenants WHERE slug = 'cacanode-demo'), 1, '09:00', '17:00', NOW(), NOW()),
+    ('00000000-0000-0000-0000-000000000072', (SELECT id FROM tenants WHERE slug = 'cacanode-demo'), 2, '09:00', '17:00', NOW(), NOW()),
+    ('00000000-0000-0000-0000-000000000073', (SELECT id FROM tenants WHERE slug = 'cacanode-demo'), 3, '09:00', '17:00', NOW(), NOW()),
+    ('00000000-0000-0000-0000-000000000074', (SELECT id FROM tenants WHERE slug = 'cacanode-demo'), 4, '09:00', '17:00', NOW(), NOW()),
+    ('00000000-0000-0000-0000-000000000075', (SELECT id FROM tenants WHERE slug = 'cacanode-demo'), 5, '09:00', '17:00', NOW(), NOW())
+ON CONFLICT (id) DO UPDATE
+SET
+    tenant_id = EXCLUDED.tenant_id,
+    day_of_week = EXCLUDED.day_of_week,
+    start_local = EXCLUDED.start_local,
+    end_local = EXCLUDED.end_local,
     updated_at = NOW();

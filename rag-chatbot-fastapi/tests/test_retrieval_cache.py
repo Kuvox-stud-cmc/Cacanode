@@ -9,16 +9,16 @@ from uuid import uuid4
 
 import pytest
 
-from app.core.cache import (
+from app.bootstrap.settings import Settings
+from app.common.cache import (
     CacheOperationStatus,
     CacheReadResult,
     CacheReadStatus,
     CacheStore,
 )
-from app.core.concurrent_loads import ConcurrentLoadTracker
-from app.core.config import Settings
-from app.rag.models import RetrievedChunk
-from app.rag.retrieval_cache import (
+from app.common.concurrent_loads import ConcurrentLoadTracker
+from app.modules.generation.internal.models import RetrievedChunk
+from app.modules.retrieval.internal.cache import (
     CachedRetriever,
     RetrievalCacheKeyBuilder,
     RetrievedChunkCacheCodec,
@@ -286,11 +286,11 @@ async def test_same_retrieval_key_overlap_is_observed_without_changing_results(
 ) -> None:
     starts: list[int] = []
     monkeypatch.setattr(
-        "app.core.concurrent_loads.record_authoritative_load_started",
+        "app.common.concurrent_loads.record_authoritative_load_started",
         lambda _cache, concurrency: starts.append(concurrency),
     )
     monkeypatch.setattr(
-        "app.core.concurrent_loads.record_authoritative_load_finished", lambda *_: None
+        "app.common.concurrent_loads.record_authoritative_load_finished", lambda *_: None
     )
     chunk = _chunk()
     entered = 0

@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { buttonVariants } from "@/components/ui/button";
 import type { BillingInterval, BillingPlan } from "@/lib/billing-api";
 
-export type PlanId = "starter" | "pro" | "enterprise";
+export type PlanId = "starter" | "pro" | "business" | "enterprise";
 
 type PlanCardGridProps = {
   plans: BillingPlan[];
@@ -22,6 +22,7 @@ export function normalizePlanId(plan: string | undefined): PlanId | null {
     case "free":
     case "starter": return "starter";
     case "pro": return "pro";
+    case "business": return "business";
     case "enterprise": return "enterprise";
     default: return null;
   }
@@ -30,6 +31,7 @@ export function normalizePlanId(plan: string | undefined): PlanId | null {
 function publicHref(plan: BillingPlan): string {
   if (plan.planCode === "STARTER") return "/register";
   if (plan.planCode === "PRO") return "/register?plan=pro";
+  if (plan.planCode === "BUSINESS") return "/register?plan=business";
   return plan.salesUrl ?? "mailto:sales@cacanode.com";
 }
 
@@ -63,7 +65,7 @@ export default function PlanCardGrid({
           ))}
         </div>
       </div>
-      <div className="grid grid-cols-1 items-stretch gap-6 md:grid-cols-3">
+      <div className="grid grid-cols-1 items-stretch gap-6 md:grid-cols-2 xl:grid-cols-4">
         {plans.map((plan) => {
           const planId = normalizePlanId(plan.planCode);
           const isCurrent = planId !== null && currentPlan === planId;
@@ -72,6 +74,11 @@ export default function PlanCardGrid({
             t("limits.documents", { count: formatLimit(plan.limits.documents) }),
             t("limits.teamMembers", { count: formatLimit(plan.limits.teamMembers) }),
             t("limits.storage", { count: formatLimit(plan.limits.storageMb, " MB") }),
+            t("limits.activeJobs", { count: plan.planCode === "ENTERPRISE" ? t("contracted") : format.number(plan.limits.activeJobs) }),
+            t("limits.verifiedApplications", { count: plan.planCode === "ENTERPRISE" ? t("contracted") : format.number(plan.limits.verifiedApplications) }),
+            t("limits.interviews", { count: plan.planCode === "ENTERPRISE" ? t("contracted") : format.number(plan.limits.interviewSeconds / 60) }),
+            t("limits.cvAnalyses", { count: plan.planCode === "ENTERPRISE" ? t("contracted") : format.number(plan.limits.cvAnalyses) }),
+            t("limits.recruitmentStorage", { count: plan.planCode === "ENTERPRISE" ? t("contracted") : formatStorage(plan.limits.recruitmentStorageBytes, format) }),
             ...plan.includedFeatures,
           ];
           return (
@@ -87,12 +94,12 @@ export default function PlanCardGrid({
               </ul>
               {onSelectPlan && planId ? (
                 <Button type="button" className="w-full" variant={isCurrent ? "outline" : "default"}
-                  disabled={isCurrent && planId !== "pro"} onClick={() => onSelectPlan(planId, interval)}>
-                  {isCurrent && planId !== "pro" ? t("currentPlan") : planId === "pro" && isCurrent ? t("renewPro") : t("choosePlan", { plan: plan.name })}
+                  disabled={isCurrent && !["pro", "business"].includes(planId)} onClick={() => onSelectPlan(planId, interval)}>
+                  {isCurrent && !["pro", "business"].includes(planId) ? t("currentPlan") : isCurrent ? t("renewPlan", { plan: plan.name }) : t("choosePlan", { plan: plan.name })}
                 </Button>
               ) : (
                 <Link className={buttonVariants({ className: "w-full", variant: plan.planCode === "PRO" ? "default" : "outline" })}
-                  href={publicHref(plan)}>{plan.contactSales ? t("contactSales") : plan.planCode === "STARTER" ? t("startFree") : t("getPro")}</Link>
+                  href={publicHref(plan)}>{plan.contactSales ? t("contactSales") : plan.planCode === "STARTER" ? t("startFree") : t("getPlan", { plan: plan.name })}</Link>
               )}
             </div>
           );
@@ -100,4 +107,10 @@ export default function PlanCardGrid({
       </div>
     </div>
   );
+}
+
+function formatStorage(bytes: number, format: ReturnType<typeof useFormatter>): string {
+  const gib = 1024 ** 3;
+  const mib = 1024 ** 2;
+  return bytes >= gib ? `${format.number(bytes / gib)} GB` : `${format.number(bytes / mib)} MB`;
 }

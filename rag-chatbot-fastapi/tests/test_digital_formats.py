@@ -7,20 +7,31 @@ from uuid import uuid4
 
 import pytest
 
-from app.graph import (
-    EntityMention,
-    EntityRelationExtractor,
-    EvidenceRelation,
-    GraphBatch,
-    GraphSearchRequest,
-    KuzuGraphRepository,
+from app.contracts.document_ingestion_v1 import DocumentIngestRequestedEvent
+from app.modules.generation.internal.spreadsheets import (
+    CalculationCommand,
+    CalculationError,
+    PolarsCalculationAdapter,
+    TypedFilter,
 )
-from app.ingestion.chunking import DeterministicChunker
-from app.ingestion.errors import PermanentIngestionError
-from app.ingestion.events import DocumentIngestRequestedEvent
-from app.ingestion.extraction import DocumentTextExtractor
-from app.ingestion.spreadsheets import CalculationCommand, PolarsCalculationAdapter, TypedFilter
-from app.rag.errors import ChatModelProviderError
+from app.modules.graph.api import (
+    GraphBatch,
+)
+from app.modules.graph.api import (
+    GraphEntity as EntityMention,
+)
+from app.modules.graph.api import (
+    GraphRelation as EvidenceRelation,
+)
+from app.modules.graph.api import (
+    GraphSearchQuery as GraphSearchRequest,
+)
+from app.modules.graph.internal.service import KuzuGraphRepository
+from app.modules.ingestion.api import PermanentIngestionFailure
+from app.modules.ingestion.internal.chunking import DeterministicChunker
+from app.modules.ingestion.internal.entity_extraction import EntityRelationExtractor
+from app.modules.ingestion.internal.extraction import DocumentTextExtractor
+from app.modules.model.api import ModelUnavailableError as ChatModelProviderError
 
 
 def test_markdown_and_html_preserve_structure_and_ignore_active_content() -> None:
@@ -74,7 +85,7 @@ def test_csv_tables_types_ranges_and_calculations_are_deterministic() -> None:
         ),
     )
     assert float(result.value) == pytest.approx(30.75)
-    with pytest.raises(PermanentIngestionError, match="Unknown spreadsheet column"):
+    with pytest.raises(CalculationError, match="Unknown spreadsheet column"):
         adapter.execute(
             table,
             CalculationCommand(table_id=table.table_id, operation="sum", column="missing"),
@@ -217,7 +228,7 @@ def test_graph_scopes_matching_unit_ids_to_their_source(tmp_path: object) -> Non
     results = repository.search(
         GraphSearchRequest(tenant_id="tenant-a", knowledge_base_id="kb-a", query="Acme")
     )
-    assert {(result["document_id"], result["unit_id"]) for result in results} == {
+    assert {(result.document_id, result.unit_id) for result in results} == {
         ("source-a", "shared-structural-unit"),
         ("source-b", "shared-structural-unit"),
     }
@@ -325,7 +336,7 @@ async def test_graph_extraction_fails_after_single_unit_output_limit_retry() -> 
     chunks = DeterministicChunker().chunk(parsed)
     model = AlwaysLengthLimitedModel()
 
-    with pytest.raises(PermanentIngestionError, match="configured model output limit"):
+    with pytest.raises(PermanentIngestionFailure, match="configured model output limit"):
         await EntityRelationExtractor(model)._extract_batch(chunks)
 
     assert model.calls == 2

@@ -1,6 +1,18 @@
 .DEFAULT_GOAL := help
 
 PYTHON_MODE ?= venv
+
+# Automatically use the active Conda environment if one is activated
+ifdef CONDA_DEFAULT_ENV
+ifeq ($(PYTHON_MODE),venv)
+PYTHON_MODE = system
+endif
+# Fix for Conda on Windows: prevent httpx from crashing due to a missing SSL_CERT_FILE path
+ifeq ($(OS),Windows_NT)
+unexport SSL_CERT_FILE
+endif
+endif
+
 PYTHON ?= python
 CONDA ?= conda
 CONDA_ENV ?= rag-chatbot
@@ -44,6 +56,8 @@ endif
 
 ifeq ($(PYTHON_MODE),conda)
 PYTHON_RUN := $(CONDA) run --no-capture-output -n $(CONDA_ENV) python
+else ifeq ($(PYTHON_MODE),system)
+PYTHON_RUN := $(PYTHON)
 else
 PYTHON_RUN := $(VENV_PYTHON)
 endif
@@ -52,6 +66,7 @@ endif
 	dev-infra dev-down dev-reranker dev-reranker-down \
 	evaluate-retrieval compare-retrieval-cache baseline-cache baseline-cache-enabled \
 	cleanup-semantic-answer-cache \
+	recover-ingestion-checkpoints generate-proto check-proto \
 	cleanup-semantic-answer-cache-dry-run test check lint typecheck clean
 
 help:
@@ -75,6 +90,9 @@ help:
 	$(info   make baseline-cache-enabled Label a cache-enabled comparison run as JSON)
 	$(info   make cleanup-semantic-answer-cache Delete expired semantic answer-cache points)
 	$(info   make cleanup-semantic-answer-cache-dry-run Preview the bounded cleanup)
+	$(info   make recover-ingestion-checkpoints Republish bounded incomplete ingestion jobs)
+	$(info   make generate-proto       Regenerate deterministic Python protobuf outputs)
+	$(info   make check-proto          Verify generated protobuf outputs are current)
 	$(info   make test                 Run pytest)
 	$(info   make lint                 Run Ruff checks)
 	$(info   make typecheck            Run mypy)
@@ -84,7 +102,9 @@ help:
 
 env:
 ifeq ($(PYTHON_MODE),conda)
-	@$(PYTHON_RUN) --version 1>&2
+	$(PYTHON_RUN) --version
+else ifeq ($(PYTHON_MODE),system)
+	$(PYTHON_RUN) --version
 else
 	@$(PYTHON) -m venv $(VENV)
 	@$(PYTHON_RUN) --version 1>&2
@@ -154,15 +174,37 @@ baseline-cache-enabled: env
 	@BASELINE_CACHE_ENABLED=true $(PYTHON_RUN) -m app.maintenance.cache_baseline
 
 cleanup-semantic-answer-cache: env
-	$(PYTHON_RUN) -m app.maintenance.cleanup_semantic_answer_cache --apply
+	$(PYTHON_RUN) -m app.bootstrap.semantic_cache_cleanup --apply
 
 cleanup-semantic-answer-cache-dry-run: env
-	$(PYTHON_RUN) -m app.maintenance.cleanup_semantic_answer_cache
+	$(PYTHON_RUN) -m app.bootstrap.semantic_cache_cleanup
+
+recover-ingestion-checkpoints: env
+	$(PYTHON_RUN) -m app.bootstrap.recover_ingestion --limit 100
+
+generate-proto: env
+	$(PYTHON_RUN) -m grpc_tools.protoc -I../proto \
+		--python_out=app/generated --pyi_out=app/generated --grpc_python_out=app/generated \
+		../proto/cacanode_ai_v1.proto
+	@sed -i.bak 's/^import cacanode_ai_v1_pb2 as/from app.generated import cacanode_ai_v1_pb2 as/' app/generated/cacanode_ai_v1_pb2_grpc.py
+	@$(REMOVE) app/generated/cacanode_ai_v1_pb2_grpc.py.bak
+
+check-proto: env
+	@tmp=$$(mktemp -d); \
+	$(PYTHON_RUN) -m grpc_tools.protoc -I../proto \
+		--python_out=$$tmp --pyi_out=$$tmp --grpc_python_out=$$tmp \
+		../proto/cacanode_ai_v1.proto; \
+	sed -i.bak 's/^import cacanode_ai_v1_pb2 as/from app.generated import cacanode_ai_v1_pb2 as/' $$tmp/cacanode_ai_v1_pb2_grpc.py; \
+	rm -f $$tmp/cacanode_ai_v1_pb2_grpc.py.bak; \
+	diff -u app/generated/cacanode_ai_v1_pb2.py $$tmp/cacanode_ai_v1_pb2.py; \
+	diff -u app/generated/cacanode_ai_v1_pb2.pyi $$tmp/cacanode_ai_v1_pb2.pyi; \
+	diff -u app/generated/cacanode_ai_v1_pb2_grpc.py $$tmp/cacanode_ai_v1_pb2_grpc.py; \
+	rm -rf $$tmp
 
 test: env
 	$(PYTHON_RUN) -m pytest $(PYTEST_ARGS)
 
-check: lint typecheck test
+check: check-proto lint typecheck test
 
 lint: env
 	$(PYTHON_RUN) -m ruff check app tests

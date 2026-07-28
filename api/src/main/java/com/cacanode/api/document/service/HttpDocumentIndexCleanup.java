@@ -1,14 +1,14 @@
 package com.cacanode.api.document.service;
 
 import java.util.UUID;
-import com.cacanode.api.chat.ai.AiInferenceClient;
+import com.cacanode.api.ai.api.AiInferenceApi;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
 @Component
 @RequiredArgsConstructor
 public class HttpDocumentIndexCleanup implements DocumentIndexCleanup {
-    private final AiInferenceClient inferenceClient;
+    private final AiInferenceApi inferenceClient;
 
     @Override
     public void delete(UUID tenantId, UUID knowledgeBaseId, UUID documentId) {

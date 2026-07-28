@@ -1,4 +1,4 @@
-export type BillingPlanCode = 'STARTER' | 'TRIAL' | 'PRO' | 'ENTERPRISE';
+export type BillingPlanCode = 'STARTER' | 'TRIAL' | 'PRO' | 'BUSINESS' | 'ENTERPRISE';
 export type BillingInterval = 'MONTHLY' | 'ANNUAL';
 export type BillingStatus = 'TRIAL' | 'STARTER' | 'ACTIVE' | 'GRACE' | 'ENTERPRISE';
 export type PaymentStatus =
@@ -13,6 +13,13 @@ export type PaymentStatus =
 export type BillingUsage = {
   used: number;
   limit: number | null;
+  overLimit: boolean;
+};
+
+export type HiringBillingUsage = {
+  used: number;
+  reserved: number;
+  limit: number;
   overLimit: boolean;
 };
 
@@ -49,6 +56,11 @@ export type BillingAccount = {
   documents: BillingUsage;
   teamMembers: BillingUsage;
   storageMb: BillingUsage;
+  activeJobs: HiringBillingUsage;
+  verifiedApplications: HiringBillingUsage;
+  interviewSeconds: HiringBillingUsage;
+  cvAnalyses: HiringBillingUsage;
+  recruitmentStorageBytes: HiringBillingUsage;
   features: BillingFeatures;
   pendingPayment: BillingPayment | null;
   cancelAtPeriodEnd: boolean;

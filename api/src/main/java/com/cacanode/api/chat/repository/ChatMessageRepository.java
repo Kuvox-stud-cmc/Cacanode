@@ -22,4 +22,7 @@ public interface ChatMessageRepository extends JpaRepository<ChatMessage, UUID> 
     Optional<ChatMessage> findFirstBySessionIdAndRoleOrderBySequenceNumberAsc(UUID sessionId, String role);
 
     long countBySessionId(UUID sessionId);
+
+    Optional<ChatMessage> findFirstBySessionIdAndSequenceNumberLessThanOrderBySequenceNumberDesc(
+            UUID sessionId, int sequenceNumber);
 }

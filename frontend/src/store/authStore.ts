@@ -6,7 +6,7 @@ export interface AuthState {
   accessToken: string | null
   tenantId: string | null
   setAuth: (user: AuthUser, token: string, tenantId: string) => void
-  setPlan: (plan: string) => void
+  setPlan: (plan: AuthUser["plan"]) => void
   clearAuth: () => void
 }
 

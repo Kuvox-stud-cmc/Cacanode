@@ -16,8 +16,8 @@ import org.springframework.web.filter.OncePerRequestFilter;
 import com.cacanode.api.common.security.AppUserDetailsService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.cacanode.api.auth.service.JwtService;
-import com.cacanode.api.tenant.enums.UserStatus;
-import com.cacanode.api.tenant.model.User;
+import com.cacanode.api.tenant.api.TenantIdentityApi;
+import com.cacanode.api.tenant.api.TenantRoleInvariant;
 
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -33,6 +33,7 @@ public class JwtAuthFilter extends OncePerRequestFilter {
 
   private final JwtService jwtService;
   private final AppUserDetailsService userDetailsService;
+  private final TenantIdentityApi tenantIdentityApi;
 
   @Override
   protected boolean shouldNotFilter(HttpServletRequest request) {
@@ -50,6 +51,10 @@ public class JwtAuthFilter extends OncePerRequestFilter {
     HttpServletResponse response,
     FilterChain filterChain
   ) throws ServletException, IOException {
+
+    if (request.getRequestURI().startsWith("/api/v1/platform/")) {
+      response.setHeader("Cache-Control", "no-store");
+    }
 
     final String authHeader = request.getHeader("Authorization");
     
@@ -80,15 +85,17 @@ public class JwtAuthFilter extends OncePerRequestFilter {
           || !userDetails.isAccountNonExpired() || !userDetails.isCredentialsNonExpired()) {
           throw new IllegalStateException("User account is disabled");
         }
-        if (userDetails instanceof User user) {
-          String tokenUserId = jwtService.extractUserId(token);
-          if (user.getStatus() != UserStatus.ACTIVE
-            || !user.getId().toString().equals(tokenUserId)
-            || !user.getTenant().getId().toString().equals(tenantId)) {
-            throw new IllegalStateException("User account is disabled or token scope is invalid");
-          }
-          authenticatedRole = user.getRole().name();
+        String tokenUserId = jwtService.extractUserId(token);
+        var user = tenantIdentityApi.requireUser(
+                java.util.UUID.fromString(tenantId), java.util.UUID.fromString(tokenUserId));
+        if (!"ACTIVE".equals(user.status())) {
+          throw new IllegalStateException("User account is disabled or token scope is invalid");
         }
+        TenantRoleInvariant.requireValid(user.role(), user.tenantKind());
+        if (!user.role().equals(role)) {
+          throw new IllegalStateException("JWT role is stale or invalid");
+        }
+        authenticatedRole = user.role();
 
         // 4. Build authentication token
         UsernamePasswordAuthenticationToken authentication = new UsernamePasswordAuthenticationToken(

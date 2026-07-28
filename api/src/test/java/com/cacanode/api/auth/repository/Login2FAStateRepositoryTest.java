@@ -1,6 +1,6 @@
 package com.cacanode.api.auth.repository;
 
-import com.cacanode.api.auth.enums.Login2FAChallengeType;
+import com.cacanode.api.auth.api.Login2FAChallengeType;
 import com.cacanode.api.auth.model.Login2FAState;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;

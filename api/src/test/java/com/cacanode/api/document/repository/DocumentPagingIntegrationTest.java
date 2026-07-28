@@ -24,10 +24,8 @@ import com.cacanode.api.document.enums.DocumentVisibility;
 import com.cacanode.api.document.messaging.DocumentIngestionPublisher;
 import com.cacanode.api.document.service.DocumentIndexCleanup;
 import com.cacanode.api.document.service.DocumentService;
-import com.cacanode.api.document.storage.DocumentStorage;
-import com.cacanode.api.tenant.enums.KnowledgeBaseStatus;
-import com.cacanode.api.tenant.model.KnowledgeBase;
-import com.cacanode.api.tenant.repository.KnowledgeBaseRepository;
+import com.cacanode.api.common.storage.DocumentStorage;
+import com.cacanode.api.tenant.api.TenantWorkspaceApi;
 
 @DataJpaTest(properties = "spring.jpa.show-sql=false")
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
@@ -49,14 +47,13 @@ class DocumentPagingIntegrationTest {
 
     @BeforeEach
     void setUp() {
-        KnowledgeBaseRepository knowledgeBaseRepository = mock(KnowledgeBaseRepository.class);
-        KnowledgeBase knowledgeBase = new KnowledgeBase();
-        knowledgeBase.setStatus(KnowledgeBaseStatus.ACTIVE);
-        when(knowledgeBaseRepository.findByIdAndTenantId(KNOWLEDGE_BASE_ID, TENANT_ID))
-                .thenReturn(java.util.Optional.of(knowledgeBase));
+        TenantWorkspaceApi tenantWorkspaceApi = mock(TenantWorkspaceApi.class);
+        when(tenantWorkspaceApi.requireActiveKnowledgeBase(TENANT_ID, KNOWLEDGE_BASE_ID))
+                .thenReturn(new TenantWorkspaceApi.WorkspaceContext(
+                        TENANT_ID, null, KNOWLEDGE_BASE_ID, "Tenant", "Prompt", 0));
         documentService = new DocumentService(
                 documentRepository,
-                knowledgeBaseRepository,
+                tenantWorkspaceApi,
                 mock(DocumentStorage.class),
                 mock(DocumentIngestionPublisher.class),
                 mock(DocumentIndexCleanup.class),

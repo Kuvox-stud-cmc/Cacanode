@@ -10,7 +10,7 @@ export type AuthUser = {
   email: string;
   fullName: string;
   role: string;
-  plan: string;
+  plan: 'STARTER' | 'TRIAL' | 'PRO' | 'BUSINESS' | 'ENTERPRISE';
 };
 
 export type MobileAuthResponse = {

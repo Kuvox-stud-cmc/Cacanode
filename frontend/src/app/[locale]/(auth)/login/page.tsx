@@ -23,7 +23,7 @@ import { useAuthStore } from "@/components/providers/StoreProvider";
 import { authApiErrorMessage, loginApi } from "@/lib/auth-api";
 import { cn } from "@/lib/utils";
 import {
-  consumeAuthDestination,
+  consumeAuthDestinationForRole,
   rememberAuthDestination,
   safeInternalPath,
   withNext,
@@ -86,7 +86,7 @@ function LoginContent() {
       // Direct login (AuthResponse)
       if ("accessToken" in res && "user" in res) {
         setAuth(res.user, res.accessToken, res.user.tenantId);
-        router.push(consumeAuthDestination());
+        router.push(consumeAuthDestinationForRole(res.user.role));
       }
     } catch (e) {
       const msg = authApiErrorMessage(e, t("fallback.invalidCredentials"));

@@ -1,3 +1,5 @@
+import type { AuthRole } from "@/types"
+
 const AUTH_DESTINATION_KEY = "cacanode:auth-destination"
 
 function withoutUiLocale(pathname: string): string {
@@ -47,6 +49,18 @@ export function consumeAuthDestination(fallback = "/dashboard"): string {
     window.localStorage.removeItem(AUTH_DESTINATION_KEY)
   }
   return destination
+}
+
+export function destinationForRole(role: AuthRole, requested: string | null | undefined): string {
+  if (role === "PLATFORM_ADMIN") return "/platform"
+  const safe = safeInternalPath(requested)
+  return safe?.startsWith("/platform") ? "/dashboard" : (safe ?? "/dashboard")
+}
+
+export function consumeAuthDestinationForRole(role: AuthRole): string {
+  const stored = typeof window === "undefined" ? null : window.localStorage.getItem(AUTH_DESTINATION_KEY)
+  if (typeof window !== "undefined") window.localStorage.removeItem(AUTH_DESTINATION_KEY)
+  return destinationForRole(role, stored)
 }
 
 export function withNext(path: string, destination: string | null): string {

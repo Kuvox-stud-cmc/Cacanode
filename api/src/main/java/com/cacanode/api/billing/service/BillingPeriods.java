@@ -1,7 +1,7 @@
 package com.cacanode.api.billing.service;
 
-import com.cacanode.api.billing.enums.BillingPlanCode;
-import com.cacanode.api.billing.enums.BillingStatus;
+import com.cacanode.api.billing.api.BillingPlanCode;
+import com.cacanode.api.billing.api.BillingStatus;
 import com.cacanode.api.billing.model.BillingSubscription;
 import org.springframework.stereotype.Component;
 

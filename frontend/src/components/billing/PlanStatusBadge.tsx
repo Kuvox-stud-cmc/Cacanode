@@ -56,11 +56,13 @@ export function PlanStatusBadge({
   const t = useTranslations("PlanBadge")
   const presentation = getPlanPresentation(plan, status)
   const normalizedPlan = plan?.trim().toUpperCase()
-  const label = status?.trim().toUpperCase() === "GRACE" ? t("grace")
+  const label = status?.trim().toUpperCase() === "GRACE"
+    ? normalizedPlan === "BUSINESS" ? t("businessGrace") : t("proGrace")
     : normalizedPlan === "TRIAL" ? t("trial")
     : normalizedPlan === "FREE" || normalizedPlan === "STARTER" ? t("starter")
     : normalizedPlan === "PRO" ? t("pro")
-    : normalizedPlan === "BUSINESS" || normalizedPlan === "ENTERPRISE" ? t("enterprise")
+    : normalizedPlan === "BUSINESS" ? t("business")
+    : normalizedPlan === "ENTERPRISE" ? t("enterprise")
     : t("current")
   return (
     <Badge

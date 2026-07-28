@@ -2,8 +2,8 @@ package com.cacanode.api.chat.controller;
 
 import com.cacanode.api.chat.dto.ChatDtos;
 import com.cacanode.api.chat.enums.ChatChannel;
-import com.cacanode.api.chat.service.ChatControlPlaneService;
-import com.cacanode.api.tenant.service.IntegrationTokenService;
+import com.cacanode.api.chat.query.ChatControlPlaneService;
+import com.cacanode.api.tenant.api.IntegrationAccessApi;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -25,15 +25,15 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class ExternalChatController {
     private final ChatControlPlaneService chatService;
-    private final IntegrationTokenService tokenService;
+    private final IntegrationAccessApi tokenService;
 
     @PostMapping("/api/v1/widget/chat/sessions")
     public ChatDtos.SessionResponse createWidget(
             @Valid @RequestBody ChatDtos.ExternalCreateSessionRequest body,
             @RequestHeader("Authorization") String authorization,
             @RequestHeader(value = "X-Parent-Origin", required = false) String parentOrigin) {
-        var principal = tokenService.authenticate(
-                authorization, IntegrationTokenService.WIDGET_SCOPE, parentOrigin);
+        var principal = tokenService.authenticateChatAccess(
+                authorization, IntegrationAccessApi.WIDGET_SCOPE, parentOrigin);
         return chatService.createExternalSession(
                 principal.tenantId(), principal.chatbotId(), principal.knowledgeBaseId(),
                 principal.tokenId(), ChatChannel.WIDGET, body);
@@ -43,7 +43,7 @@ public class ExternalChatController {
     public ChatDtos.SessionResponse createApi(
             @Valid @RequestBody ChatDtos.ExternalCreateSessionRequest body,
             @RequestHeader("Authorization") String authorization) {
-        var principal = tokenService.authenticate(authorization, IntegrationTokenService.API_SCOPE, null);
+        var principal = tokenService.authenticateChatAccess(authorization, IntegrationAccessApi.API_SCOPE, null);
         return chatService.createExternalSession(
                 principal.tenantId(), principal.chatbotId(), principal.knowledgeBaseId(),
                 principal.tokenId(), ChatChannel.CUSTOM_API, body);
@@ -57,8 +57,8 @@ public class ExternalChatController {
             @RequestHeader(value = "X-Parent-Origin", required = false) String parentOrigin,
             @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
             @RequestHeader(value = "X-Request-ID", required = false) String requestId) {
-        var principal = tokenService.authenticate(
-                authorization, IntegrationTokenService.WIDGET_SCOPE, parentOrigin);
+        var principal = tokenService.authenticateChatAccess(
+                authorization, IntegrationAccessApi.WIDGET_SCOPE, parentOrigin);
         return chatService.submitWidgetMessage(
                 principal.tenantId(), principal.tokenId(), sessionId, body.content(),
                 body.metadata(), body.locale(), idempotencyKey, requestId);
@@ -71,8 +71,8 @@ public class ExternalChatController {
             @RequestHeader("Authorization") String authorization,
             @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
             @RequestHeader(value = "X-Request-ID", required = false) String requestId) {
-        var principal = tokenService.authenticate(
-                authorization, IntegrationTokenService.API_SCOPE, null);
+        var principal = tokenService.authenticateChatAccess(
+                authorization, IntegrationAccessApi.API_SCOPE, null);
         return chatService.submitExternalMessage(
                 principal.tenantId(), principal.tokenId(), sessionId, body.content(),
                 body.metadata(), idempotencyKey, requestId);
@@ -88,8 +88,8 @@ public class ExternalChatController {
             @RequestHeader(value = "X-Parent-Origin", required = false) String parentOrigin,
             HttpServletRequest request) {
         String scope = request.getRequestURI().contains("/widget/")
-                ? IntegrationTokenService.WIDGET_SCOPE : IntegrationTokenService.API_SCOPE;
-        var principal = tokenService.authenticate(authorization, scope, parentOrigin);
+                ? IntegrationAccessApi.WIDGET_SCOPE : IntegrationAccessApi.API_SCOPE;
+        var principal = tokenService.authenticateChatAccess(authorization, scope, parentOrigin);
         return chatService.history(
                 principal.tenantId(), null, principal.tokenId(), sessionId, 50, 0);
     }
@@ -105,8 +105,8 @@ public class ExternalChatController {
             @RequestHeader(value = "X-Parent-Origin", required = false) String parentOrigin,
             HttpServletRequest request) {
         String scope = request.getRequestURI().contains("/widget/")
-                ? IntegrationTokenService.WIDGET_SCOPE : IntegrationTokenService.API_SCOPE;
-        var principal = tokenService.authenticate(authorization, scope, parentOrigin);
+                ? IntegrationAccessApi.WIDGET_SCOPE : IntegrationAccessApi.API_SCOPE;
+        var principal = tokenService.authenticateChatAccess(authorization, scope, parentOrigin);
         chatService.close(principal.tenantId(), null, principal.tokenId(), sessionId);
     }
 }

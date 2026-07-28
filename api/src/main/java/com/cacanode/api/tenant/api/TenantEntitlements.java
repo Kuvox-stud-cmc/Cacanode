@@ -1,7 +1,7 @@
 package com.cacanode.api.tenant.api;
 
-import com.cacanode.api.tenant.enums.TenantPlan;
-import com.cacanode.api.tenant.enums.TenantStatus;
+import com.cacanode.api.tenant.api.TenantPlan;
+import com.cacanode.api.tenant.api.TenantStatus;
 
 import java.time.LocalDateTime;
 import java.util.UUID;

@@ -11,9 +11,27 @@ class VisibilityMode(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     VISIBILITY_MODE_UNSPECIFIED: _ClassVar[VisibilityMode]
     ALL_TENANT_DOCUMENTS: _ClassVar[VisibilityMode]
     CUSTOMER_VISIBLE_DOCUMENTS: _ClassVar[VisibilityMode]
+
+class InterviewSectionKind(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    INTERVIEW_SECTION_KIND_UNSPECIFIED: _ClassVar[InterviewSectionKind]
+    INTERVIEW_SECTION_KIND_CORE: _ClassVar[InterviewSectionKind]
+    INTERVIEW_SECTION_KIND_ENGLISH_SCREEN: _ClassVar[InterviewSectionKind]
+
+class InterviewQuestionSource(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    INTERVIEW_QUESTION_SOURCE_UNSPECIFIED: _ClassVar[InterviewQuestionSource]
+    INTERVIEW_QUESTION_SOURCE_TEMPLATE: _ClassVar[InterviewQuestionSource]
+    INTERVIEW_QUESTION_SOURCE_CV_PERSONALIZED: _ClassVar[InterviewQuestionSource]
 VISIBILITY_MODE_UNSPECIFIED: VisibilityMode
 ALL_TENANT_DOCUMENTS: VisibilityMode
 CUSTOMER_VISIBLE_DOCUMENTS: VisibilityMode
+INTERVIEW_SECTION_KIND_UNSPECIFIED: InterviewSectionKind
+INTERVIEW_SECTION_KIND_CORE: InterviewSectionKind
+INTERVIEW_SECTION_KIND_ENGLISH_SCREEN: InterviewSectionKind
+INTERVIEW_QUESTION_SOURCE_UNSPECIFIED: InterviewQuestionSource
+INTERVIEW_QUESTION_SOURCE_TEMPLATE: InterviewQuestionSource
+INTERVIEW_QUESTION_SOURCE_CV_PERSONALIZED: InterviewQuestionSource
 
 class PriorMessage(_message.Message):
     __slots__ = ("role", "content")
@@ -220,3 +238,129 @@ class DeleteDocumentIndexResponse(_message.Message):
     DELETED_FIELD_NUMBER: _ClassVar[int]
     deleted: bool
     def __init__(self, deleted: bool = ...) -> None: ...
+
+class InterviewQuestionSnapshot(_message.Message):
+    __slots__ = ("question_id", "position", "prompt", "competency", "rubric", "follow_up_limit", "source", "evidence")
+    QUESTION_ID_FIELD_NUMBER: _ClassVar[int]
+    POSITION_FIELD_NUMBER: _ClassVar[int]
+    PROMPT_FIELD_NUMBER: _ClassVar[int]
+    COMPETENCY_FIELD_NUMBER: _ClassVar[int]
+    RUBRIC_FIELD_NUMBER: _ClassVar[int]
+    FOLLOW_UP_LIMIT_FIELD_NUMBER: _ClassVar[int]
+    SOURCE_FIELD_NUMBER: _ClassVar[int]
+    EVIDENCE_FIELD_NUMBER: _ClassVar[int]
+    question_id: str
+    position: int
+    prompt: str
+    competency: str
+    rubric: str
+    follow_up_limit: int
+    source: InterviewQuestionSource
+    evidence: str
+    def __init__(self, question_id: _Optional[str] = ..., position: _Optional[int] = ..., prompt: _Optional[str] = ..., competency: _Optional[str] = ..., rubric: _Optional[str] = ..., follow_up_limit: _Optional[int] = ..., source: _Optional[_Union[InterviewQuestionSource, str]] = ..., evidence: _Optional[str] = ...) -> None: ...
+
+class InterviewSectionSnapshot(_message.Message):
+    __slots__ = ("section_id", "position", "kind", "language_tag", "duration_limit_seconds", "transition_text", "questions")
+    SECTION_ID_FIELD_NUMBER: _ClassVar[int]
+    POSITION_FIELD_NUMBER: _ClassVar[int]
+    KIND_FIELD_NUMBER: _ClassVar[int]
+    LANGUAGE_TAG_FIELD_NUMBER: _ClassVar[int]
+    DURATION_LIMIT_SECONDS_FIELD_NUMBER: _ClassVar[int]
+    TRANSITION_TEXT_FIELD_NUMBER: _ClassVar[int]
+    QUESTIONS_FIELD_NUMBER: _ClassVar[int]
+    section_id: str
+    position: int
+    kind: InterviewSectionKind
+    language_tag: str
+    duration_limit_seconds: int
+    transition_text: str
+    questions: _containers.RepeatedCompositeFieldContainer[InterviewQuestionSnapshot]
+    def __init__(self, section_id: _Optional[str] = ..., position: _Optional[int] = ..., kind: _Optional[_Union[InterviewSectionKind, str]] = ..., language_tag: _Optional[str] = ..., duration_limit_seconds: _Optional[int] = ..., transition_text: _Optional[str] = ..., questions: _Optional[_Iterable[_Union[InterviewQuestionSnapshot, _Mapping]]] = ...) -> None: ...
+
+class InterviewInteractionLimits(_message.Message):
+    __slots__ = ("repetition_limit", "clarification_limit", "silence_timeout_seconds", "silence_prompt_limit")
+    REPETITION_LIMIT_FIELD_NUMBER: _ClassVar[int]
+    CLARIFICATION_LIMIT_FIELD_NUMBER: _ClassVar[int]
+    SILENCE_TIMEOUT_SECONDS_FIELD_NUMBER: _ClassVar[int]
+    SILENCE_PROMPT_LIMIT_FIELD_NUMBER: _ClassVar[int]
+    repetition_limit: int
+    clarification_limit: int
+    silence_timeout_seconds: int
+    silence_prompt_limit: int
+    def __init__(self, repetition_limit: _Optional[int] = ..., clarification_limit: _Optional[int] = ..., silence_timeout_seconds: _Optional[int] = ..., silence_prompt_limit: _Optional[int] = ...) -> None: ...
+
+class PrepareInterviewSessionRequest(_message.Message):
+    __slots__ = ("session_id", "call_attempt_id", "tenant_id", "template_revision_id", "snapshot_version", "snapshot_sha256", "company_display_name", "candidate_display_name", "introduction_text", "disclosure_text", "closing_text", "duration_limit_seconds", "interaction_limits", "recording_enabled", "cv_personalization_enabled", "sections", "trace")
+    SESSION_ID_FIELD_NUMBER: _ClassVar[int]
+    CALL_ATTEMPT_ID_FIELD_NUMBER: _ClassVar[int]
+    TENANT_ID_FIELD_NUMBER: _ClassVar[int]
+    TEMPLATE_REVISION_ID_FIELD_NUMBER: _ClassVar[int]
+    SNAPSHOT_VERSION_FIELD_NUMBER: _ClassVar[int]
+    SNAPSHOT_SHA256_FIELD_NUMBER: _ClassVar[int]
+    COMPANY_DISPLAY_NAME_FIELD_NUMBER: _ClassVar[int]
+    CANDIDATE_DISPLAY_NAME_FIELD_NUMBER: _ClassVar[int]
+    INTRODUCTION_TEXT_FIELD_NUMBER: _ClassVar[int]
+    DISCLOSURE_TEXT_FIELD_NUMBER: _ClassVar[int]
+    CLOSING_TEXT_FIELD_NUMBER: _ClassVar[int]
+    DURATION_LIMIT_SECONDS_FIELD_NUMBER: _ClassVar[int]
+    INTERACTION_LIMITS_FIELD_NUMBER: _ClassVar[int]
+    RECORDING_ENABLED_FIELD_NUMBER: _ClassVar[int]
+    CV_PERSONALIZATION_ENABLED_FIELD_NUMBER: _ClassVar[int]
+    SECTIONS_FIELD_NUMBER: _ClassVar[int]
+    TRACE_FIELD_NUMBER: _ClassVar[int]
+    session_id: str
+    call_attempt_id: str
+    tenant_id: str
+    template_revision_id: str
+    snapshot_version: str
+    snapshot_sha256: str
+    company_display_name: str
+    candidate_display_name: str
+    introduction_text: str
+    disclosure_text: str
+    closing_text: str
+    duration_limit_seconds: int
+    interaction_limits: InterviewInteractionLimits
+    recording_enabled: bool
+    cv_personalization_enabled: bool
+    sections: _containers.RepeatedCompositeFieldContainer[InterviewSectionSnapshot]
+    trace: TraceMetadata
+    def __init__(self, session_id: _Optional[str] = ..., call_attempt_id: _Optional[str] = ..., tenant_id: _Optional[str] = ..., template_revision_id: _Optional[str] = ..., snapshot_version: _Optional[str] = ..., snapshot_sha256: _Optional[str] = ..., company_display_name: _Optional[str] = ..., candidate_display_name: _Optional[str] = ..., introduction_text: _Optional[str] = ..., disclosure_text: _Optional[str] = ..., closing_text: _Optional[str] = ..., duration_limit_seconds: _Optional[int] = ..., interaction_limits: _Optional[_Union[InterviewInteractionLimits, _Mapping]] = ..., recording_enabled: bool = ..., cv_personalization_enabled: bool = ..., sections: _Optional[_Iterable[_Union[InterviewSectionSnapshot, _Mapping]]] = ..., trace: _Optional[_Union[TraceMetadata, _Mapping]] = ...) -> None: ...
+
+class PrepareInterviewSessionResponse(_message.Message):
+    __slots__ = ("session_id", "call_attempt_id", "runtime_token", "expires_at_epoch_seconds", "accepted_snapshot_sha256")
+    SESSION_ID_FIELD_NUMBER: _ClassVar[int]
+    CALL_ATTEMPT_ID_FIELD_NUMBER: _ClassVar[int]
+    RUNTIME_TOKEN_FIELD_NUMBER: _ClassVar[int]
+    EXPIRES_AT_EPOCH_SECONDS_FIELD_NUMBER: _ClassVar[int]
+    ACCEPTED_SNAPSHOT_SHA256_FIELD_NUMBER: _ClassVar[int]
+    session_id: str
+    call_attempt_id: str
+    runtime_token: str
+    expires_at_epoch_seconds: int
+    accepted_snapshot_sha256: str
+    def __init__(self, session_id: _Optional[str] = ..., call_attempt_id: _Optional[str] = ..., runtime_token: _Optional[str] = ..., expires_at_epoch_seconds: _Optional[int] = ..., accepted_snapshot_sha256: _Optional[str] = ...) -> None: ...
+
+class CancelInterviewSessionRequest(_message.Message):
+    __slots__ = ("session_id", "call_attempt_id", "reason", "trace")
+    SESSION_ID_FIELD_NUMBER: _ClassVar[int]
+    CALL_ATTEMPT_ID_FIELD_NUMBER: _ClassVar[int]
+    REASON_FIELD_NUMBER: _ClassVar[int]
+    TRACE_FIELD_NUMBER: _ClassVar[int]
+    session_id: str
+    call_attempt_id: str
+    reason: str
+    trace: TraceMetadata
+    def __init__(self, session_id: _Optional[str] = ..., call_attempt_id: _Optional[str] = ..., reason: _Optional[str] = ..., trace: _Optional[_Union[TraceMetadata, _Mapping]] = ...) -> None: ...
+
+class CancelInterviewSessionResponse(_message.Message):
+    __slots__ = ("session_id", "call_attempt_id", "cancelled", "already_terminal")
+    SESSION_ID_FIELD_NUMBER: _ClassVar[int]
+    CALL_ATTEMPT_ID_FIELD_NUMBER: _ClassVar[int]
+    CANCELLED_FIELD_NUMBER: _ClassVar[int]
+    ALREADY_TERMINAL_FIELD_NUMBER: _ClassVar[int]
+    session_id: str
+    call_attempt_id: str
+    cancelled: bool
+    already_terminal: bool
+    def __init__(self, session_id: _Optional[str] = ..., call_attempt_id: _Optional[str] = ..., cancelled: bool = ..., already_terminal: bool = ...) -> None: ...

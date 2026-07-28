@@ -1,0 +1,125 @@
+from __future__ import annotations
+
+from collections.abc import Sequence
+from typing import Any
+
+from app.modules.generation.api import (
+    GenerationApi,
+    GenerationContext,
+    GenerationRejectedError,
+    GenerationResult,
+    GenerationTimeoutError,
+    GenerationUnavailableError,
+    GenerationVisibility,
+    TicketDraft,
+)
+from app.modules.generation.internal.models import ChatMessage, ChatSession
+from app.modules.generation.internal.service import RagChatService
+from app.modules.model.api import ModelTimeoutError, ModelUnavailableError
+from app.modules.retrieval.api import (
+    RetrievalApi,
+    RetrievalQuery,
+    VisibilityScope,
+)
+
+
+class GenerationRetrievalAdapter:
+    def __init__(self, retrieval: RetrievalApi) -> None:
+        self._retrieval = retrieval
+
+    async def retrieve(
+        self,
+        *,
+        tenant_id: str,
+        knowledge_base_id: str,
+        query_text: str,
+        query_vector: Sequence[float],
+        authoritative_revision: int = 0,
+        document_ids: Sequence[str] | None = None,
+    ) -> list[Any]:
+        return await self._retrieval.retrieve(
+            RetrievalQuery(
+                tenant_id=tenant_id,
+                knowledge_base_id=knowledge_base_id,
+                query_text=query_text,
+                query_vector=tuple(float(value) for value in query_vector),
+                authoritative_revision=authoritative_revision,
+                visibility=(
+                    VisibilityScope.CUSTOMER_VISIBLE_DOCUMENTS
+                    if document_ids is not None
+                    else VisibilityScope.ALL_TENANT_DOCUMENTS
+                ),
+                document_ids=(tuple(document_ids) if document_ids is not None else None),
+            )
+        )
+
+
+class GenerationService(GenerationApi):
+    def __init__(self, delegate: RagChatService, *, default_locale: str = "vi-VN") -> None:
+        self._delegate = delegate
+        self._default_locale = default_locale
+
+    async def generate(self, context: GenerationContext) -> GenerationResult:
+        if not context.generation_id or not context.tenant_id or not context.knowledge_base_id:
+            raise GenerationRejectedError("Generation scope is incomplete")
+        if context.authoritative_revision < 0:
+            raise GenerationRejectedError("Revision must not be negative")
+        visible_ids = tuple(sorted(set(context.visible_document_ids)))
+        session = ChatSession(
+            id=context.turn_id or context.generation_id,
+            tenant_id=context.tenant_id,
+            user_id=None,
+            chatbot_id=context.chatbot_id,
+            knowledge_base_id=context.knowledge_base_id,
+            locale=context.locale or self._default_locale,
+            channel=context.channel or "EMPLOYEE_PLAYGROUND",
+            customer_answer_prompt=context.customer_answer_prompt,
+            tenant_name=context.tenant_name,
+            authoritative_revision=context.authoritative_revision,
+        )
+        history = tuple(
+            ChatMessage(role=item.role, content=item.content, sequence_number=index)
+            for index, item in enumerate(context.prior_messages[:20], start=1)
+            if item.role in {"user", "assistant", "system"}
+        )
+        try:
+            message = await self._delegate.submit_message(
+                session=session,
+                content=context.question,
+                prior_messages=history,
+                visible_document_ids=(
+                    visible_ids
+                    if context.visibility is GenerationVisibility.CUSTOMER_VISIBLE_DOCUMENTS
+                    else ()
+                ),
+            )
+        except ModelTimeoutError as exc:
+            raise GenerationTimeoutError("Model deadline exceeded") from exc
+        except ModelUnavailableError as exc:
+            raise GenerationUnavailableError("Model provider failed") from exc
+
+        if (
+            context.visibility is GenerationVisibility.CUSTOMER_VISIBLE_DOCUMENTS
+            and any(item.document_id not in visible_ids for item in message.citations)
+        ):
+            raise GenerationUnavailableError("Generated citation escaped visibility scope")
+        draft = None
+        if message.action:
+            metadata = message.action.get("metadata")
+            draft = TicketDraft(
+                title=str(message.action.get("title") or ""),
+                description=str(message.action.get("description") or ""),
+                customer_email=str(message.action.get("customer_email") or ""),
+                metadata=(
+                    {str(key): str(value) for key, value in metadata.items()}
+                    if isinstance(metadata, dict)
+                    else {}
+                ),
+            )
+        return GenerationResult(
+            generation_id=context.generation_id,
+            authoritative_revision=context.authoritative_revision,
+            answer=message.content,
+            citations=tuple(message.citations),
+            ticket_draft=draft,
+        )

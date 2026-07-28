@@ -1,0 +1,14 @@
+{
+  "schema_version": "1.0",
+  "event_id": "6319123a-820c-521c-9799-1cb552f4ee2e",
+  "event_type": "interview.session.completed",
+  "occurred_at": "2026-07-23T08:25:00Z",
+  "tenant_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+  "aggregate_id": "22222222-2222-4222-8222-222222222222",
+  "session_id": "22222222-2222-4222-8222-222222222222",
+  "call_attempt_id": "55555555-5555-4555-8555-555555555555",
+  "completion_reason": "FINISHED",
+  "connected_seconds": 900,
+  "turn_count": 18,
+  "section_results": [{"section_id": "77777777-7777-4777-8777-777777777777", "kind": "CORE", "status": "COMPLETED"}]
+}

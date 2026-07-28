@@ -4,7 +4,9 @@ import com.cacanode.api.common.exception.custom.BadRequestException;
 import com.cacanode.api.common.exception.custom.ResourceNotFoundException;
 import com.cacanode.api.common.exception.custom.UnauthorizedException;
 import com.cacanode.api.common.cache.BusinessCacheInvalidationPublisher;
-import com.cacanode.api.tenant.api.TenantModuleApi;
+import com.cacanode.api.tenant.api.TenantEntitlementApi;
+import com.cacanode.api.tenant.api.IntegrationAccessApi;
+import com.cacanode.api.tenant.api.WidgetOriginNotAllowedException;
 import com.cacanode.api.tenant.cache.IntegrationTokenCacheInvalidationPublisher;
 import com.cacanode.api.tenant.dto.IntegrationTokenDtos;
 import com.cacanode.api.tenant.model.Chatbot;
@@ -29,10 +31,10 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
-import com.cacanode.api.tenant.enums.TenantStatus;
+import com.cacanode.api.tenant.api.TenantStatus;
 
 @Service
-public class IntegrationTokenService {
+public class IntegrationTokenService implements IntegrationAccessApi {
     public static final String WIDGET_SCOPE = "widget:chat";
     public static final String API_SCOPE = "api:chat";
     private static final Set<String> ALLOWED_SCOPES = Set.of(WIDGET_SCOPE, API_SCOPE);
@@ -40,7 +42,7 @@ public class IntegrationTokenService {
 
     private final IntegrationTokenRepository repository;
     private final ChatbotRepository chatbotRepository;
-    private final TenantModuleApi tenantModuleApi;
+    private final TenantEntitlementApi tenantModuleApi;
     private final IntegrationTokenCacheInvalidationPublisher cacheInvalidationPublisher;
     @Autowired(required = false)
     private WidgetConfigRepository widgetConfigRepository;
@@ -53,7 +55,7 @@ public class IntegrationTokenService {
     public IntegrationTokenService(
             IntegrationTokenRepository repository,
             ChatbotRepository chatbotRepository,
-            TenantModuleApi tenantModuleApi,
+            TenantEntitlementApi tenantModuleApi,
             IntegrationTokenCacheInvalidationPublisher cacheInvalidationPublisher
     ) {
         this.repository = repository;
@@ -151,11 +153,6 @@ public class IntegrationTokenService {
     }
 
     @Transactional
-    public Principal authenticate(String authorization, String requiredScope) {
-        return authenticate(authorization, requiredScope, null);
-    }
-
-    @Transactional
     public Principal authenticate(String authorization, String requiredScope, String parentOrigin) {
         if (WIDGET_SCOPE.equals(requiredScope) && isWidgetPreviewAuthorization(authorization)) {
             return widgetPreviewTokenService.authenticate(authorization.substring("Bearer ".length()));
@@ -185,9 +182,9 @@ public class IntegrationTokenService {
         }
         if (WIDGET_SCOPE.equals(requiredScope)
                 && !token.getChatbot().getAllowedOrigins().isEmpty()
-                && !token.getChatbot().getAllowedOrigins().contains(parentOrigin)) {
-            throw new org.springframework.security.access.AccessDeniedException(
-                    "Website origin is not allowed");
+                && (parentOrigin == null
+                        || !token.getChatbot().getAllowedOrigins().contains(parentOrigin))) {
+            throw new WidgetOriginNotAllowedException();
         }
         if (tenantModuleApi != null && API_SCOPE.equals(requiredScope)
                 && !tenantModuleApi.getEntitlements(token.getTenant().getId()).apiAccess()) {
@@ -203,10 +200,20 @@ public class IntegrationTokenService {
         );
     }
 
+    @Override
+    public IntegrationPrincipal authenticateChatAccess(
+            String authorization, String requiredScope, String parentOrigin) {
+        Principal principal = authenticate(authorization, requiredScope, parentOrigin);
+        return new IntegrationPrincipal(principal.tokenId(), principal.tenantId(), principal.chatbotId(),
+                principal.knowledgeBaseId(), principal.scopes());
+    }
+
     @Transactional
-    public Principal authenticateForAnyChatScope(String authorization) {
+    public IntegrationPrincipal authenticateForAnyChatScope(String authorization) {
         if (isWidgetPreviewAuthorization(authorization)) {
-            return widgetPreviewTokenService.authenticate(authorization.substring("Bearer ".length()));
+            Principal principal = widgetPreviewTokenService.authenticate(authorization.substring("Bearer ".length()));
+            return new IntegrationPrincipal(principal.tokenId(), principal.tenantId(), principal.chatbotId(),
+                    principal.knowledgeBaseId(), principal.scopes());
         }
         String secret = bearerSecret(authorization);
         IntegrationToken token = findBySecret(secret);
@@ -218,10 +225,36 @@ public class IntegrationTokenService {
             throw new UnauthorizedException("Integration token does not have chat access");
         }
         token.setLastUsedAt(now);
-        return new Principal(
+        return new IntegrationPrincipal(
                 token.getId(), token.getTenant().getId(), token.getChatbot().getId(),
                 token.getChatbot().getKnowledgeBase().getId(), List.copyOf(token.getScopes())
         );
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public void validateEvidenceAccess(UUID integrationTokenId, UUID tenantId, UUID knowledgeBaseId) {
+        IntegrationToken token = repository.findWithContextById(integrationTokenId)
+                .orElseThrow(() -> new UnauthorizedException("Integration token is invalid"));
+        LocalDateTime now = LocalDateTime.now();
+        boolean apiToken = token.getScopes().contains(API_SCOPE);
+        boolean widgetToken = token.getScopes().contains(WIDGET_SCOPE);
+        boolean valid = tenantId.equals(token.getTenant().getId())
+                && knowledgeBaseId.equals(token.getChatbot().getKnowledgeBase().getId())
+                && token.getRevokedAt() == null
+                && (token.getExpiresAt() == null || token.getExpiresAt().isAfter(now))
+                && (apiToken || widgetToken)
+                && (token.getTenant().getStatus() == TenantStatus.ACTIVE
+                    || token.getTenant().getStatus() == TenantStatus.TRIAL)
+                && "ACTIVE".equals(token.getChatbot().getStatus().name())
+                && "ACTIVE".equals(token.getChatbot().getKnowledgeBase().getStatus().name());
+        if (valid && widgetToken && !apiToken && widgetConfigRepository != null) {
+            valid = widgetConfigRepository.findByChatbot_IdAndTenant_Id(
+                    token.getChatbot().getId(), tenantId).filter(config -> config.isActive()).isPresent();
+        }
+        if (!valid) {
+            throw new UnauthorizedException("Integration token is invalid");
+        }
     }
 
     public String hash(String secret) {

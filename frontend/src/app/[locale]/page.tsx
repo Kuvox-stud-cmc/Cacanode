@@ -1,5 +1,5 @@
-import ChatPlayground from "@/components/chat/ChatPlayground";
+import { RoleAwareRoot } from "@/components/app/RoleAwareRoot";
 
 export default function HomePage() {
-  return <ChatPlayground />;
+  return <RoleAwareRoot />;
 }

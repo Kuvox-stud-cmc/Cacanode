@@ -21,10 +21,9 @@ import com.cacanode.api.document.messaging.DocumentIngestionPublisher;
 import com.cacanode.api.document.messaging.DocumentStatusEvent;
 import com.cacanode.api.document.model.Document;
 import com.cacanode.api.document.repository.DocumentRepository;
-import com.cacanode.api.document.storage.DocumentStorage;
-import com.cacanode.api.tenant.api.TenantModuleApi;
-import com.cacanode.api.tenant.repository.KnowledgeBaseRepository;
-import com.cacanode.api.tenant.service.KnowledgeBaseRevisionService;
+import com.cacanode.api.common.storage.DocumentStorage;
+import com.cacanode.api.tenant.api.TenantEntitlementApi;
+import com.cacanode.api.tenant.api.TenantWorkspaceApi;
 
 class Phase4KnowledgeBaseRevisionTest {
 
@@ -34,21 +33,19 @@ class Phase4KnowledgeBaseRevisionTest {
     private final DocumentRepository documentRepository = mock(DocumentRepository.class);
     private final DocumentStorage documentStorage = mock(DocumentStorage.class);
     private final DocumentIndexCleanup indexCleanup = mock(DocumentIndexCleanup.class);
-    private final KnowledgeBaseRevisionService revisionService =
-            mock(KnowledgeBaseRevisionService.class);
+    private final TenantWorkspaceApi workspaceApi = mock(TenantWorkspaceApi.class);
     private DocumentService service;
 
     @BeforeEach
     void setUp() {
         service = new DocumentService(
                 documentRepository,
-                mock(KnowledgeBaseRepository.class),
+                workspaceApi,
                 documentStorage,
                 mock(DocumentIngestionPublisher.class),
                 indexCleanup,
                 mock(ApplicationEventPublisher.class),
-                mock(TenantModuleApi.class),
-                revisionService
+                mock(TenantEntitlementApi.class)
         );
     }
 
@@ -64,7 +61,7 @@ class Phase4KnowledgeBaseRevisionTest {
         service.updateVisibility(
                 tenantId, "TENANT_ADMIN", documentId, DocumentVisibility.EMPLOYEE_ONLY);
 
-        verify(revisionService).increment(tenantId, knowledgeBaseId);
+        verify(workspaceApi).incrementSearchRevision(tenantId, knowledgeBaseId);
     }
 
     @Test
@@ -80,7 +77,7 @@ class Phase4KnowledgeBaseRevisionTest {
         service.applyStatusEvent(event);
         service.applyStatusEvent(event);
 
-        verify(revisionService).increment(tenantId, knowledgeBaseId);
+        verify(workspaceApi).incrementSearchRevision(tenantId, knowledgeBaseId);
     }
 
     @Test
@@ -94,7 +91,7 @@ class Phase4KnowledgeBaseRevisionTest {
         verify(indexCleanup).delete(tenantId, knowledgeBaseId, documentId);
         verify(documentStorage).delete("storage-key");
         verify(documentRepository).delete(document);
-        verify(revisionService).increment(tenantId, knowledgeBaseId);
+        verify(workspaceApi).incrementSearchRevision(tenantId, knowledgeBaseId);
     }
 
     @Test
@@ -111,7 +108,7 @@ class Phase4KnowledgeBaseRevisionTest {
             // Expected: FastAPI cleanup owns the partial-attempt revision bump.
         }
 
-        verify(revisionService, never()).increment(any(), any());
+        verify(workspaceApi, never()).incrementSearchRevision(any(), any());
     }
 
     private Document document(DocumentStatus status) {

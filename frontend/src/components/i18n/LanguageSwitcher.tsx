@@ -12,6 +12,7 @@ import {
 import { usePathname, useRouter } from "@/i18n/navigation";
 import type { AppLocale } from "@/i18n/routing";
 import { cn } from "@/lib/utils";
+import { BEFORE_LOCALE_CHANGE_EVENT } from "@/hooks/useLocaleChangeDraft";
 
 type LanguageSwitcherProps = {
   className?: string;
@@ -40,6 +41,7 @@ export function LanguageSwitcher({
     const query = window.location.search;
     const hash = window.location.hash;
     const destination = `${pathname}${query}${hash}`;
+    window.dispatchEvent(new Event(BEFORE_LOCALE_CHANGE_EVENT));
     startTransition(() => router.replace(destination, { locale: nextLocale }));
   }
 

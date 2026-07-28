@@ -1,13 +1,12 @@
 package com.cacanode.api.billing.api;
 
-import com.cacanode.api.billing.dto.BillingDtos;
-import com.cacanode.api.billing.service.BillingService;
+import com.cacanode.api.billing.api.BillingDtos;
 
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
-public interface BillingModuleApi extends BillingService {
+public interface BillingModuleApi {
     List<BillingDtos.PublicPlan> plans();
 
     BillingDtos.AccountResponse account(UUID tenantId);

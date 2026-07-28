@@ -1,0 +1,281 @@
+import asyncio
+import time
+from collections.abc import AsyncIterator, Sequence
+from typing import Any
+
+import httpx
+from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
+from langchain_openai import ChatOpenAI
+from pydantic import SecretStr
+
+from app.common.metrics import AI_CHAT_MODEL_SECONDS, AI_CHAT_MODEL_TIMEOUTS_TOTAL
+from app.modules.model.api import ModelCompletion, ModelTimeoutError, ModelUnavailableError
+from app.modules.model.internal.config import ModelConfig
+
+
+def _messages(messages: Sequence[dict[str, Any]]) -> list[BaseMessage]:
+    result: list[BaseMessage] = []
+    for message in messages:
+        content = str(message.get("content", ""))
+        if message.get("role") == "system":
+            result.append(SystemMessage(content=content))
+        else:
+            result.append(HumanMessage(content=content))
+    return result
+
+
+MIN_REASONING_MODEL_OUTPUT_TOKENS = 1024
+
+
+def _is_reasoning_model(model: str) -> bool:
+    normalized = model.lower()
+    return normalized.startswith("o1") or normalized.startswith("o3") or normalized.startswith("o4")
+
+
+def _supports_temperature(model: str) -> bool:
+    return not _is_reasoning_model(model)
+
+
+def _completion_token_budget(model: str, configured_tokens: int) -> int:
+    if _is_reasoning_model(model):
+        return max(configured_tokens, MIN_REASONING_MODEL_OUTPUT_TOKENS)
+    return configured_tokens
+
+
+def _message_content_to_text(content: Any) -> str:
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            if isinstance(item, str):
+                parts.append(item)
+            elif isinstance(item, dict) and isinstance(item.get("text"), str):
+                parts.append(item["text"])
+        return "".join(parts)
+    return str(content)
+
+
+def _finish_reason(response: Any) -> str:
+    metadata = getattr(response, "response_metadata", None)
+    if isinstance(metadata, dict):
+        finish_reason = metadata.get("finish_reason")
+        if finish_reason is not None:
+            return str(finish_reason)
+    return "unknown"
+
+
+def _non_negative_token_count(value: Any) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return None
+    return value
+
+
+def _openai_usage(response: Any) -> tuple[int | None, int | None]:
+    usage = getattr(response, "usage_metadata", None)
+    if isinstance(usage, dict):
+        input_tokens = _non_negative_token_count(usage.get("input_tokens"))
+        output_tokens = _non_negative_token_count(usage.get("output_tokens"))
+        if input_tokens is not None or output_tokens is not None:
+            return input_tokens, output_tokens
+    metadata = getattr(response, "response_metadata", None)
+    token_usage = metadata.get("token_usage") if isinstance(metadata, dict) else None
+    if isinstance(token_usage, dict):
+        return (
+            _non_negative_token_count(
+                token_usage.get("prompt_tokens", token_usage.get("input_tokens"))
+            ),
+            _non_negative_token_count(
+                token_usage.get("completion_tokens", token_usage.get("output_tokens"))
+            ),
+        )
+    return None, None
+
+
+class OllamaChatModel:
+    """Adapter for Ollama's native /api/chat endpoint."""
+
+    provider = "ollama"
+
+    def __init__(self, settings: ModelConfig):
+        if not settings.LLM_MODEL_ID:
+            raise RuntimeError("LLM_MODEL_ID is not configured")
+        self._settings = settings
+        self._base_url = settings.LLM_BASE_URL.rstrip("/")
+        self.model = settings.LLM_MODEL_ID
+        self._timeout_seconds = settings.LLM_TIMEOUT_SECONDS
+
+    async def complete(self, messages: Sequence[dict[str, Any]]) -> str:
+        return (await self.complete_with_usage(messages)).content
+
+    async def complete_with_usage(self, messages: Sequence[dict[str, Any]]) -> ModelCompletion:
+        started_at = time.perf_counter()
+        outcome = "success"
+        try:
+            return await asyncio.wait_for(
+                self._complete_ollama_native(messages),
+                timeout=self._timeout_seconds,
+            )
+        except TimeoutError as exc:
+            outcome = "timeout"
+            AI_CHAT_MODEL_TIMEOUTS_TOTAL.labels(
+                provider=self.provider,
+                model=self.model,
+            ).inc()
+            raise ModelTimeoutError("Model generation timed out") from exc
+        except httpx.TimeoutException as exc:
+            outcome = "timeout"
+            AI_CHAT_MODEL_TIMEOUTS_TOTAL.labels(
+                provider=self.provider,
+                model=self.model,
+            ).inc()
+            raise ModelTimeoutError("Model generation timed out") from exc
+        except Exception as exc:
+            outcome = "error"
+            raise ModelUnavailableError("Model provider request failed") from exc
+        finally:
+            AI_CHAT_MODEL_SECONDS.labels(
+                provider=self.provider,
+                model=self.model,
+                outcome=outcome,
+            ).observe(time.perf_counter() - started_at)
+
+    async def _complete_ollama_native(self, messages: Sequence[dict[str, Any]]) -> ModelCompletion:
+        payload: dict[str, Any] = {
+            "model": self.model,
+            "messages": [
+                {"role": message.get("role", "user"), "content": str(message.get("content", ""))}
+                for message in messages
+            ],
+            "stream": False,
+            "options": {
+                "temperature": self._settings.LLM_TEMPERATURE,
+                "num_predict": self._settings.LLM_MAX_OUTPUT_TOKENS,
+            },
+        }
+        if self._settings.LLM_DISABLE_THINKING:
+            payload["think"] = False
+
+        async with httpx.AsyncClient(timeout=self._timeout_seconds) as client:
+            response = await client.post(self._ollama_chat_url(), json=payload)
+            response.raise_for_status()
+            data = response.json()
+        message = data.get("message")
+        if isinstance(message, dict):
+            return ModelCompletion(
+                content=str(message.get("content", "")),
+                input_tokens=_non_negative_token_count(data.get("prompt_eval_count")),
+                output_tokens=_non_negative_token_count(data.get("eval_count")),
+            )
+        return ModelCompletion(
+            content="",
+            input_tokens=_non_negative_token_count(data.get("prompt_eval_count")),
+            output_tokens=_non_negative_token_count(data.get("eval_count")),
+        )
+
+    def _ollama_chat_url(self) -> str:
+        base_url = self._base_url
+        if base_url.endswith("/v1"):
+            base_url = base_url[: -len("/v1")]
+        return f"{base_url}/api/chat"
+
+    async def stream(self, messages: Sequence[dict[str, Any]]) -> AsyncIterator[str]:
+        yield await self.complete(messages)
+
+
+class OpenAIChatModel:
+    """Adapter for OpenAI-hosted answer generation."""
+
+    provider = "openai"
+
+    def __init__(
+        self,
+        settings: ModelConfig,
+        *,
+        reasoning_effort: str | None = None,
+        enforce_reasoning_minimum: bool = True,
+    ):
+        if not settings.OPENAI_API_KEY:
+            raise RuntimeError("OPENAI_API_KEY is required when LLM_PROVIDER=openai")
+        if not settings.OPENAI_MODEL:
+            raise RuntimeError("OPENAI_MODEL is not configured")
+        self.model = settings.OPENAI_MODEL
+        self._timeout_seconds = settings.LLM_TIMEOUT_SECONDS
+        client_kwargs: dict[str, Any] = {
+            "api_key": SecretStr(settings.OPENAI_API_KEY),
+            "model": settings.OPENAI_MODEL,
+            "max_completion_tokens": (
+                _completion_token_budget(settings.OPENAI_MODEL, settings.LLM_MAX_OUTPUT_TOKENS)
+                if enforce_reasoning_minimum
+                else settings.LLM_MAX_OUTPUT_TOKENS
+            ),
+            "timeout": settings.LLM_TIMEOUT_SECONDS,
+        }
+        if _supports_temperature(settings.OPENAI_MODEL):
+            client_kwargs["temperature"] = settings.LLM_TEMPERATURE
+        elif reasoning_effort is not None:
+            client_kwargs["reasoning_effort"] = reasoning_effort
+        self._client = ChatOpenAI(**client_kwargs)
+
+    async def complete(self, messages: Sequence[dict[str, Any]]) -> str:
+        return (await self.complete_with_usage(messages)).content
+
+    async def complete_with_usage(self, messages: Sequence[dict[str, Any]]) -> ModelCompletion:
+        started_at = time.perf_counter()
+        outcome = "success"
+        try:
+            response = await asyncio.wait_for(
+                self._client.ainvoke(_messages(messages)),
+                timeout=self._timeout_seconds,
+            )
+            content = _message_content_to_text(response.content).strip()
+            if not content:
+                finish_reason = _finish_reason(response)
+                raise ModelUnavailableError(
+                    f"Model provider returned an empty response (finish_reason={finish_reason})"
+                )
+            input_tokens, output_tokens = _openai_usage(response)
+            return ModelCompletion(
+                content=content,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+            )
+        except TimeoutError as exc:
+            outcome = "timeout"
+            AI_CHAT_MODEL_TIMEOUTS_TOTAL.labels(
+                provider=self.provider,
+                model=self.model,
+            ).inc()
+            raise ModelTimeoutError("Model generation timed out") from exc
+        except ModelUnavailableError:
+            outcome = "error"
+            raise
+        except Exception as exc:
+            outcome = "error"
+            raise ModelUnavailableError("Model provider request failed") from exc
+        finally:
+            AI_CHAT_MODEL_SECONDS.labels(
+                provider=self.provider,
+                model=self.model,
+                outcome=outcome,
+            ).observe(time.perf_counter() - started_at)
+
+    async def stream(self, messages: Sequence[dict[str, Any]]) -> AsyncIterator[str]:
+        async for chunk in self._client.astream(_messages(messages)):
+            if chunk.content:
+                yield str(chunk.content)
+
+
+def create_chat_model(
+    settings: ModelConfig,
+    *,
+    reasoning_effort: str | None = None,
+    enforce_reasoning_minimum: bool = True,
+) -> OllamaChatModel | OpenAIChatModel:
+    if settings.LLM_PROVIDER == "openai":
+        return OpenAIChatModel(
+            settings,
+            reasoning_effort=reasoning_effort,
+            enforce_reasoning_minimum=enforce_reasoning_minimum,
+        )
+    return OllamaChatModel(settings)

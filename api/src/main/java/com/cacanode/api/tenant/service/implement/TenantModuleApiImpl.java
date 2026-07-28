@@ -1,18 +1,25 @@
 package com.cacanode.api.tenant.service.implement;
 
-import com.cacanode.api.common.event.TenantCreatedEvent;
+import com.cacanode.api.tenant.api.event.TenantCreatedEvent;
+import com.cacanode.api.tenant.api.event.TenantProjectionChangedEvent;
+import com.cacanode.api.tenant.api.event.UserProjectionChangedEvent;
 import com.cacanode.api.common.cache.BusinessCacheInvalidationPublisher;
 import com.cacanode.api.common.exception.custom.ResourceNotFoundException;
+import com.cacanode.api.common.event.durable.DurableEventPublisher;
 import com.cacanode.api.tenant.CustomerAnswerPromptDefaults;
 import com.cacanode.api.tenant.api.ApplyTenantEntitlementsCommand;
 import com.cacanode.api.tenant.api.RegisterTenantCommand;
 import com.cacanode.api.tenant.api.TenantEntitlements;
-import com.cacanode.api.tenant.api.TenantModuleApi;
+import com.cacanode.api.tenant.api.TenantIdentityApi;
+import com.cacanode.api.tenant.api.TenantEntitlementApi;
+import com.cacanode.api.tenant.api.TenantPublicProfileApi;
 import com.cacanode.api.tenant.api.TenantUserResult;
 import com.cacanode.api.tenant.cache.IntegrationTokenCacheInvalidationPublisher;
-import com.cacanode.api.tenant.dto.UserAuthDto;
-import com.cacanode.api.tenant.enums.TenantPlan;
-import com.cacanode.api.tenant.enums.TenantStatus;
+import com.cacanode.api.tenant.api.UserAuthDto;
+import com.cacanode.api.tenant.api.TenantPlan;
+import com.cacanode.api.tenant.api.TenantStatus;
+import com.cacanode.api.tenant.api.TenantKind;
+import com.cacanode.api.tenant.api.TenantKindApi;
 import com.cacanode.api.tenant.enums.UserRole;
 import com.cacanode.api.tenant.enums.UserStatus;
 import com.cacanode.api.tenant.model.Tenant;
@@ -37,16 +44,20 @@ import java.util.regex.Pattern;
 @Service
 @Slf4j(topic = "TENANT-API")
 @RequiredArgsConstructor
-public class TenantModuleApiImpl implements TenantModuleApi {
+public class TenantModuleApiImpl implements TenantIdentityApi, TenantEntitlementApi, TenantPublicProfileApi, TenantKindApi {
 
         private final PasswordEncoder passwordEncoder;
         private final TenantRepository tenantRepository;
         private final UserRepository userRepository;
+        private final com.cacanode.api.tenant.repository.InvitationRepository invitationRepository;
+        private final com.cacanode.api.tenant.service.TenantUserManagementService userManagementService;
         private final TenantWorkspaceService tenantWorkspaceService;
         private final ApplicationEventPublisher eventPublisher;
         private final IntegrationTokenCacheInvalidationPublisher cacheInvalidationPublisher;
         @Autowired(required = false)
         private BusinessCacheInvalidationPublisher businessInvalidationPublisher;
+        @Autowired(required = false)
+        private DurableEventPublisher durableEventPublisher;
 
         @Override
         @Transactional
@@ -55,6 +66,7 @@ public class TenantModuleApiImpl implements TenantModuleApi {
                 // 1. Create tenant
                 Tenant tenant = new Tenant();
                 tenant.setName(command.getCompanyName());
+                tenant.setKind(TenantKind.CUSTOMER);
                 tenant.setCustomerAnswerPrompt(
                                 CustomerAnswerPromptDefaults.forTenant(command.getCompanyName()));
                 tenant.setSlug(generateSlug(command.getCompanyName()));
@@ -83,9 +95,12 @@ public class TenantModuleApiImpl implements TenantModuleApi {
                 user.setRole(UserRole.TENANT_ADMIN);
                 user.setStatus(UserStatus.PENDING);
                 userRepository.save(user);
+                publishBusinessEvent("tenant.user.projection.changed.v1", userProjection(user));
 
-                eventPublisher.publishEvent(new TenantCreatedEvent(
-                                tenant.getId(), user.getId(), trialStartsAt, tenant.getTrialEndsAt()));
+                publishBusinessEvent("tenant.created.v1", new TenantCreatedEvent(
+                                tenant.getId(), user.getId(), trialStartsAt, tenant.getTrialEndsAt(),
+                                tenant.getName(), tenant.getStatus().name(), tenant.getPlan().name(),
+                                tenant.getMaxStorageMb(), trialStartsAt));
 
                 log.info("Tenant and admin user created: tenantId={}, userId={}", tenant.getId(), user.getId());
 
@@ -97,6 +112,7 @@ public class TenantModuleApiImpl implements TenantModuleApi {
                                 .role(user.getRole().name())
                                 .plan(tenant.getPlan().name())
                                 .status(tenant.getStatus().name())
+                                .tenantKind(tenant.getKind())
                                 .build();
         }
 
@@ -113,6 +129,7 @@ public class TenantModuleApiImpl implements TenantModuleApi {
                                                 .role(user.getRole().name())
                                                 .plan(user.getTenant().getPlan().name())
                                                 .status(user.getStatus().name())
+                                                .tenantKind(user.getTenant().getKind())
                                                 .build())
                                 .orElse(null);
         }
@@ -130,6 +147,7 @@ public class TenantModuleApiImpl implements TenantModuleApi {
                                                 .role(user.getRole().name())
                                                 .status(user.getStatus().name())
                                                 .tenantStatus(user.getTenant().getStatus().name())
+                                                .tenantKind(user.getTenant().getKind())
                                                 .build())
                                 .orElse(null);
         }
@@ -147,6 +165,7 @@ public class TenantModuleApiImpl implements TenantModuleApi {
                                                 .role(user.getRole().name())
                                                 .status(user.getStatus().name())
                                                 .tenantStatus(user.getTenant().getStatus().name())
+                                                .tenantKind(user.getTenant().getKind())
                                                 .build())
                                 .orElse(null);
         }
@@ -164,6 +183,7 @@ public class TenantModuleApiImpl implements TenantModuleApi {
 
                 user.setStatus(UserStatus.ACTIVE);
                 userRepository.save(user);
+                publishBusinessEvent("tenant.user.projection.changed.v1", userProjection(user));
 
                 log.info("User activated: userId={}, email={}", userId, user.getEmail());
 
@@ -188,8 +208,75 @@ public class TenantModuleApiImpl implements TenantModuleApi {
 
                 user.setStatus(UserStatus.SUSPENDED);
                 userRepository.save(user);
+                publishBusinessEvent("tenant.user.projection.changed.v1", userProjection(user));
 
                 log.info("User suspended due to verification abuse: userId={}, email={}", userId, user.getEmail());
+        }
+
+        @Override
+        @Transactional(readOnly = true)
+        public TenantSnapshot getTenant(UUID tenantId) {
+                Tenant tenant = tenantRepository.findById(tenantId)
+                                .orElseThrow(() -> new ResourceNotFoundException("Tenant was not found"));
+                return new TenantSnapshot(tenant.getId(), tenant.getName(), tenant.getKind());
+        }
+
+        @Override
+        @Transactional(readOnly = true)
+        public TenantPublicProfile getPublicProfile(UUID tenantId) {
+                Tenant tenant = tenantRepository.findById(tenantId)
+                                .orElseThrow(() -> new ResourceNotFoundException("Tenant was not found"));
+                if (tenant.getKind() != TenantKind.CUSTOMER) {
+                        throw new ResourceNotFoundException("Tenant was not found");
+                }
+                return new TenantPublicProfile(
+                                tenant.getId(), tenant.getSlug(), tenant.getName(), tenant.getStatus(), tenant.getKind());
+        }
+
+        @Override
+        @Transactional(readOnly = true)
+        public UserSnapshot requireUser(UUID tenantId, UUID userId) {
+                return userRepository.findByIdAndTenant_Id(userId, tenantId)
+                                .map(this::userSnapshot)
+                                .orElseThrow(() -> new ResourceNotFoundException("User was not found"));
+        }
+
+        @Override
+        @Transactional(readOnly = true)
+        public java.util.List<UserSnapshot> listUsers(UUID tenantId) {
+                return userRepository.findByTenant_IdOrderByFullNameAsc(tenantId).stream()
+                                .map(this::userSnapshot).toList();
+        }
+
+        @Override
+        public InvitationSnapshot validateInvitation(String rawToken) {
+                return userManagementService.validateInvitationToken(rawToken);
+        }
+
+        @Override
+        public AcceptedUserSnapshot acceptInvitation(String rawToken, String fullName, String passwordHash) {
+                return userManagementService.acceptInvitationToken(rawToken, fullName, passwordHash);
+        }
+
+        @Override
+        @Transactional(readOnly = true)
+        public long memberUsage(UUID tenantId, LocalDateTime now) {
+                return userRepository.countByTenant_IdAndStatus(tenantId, UserStatus.ACTIVE)
+                                + invitationRepository.countByTenant_IdAndStatusAndExpiresAtAfter(
+                                tenantId, com.cacanode.api.tenant.enums.InvitationStatus.PENDING, now);
+        }
+
+        private UserSnapshot userSnapshot(User user) {
+                return new UserSnapshot(user.getId(), user.getTenant().getId(), user.getFullName(),
+                                user.getEmail(), user.getRole().name(), user.getStatus().name(),
+                                user.getTenant().getKind());
+        }
+
+        @Override
+        @Transactional(readOnly = true)
+        public TenantKind kind(UUID tenantId) {
+                return tenantRepository.findById(tenantId).map(Tenant::getKind)
+                                .orElseThrow(() -> new ResourceNotFoundException("Tenant was not found"));
         }
 
         @Override
@@ -233,6 +320,11 @@ public class TenantModuleApiImpl implements TenantModuleApi {
                 if (businessInvalidationPublisher != null) {
                         businessInvalidationPublisher.entitlements(tenant.getId(), brandingChanged);
                 }
+                LocalDateTime now = LocalDateTime.now();
+                publishBusinessEvent("tenant.projection.changed.v1", new TenantProjectionChangedEvent(
+                                tenant.getId(), tenant.getName(), tenant.getStatus().name(),
+                                tenant.getPlan().name(), tenant.getMaxStorageMb() == null ? 0 : tenant.getMaxStorageMb(),
+                                tenant.getCreatedAt() == null ? now : tenant.getCreatedAt(), now, tenant.getKind()));
         }
 
         private TenantEntitlements toEntitlements(Tenant tenant) {
@@ -260,5 +352,20 @@ public class TenantModuleApiImpl implements TenantModuleApi {
                 }
 
                 return slug;
+        }
+
+        private void publishBusinessEvent(String stableType, Object event) {
+                if (durableEventPublisher != null) {
+                        durableEventPublisher.publish(stableType, 1, event);
+                } else {
+                        eventPublisher.publishEvent(event);
+                }
+        }
+
+        private UserProjectionChangedEvent userProjection(User user) {
+                LocalDateTime now = LocalDateTime.now();
+                return new UserProjectionChangedEvent(
+                                user.getId(), user.getTenant().getId(), user.getStatus().name(),
+                                user.getRole().name(), user.getCreatedAt() == null ? now : user.getCreatedAt(), now);
         }
 }

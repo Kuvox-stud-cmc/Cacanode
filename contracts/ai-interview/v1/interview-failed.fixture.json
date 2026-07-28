@@ -1,0 +1,15 @@
+{
+  "schema_version": "1.0",
+  "event_id": "a5cc8bb8-3dbf-5cb2-9422-e03d9b7c6bd7",
+  "event_type": "interview.session.failed",
+  "occurred_at": "2026-07-23T08:12:00Z",
+  "tenant_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+  "aggregate_id": "22222222-2222-4222-8222-222222222222",
+  "session_id": "22222222-2222-4222-8222-222222222222",
+  "call_attempt_id": "55555555-5555-4555-8555-555555555555",
+  "failure_code": "PROVIDER_TIMEOUT",
+  "retryable": true,
+  "connected_seconds": 120,
+  "last_turn_sequence": 3,
+  "detail": "Speech provider did not respond before the runtime deadline."
+}

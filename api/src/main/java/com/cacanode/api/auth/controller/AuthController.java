@@ -13,7 +13,6 @@ import com.cacanode.api.auth.dto.response.RegisterResponse;
 import com.cacanode.api.auth.dto.response.ResendVerificationResponse;
 import com.cacanode.api.auth.service.AuthService;
 import com.cacanode.api.common.exception.custom.UnauthorizedException;
-import com.cacanode.api.tenant.service.TenantUserManagementService;
 
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletResponse;
@@ -36,18 +35,17 @@ import org.springframework.web.bind.annotation.RestController;
 public class AuthController {
 
         private final AuthService authService;
-        private final TenantUserManagementService userManagementService;
 
         @GetMapping("/invitations/validate")
         public InvitationValidationResponse validateInvitation(@RequestParam String token) {
-                return userManagementService.validateInvitation(token);
+                return authService.validateInvitation(token);
         }
 
         @PostMapping("/invitations/accept")
         public ResponseEntity<AuthResponse> acceptInvitation(
                         @Valid @RequestBody AcceptInvitationRequest request,
                         HttpServletResponse response) {
-                return ResponseEntity.ok(userManagementService.acceptInvitation(request, response));
+                return ResponseEntity.ok(authService.acceptInvitation(request, response));
         }
 
         @PostMapping("/register")

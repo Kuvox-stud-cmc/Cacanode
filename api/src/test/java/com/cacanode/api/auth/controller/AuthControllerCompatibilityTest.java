@@ -31,8 +31,7 @@ class AuthControllerCompatibilityTest {
     @BeforeEach
     void setUp() {
         authService = mock(AuthService.class);
-        mvc = MockMvcBuilders.standaloneSetup(
-                new AuthController(authService, mock(TenantUserManagementService.class)))
+        mvc = MockMvcBuilders.standaloneSetup(new AuthController(authService))
                 .build();
     }
 

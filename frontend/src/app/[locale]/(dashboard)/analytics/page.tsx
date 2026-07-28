@@ -4,7 +4,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useFormatter, useTranslations } from "next-intl";
 import { useApiClient } from "@/hooks/useApiClient";
-import { getAnalytics, type AnalyticsDays, type AnalyticsResponse, type AnalyticsScope } from "@/lib/usage-api";
+import { getAnalytics, getRecruitmentAnalytics, type AnalyticsDays, type AnalyticsResponse, type AnalyticsScope, type RecruitmentAnalyticsResponse } from "@/lib/usage-api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Select,
@@ -31,6 +31,8 @@ export default function AnalyticsPage() {
   const [scope, setScope] = useState<AnalyticsScope>("CUSTOMER");
   const [range, setRange] = useState<AnalyticsDays>(30);
   const [analytics, setAnalytics] = useState<AnalyticsResponse | null>(null);
+  const [recruitmentAnalytics,setRecruitmentAnalytics]=useState<RecruitmentAnalyticsResponse|null>(null);
+  const [product,setProduct]=useState<"conversations"|"recruitment">("conversations");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [upgradeRequired, setUpgradeRequired] = useState(false);
@@ -45,11 +47,12 @@ export default function AnalyticsPage() {
         return;
       }
       setUpgradeRequired(false);
-      setAnalytics(await getAnalytics(request, scope, range, signal));
+      if(product==="recruitment")setRecruitmentAnalytics(await getRecruitmentAnalytics(request,range,signal));
+      else setAnalytics(await getAnalytics(request, scope, range, signal));
     }
     catch (cause) { if (!(cause instanceof DOMException && cause.name === "AbortError")) setError(cause instanceof Error ? cause.message : t("loadError")); }
     finally { if (!signal?.aborted) setLoading(false); }
-  }, [range, request, scope, t]);
+  }, [product,range, request, scope, t]);
 
   const formatDuration = useCallback((milliseconds: number) => milliseconds < 1000
     ? `${format.number(Math.round(milliseconds))}ms`
@@ -81,9 +84,11 @@ export default function AnalyticsPage() {
     return <Card className="mx-auto max-w-xl"><CardHeader><CardTitle>{t("proTitle")}</CardTitle></CardHeader><CardContent className="space-y-4"><p className="text-sm text-slate-600">{t("proDescription")}</p><Button onClick={() => router.push("/settings?tab=quota")}>{t("viewPlans")}</Button></CardContent></Card>;
   }
 
+  if(product==="recruitment")return <div className="space-y-6"><ProductTabs product={product} setProduct={setProduct}/>{error&&<div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">{error}</div>}<div className="flex justify-end"><RangeSelect range={range} setRange={setRange}/></div><RecruitmentAnalyticsPanel value={recruitmentAnalytics} loading={loading} format={format}/></div>;
+
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3"><h2 className="text-xl font-semibold text-slate-800">{t("title")}</h2><div className="flex rounded-lg border bg-white p-1">{scopeOptions.map(option => <button key={option.value} type="button" onClick={() => setScope(option.value)} className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${scope === option.value ? "bg-indigo-600 text-white" : "text-slate-500 hover:text-slate-800"}`}>{t(`scope.${option.labelKey}`)}</button>)}</div></div>
+      <ProductTabs product={product} setProduct={setProduct}/><div className="flex flex-wrap items-center justify-end gap-3"><div className="flex rounded-lg border bg-white p-1">{scopeOptions.map(option => <button key={option.value} type="button" onClick={() => setScope(option.value)} className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${scope === option.value ? "bg-indigo-600 text-white" : "text-slate-500 hover:text-slate-800"}`}>{t(`scope.${option.labelKey}`)}</button>)}</div></div>
 
       {error && <div role="alert" className="flex items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800"><span className="flex items-center gap-2"><AlertCircle className="size-4" />{error}</span><Button size="sm" variant="outline" onClick={() => void loadAnalytics()}>{t("retry")}</Button></div>}
       {noActivity && <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm text-slate-500">{t("noActivity")}</div>}
@@ -183,3 +188,7 @@ export default function AnalyticsPage() {
     </div>
   );
 }
+
+function ProductTabs({product,setProduct}:{product:"conversations"|"recruitment";setProduct:(value:"conversations"|"recruitment")=>void}){const t=useTranslations("Analytics");return <div className="flex flex-wrap items-center justify-between gap-3"><h2 className="text-xl font-semibold text-slate-800">{t("title")}</h2><div className="flex rounded-lg border bg-white p-1">{(["conversations","recruitment"] as const).map(value=><button key={value} type="button" onClick={()=>setProduct(value)} className={`rounded-md px-3 py-1.5 text-sm font-medium ${product===value?"bg-indigo-600 text-white":"text-slate-500"}`}>{t(`product.${value}`)}</button>)}</div></div>}
+function RangeSelect({range,setRange}:{range:AnalyticsDays;setRange:(value:AnalyticsDays)=>void}){const t=useTranslations("Analytics");return <Select value={String(range)} onValueChange={v=>setRange(Number(v) as AnalyticsDays)}><SelectTrigger className="w-36"><SelectValue/></SelectTrigger><SelectContent>{[7,30,90].map(value=><SelectItem key={value} value={String(value)}>{t("lastDays",{count:value})}</SelectItem>)}</SelectContent></Select>}
+function RecruitmentAnalyticsPanel({value,loading,format}:{value:RecruitmentAnalyticsResponse|null;loading:boolean;format:ReturnType<typeof useFormatter>}){const t=useTranslations("Analytics");const metrics=value?[value.jobsPublished,value.verifiedApplicationsSubmitted,value.completedInterviews,value.unsuccessfulInterviews]:[];const labels=["jobsPublished","applicationsSubmitted","interviewsCompleted","interviewsUnsuccessful"] as const;const distributions=value?[["jobStatuses",value.jobStatusDistribution],["applicationStatuses",value.applicationStatusDistribution],["interviewStatuses",value.interviewStatusDistribution]] as const:[];return <div className="space-y-5" aria-live="polite"><div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">{labels.map((label,index)=><Card key={label}><CardContent className="p-5"><p className="text-sm text-slate-500">{t(`recruitment.${label}`)}</p><p className="mt-2 text-2xl font-bold">{loading?"…":format.number(metrics[index]?.value??0)}</p><p className="text-xs text-slate-500">{t("vsLastPeriod",{value:format.number(metrics[index]?.percentageChange??0,{maximumFractionDigits:1,signDisplay:"exceptZero"}),suffix:"%"})}</p></CardContent></Card>)}</div><div className="grid gap-4 lg:grid-cols-3">{distributions.map(([label,distribution])=><Card key={label}><CardHeader><CardTitle className="text-base">{t(`recruitment.${label}`)}</CardTitle></CardHeader><CardContent className="space-y-2">{Object.entries(distribution).map(([itemStatus,count])=><div key={itemStatus} className="flex justify-between text-sm"><span>{itemStatus.replaceAll("_"," ")}</span><strong>{format.number(count)}</strong></div>)}</CardContent></Card>)}</div></div>}

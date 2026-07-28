@@ -10,10 +10,13 @@ import jakarta.persistence.LockModeType;
 import java.util.Optional;
 
 import java.util.UUID;
+import com.cacanode.api.tenant.api.TenantKind;
 
 public interface TenantRepository extends JpaRepository<Tenant, UUID> {
 
     boolean existsBySlug(String slug);
+
+    Optional<Tenant> findByKind(TenantKind kind);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select t from Tenant t where t.id = :tenantId")

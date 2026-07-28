@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
-from app.core.cache import (
+from app.common.cache import (
     CacheKeyFactory,
     CacheOperationStatus,
     CacheReadResult,
@@ -13,7 +13,7 @@ from app.core.cache import (
     RedisCacheStore,
     TtlJitter,
 )
-from app.core.metrics import CACHE_OPERATIONS_TOTAL, REDIS_OPERATIONS_TOTAL
+from app.common.metrics import CACHE_OPERATIONS_TOTAL, REDIS_OPERATIONS_TOTAL
 
 
 def test_cache_key_factory_builds_versioned_trusted_keys() -> None:

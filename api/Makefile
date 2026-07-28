@@ -8,11 +8,18 @@ UVICORN_ARGS ?=
 PYTEST_ARGS ?=
 PROFILE ?= dev
 ENV_FILE ?= .env
+TEST_ENV_FILE ?=
 ROOT_COMPOSE_FILE ?= ../docker-compose.yml
 DEV_SEED_FILE ?= src/main/resources/db/seed/dev/default_tenant_account.sql
 
+ifneq (,$(wildcard $(ENV_FILE)))
+include $(ENV_FILE)
+export
+endif
+
 ifeq ($(OS),Windows_NT)
-MVNW ?= ./mvnw.cmd
+SHELL := cmd.exe
+MVNW ?= mvnw.cmd
 ENV_RUN ?=
 VENV_PYTHON := $(VENV)/Scripts/python.exe
 REMOVE := powershell -NoProfile -Command Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
@@ -23,9 +30,15 @@ VENV_PYTHON := $(VENV)/bin/python
 REMOVE := rm -rf
 endif
 
-FLYWAY_PROPS = -Dflyway.url="$${POSTGRES_URL}" -Dflyway.user="$${POSTGRES_USER}" -Dflyway.password="$${POSTGRES_PASSWORD}" -Dflyway.locations=filesystem:src/main/resources/db/migration
+ifneq ($(strip $(TEST_ENV_FILE)),)
+TEST_ENV_RUN := set -a; [ ! -f $(TEST_ENV_FILE) ] || . ./$(TEST_ENV_FILE); set +a;
+else
+TEST_ENV_RUN :=
+endif
 
-.PHONY: help deps run dev run-dev run-prod test verify package clean migrate migrate-info migrate-validate migrate-repair migrate-baseline db-reset db-seed db-reset-seed baseline-credentials
+FLYWAY_PROPS = -Dflyway.url="$(POSTGRES_URL)" -Dflyway.user="$(POSTGRES_USER)" -Dflyway.password="$(POSTGRES_PASSWORD)" -Dflyway.locations=filesystem:src/main/resources/db/migration
+
+.PHONY: help deps run dev run-dev run-prod seed-platform-admin test verify package clean migrate migrate-info migrate-validate migrate-repair migrate-baseline db-reset db-seed db-reset-seed baseline-credentials
 
 help:
 	$(info Available targets:)
@@ -34,6 +47,7 @@ help:
 	$(info   make dev        Run Spring Boot with the dev profile)
 	$(info   make run-dev    Run Spring Boot with the dev profile)
 	$(info   make run-prod   Run Spring Boot with the prod profile)
+	$(info   make seed-platform-admin  Interactively seed the first platform administrator)
 	$(info   make test       Run tests with the test profile)
 	$(info   make verify     Run the full Maven verification lifecycle)
 	$(info   make package    Build the production JAR)
@@ -43,9 +57,9 @@ help:
 	$(info   make migrate-validate Validate applied Flyway migrations)
 	$(info   make migrate-repair   Repair Flyway metadata)
 	$(info   make migrate-baseline Baseline an existing non-empty database)
-	$(info   make db-reset         Reset local Postgres volume, restart it, then migrate)
+	$(info   make db-reset         Reset local Postgres, Qdrant, Kuzu, and SeaweedFS data, restart them, then migrate)
 	$(info   make db-seed          Seed local dev tenant and admin account)
-	$(info   make db-reset-seed    Reset local Postgres, migrate, then seed)
+	$(info   make db-reset-seed    Reset local persisted application data, migrate, then seed)
 	$(info   make baseline-credentials Print disposable baseline bearer-token exports for the seeded account)
 	$(info Optional variables: PROFILE=dev ENV_FILE=.env MAVEN_ARGS=...)
 
@@ -63,11 +77,15 @@ run-dev:
 run-prod:
 	$(ENV_RUN) $(MVNW) -Pprod spring-boot:run $(MAVEN_ARGS)
 
+seed-platform-admin:
+	$(ENV_RUN) $(MVNW) -P$(PROFILE) package -DskipTests $(MAVEN_ARGS)
+	$(ENV_RUN) java -jar target/cacanode-api.jar --app.command.mode=seed-platform-admin --server.port=0 --spring.task.scheduling.enabled=false
+
 test:
-	$(ENV_RUN) $(MVNW) -Ptest -Dspring.profiles.active=test test $(MAVEN_ARGS)
+	$(TEST_ENV_RUN) $(MVNW) -Ptest -Dspring.profiles.active=test test $(MAVEN_ARGS)
 
 verify:
-	$(ENV_RUN) $(MVNW) -Ptest -Dspring.profiles.active=test verify $(MAVEN_ARGS)
+	$(TEST_ENV_RUN) $(MVNW) -Ptest -Dspring.profiles.active=test verify $(MAVEN_ARGS)
 
 package:
 	$(ENV_RUN) $(MVNW) -Pprod clean package $(MAVEN_ARGS)
@@ -91,12 +109,16 @@ migrate-baseline:
 	$(ENV_RUN) $(MVNW) flyway:baseline $(FLYWAY_PROPS) $(MAVEN_ARGS)
 
 db-reset:
-	$(ENV_RUN) docker compose --env-file $(ENV_FILE) -f $(ROOT_COMPOSE_FILE) down --volumes postgres
-	$(ENV_RUN) docker compose --env-file $(ENV_FILE) -f $(ROOT_COMPOSE_FILE) up -d postgres
+	$(ENV_RUN) docker compose --env-file $(ENV_FILE) -f $(ROOT_COMPOSE_FILE) rm -s -f \
+		postgres qdrant graph-service seaweedfs-s3 seaweedfs-filer seaweedfs-volume seaweedfs-master
+	$(ENV_RUN) $(PYTHON) scripts/clean_docker_volumes.py $(ENV_FILE) $(ROOT_COMPOSE_FILE)
+	$(ENV_RUN) docker compose --env-file $(ENV_FILE) -f $(ROOT_COMPOSE_FILE) up -d --wait --wait-timeout 120 \
+		postgres qdrant graph-service seaweedfs-master seaweedfs-volume seaweedfs-filer seaweedfs-s3
 	$(MAKE) migrate ENV_FILE=$(ENV_FILE)
 
 db-seed:
-	$(ENV_RUN) docker compose --env-file $(ENV_FILE) -f $(ROOT_COMPOSE_FILE) exec -T postgres psql -v ON_ERROR_STOP=1 -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}" < $(DEV_SEED_FILE)
+	$(ENV_RUN) docker compose --env-file $(ENV_FILE) -f $(ROOT_COMPOSE_FILE) exec -T postgres psql -v ON_ERROR_STOP=1 -U "$(POSTGRES_USER)" -d "$(POSTGRES_DB)" < $(DEV_SEED_FILE)
+	$(ENV_RUN) docker compose --env-file $(ENV_FILE) -f $(ROOT_COMPOSE_FILE) exec -T postgres psql -v ON_ERROR_STOP=1 -U "$(POSTGRES_USER)" -d "$(POSTGRES_DB)" < src/main/resources/db/seed/dev/platform_admin.sql
 
 db-reset-seed: db-reset db-seed
 

@@ -16,6 +16,9 @@ public interface UserRepository extends JpaRepository<User, UUID> {
     @EntityGraph(attributePaths = "tenant")
     Optional<User> findByEmail(String email);
 
+    @EntityGraph(attributePaths = "tenant")
+    Optional<User> findByEmailIgnoreCase(String email);
+
     boolean existsByEmail(String email);
 
     boolean existsByEmailIgnoreCase(String email);

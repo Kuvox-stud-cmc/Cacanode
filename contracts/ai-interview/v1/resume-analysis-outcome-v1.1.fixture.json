@@ -1,0 +1,8 @@
+{
+  "schema_version":"1.1","event_id":"b429a511-c8e6-5faa-a994-87c64b8c895d","event_type":"interview.resume-analysis.outcome","occurred_at":"2026-07-24T08:00:05Z",
+  "tenant_id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","aggregate_id":"a0a33694-cb7b-526c-bb6a-8b0bd88c094a","analysis_id":"a0a33694-cb7b-526c-bb6a-8b0bd88c094a","application_id":"33333333-3333-4333-8333-333333333333",
+  "cv_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","analysis_mode":"PERSONALIZED_QUESTIONS","policy_version":"cv-redaction-v1","model_version":"resume-analysis-v1","status":"COMPLETED","summary":"Backend engineer with experience building event-driven Java services.",
+  "evidence":[{"anchor_id":"a-001","excerpt":"Built event-driven services with Java and RabbitMQ","source_location":"page 1, segment 2"}],
+  "skills":[{"name":"Java","evidence_anchor_ids":["a-001"]},{"name":"RabbitMQ","evidence_anchor_ids":["a-001"]}],
+  "personalized_questions":[{"question_id":"03c059e5-7526-5e1c-85d5-2606c6318351","target_section_id":"55555555-5555-4555-8555-555555555555","prompt":"How did you make the event-driven service resilient to duplicate delivery?","competency":"Distributed systems","rubric":"Look for idempotency, durable state, retries, and observability.","evidence_anchor_ids":["a-001"]}],"error_code":null
+}

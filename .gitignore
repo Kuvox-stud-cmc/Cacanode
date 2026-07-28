@@ -12,6 +12,8 @@ desktop.ini
 # ─── Logs ────────────────────────────────────────────────────────────────────
 *.log
 rag-chatbot-fastapi/artifacts/cache-baseline*.json
+frontend/playwright-report/
+frontend/test-results/
 
 # ─── Docker override (local only) ────────────────────────────────────────────
 docker-compose.override.yml

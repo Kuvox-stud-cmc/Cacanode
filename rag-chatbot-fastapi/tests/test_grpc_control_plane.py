@@ -3,10 +3,17 @@ from __future__ import annotations
 import grpc
 import pytest
 
-from app.core.config import Settings
+from app.bootstrap.grpc import InferenceGrpcService
 from app.generated import cacanode_ai_v1_pb2 as pb
-from app.grpc_service import InferenceGrpcService
-from app.rag.models import AssistantMessage, Citation
+from app.modules.generation.api import (
+    Citation,
+    GenerationContext,
+    GenerationResult,
+    GenerationUnavailableError,
+    GenerationVisibility,
+)
+from app.modules.generation.transport.grpc import GenerationGrpcHandler
+from app.modules.generation.transport.result_cache import ProtobufGenerationResultCache
 
 
 class Redis:
@@ -26,36 +33,65 @@ class Context:
         raise RuntimeError(f"{code.name}:{details}")
 
 
-class Runtime:
+class Generation:
     def __init__(self) -> None:
         self.calls = 0
-        self.store: object | None = None
+        self.context: GenerationContext | None = None
 
-    def chat_service(self, store: object) -> object:
-        self.store = store
-        runtime = self
+    async def generate(self, context: GenerationContext) -> GenerationResult:
+        self.calls += 1
+        self.context = context
+        if (
+            context.visibility is GenerationVisibility.CUSTOMER_VISIBLE_DOCUMENTS
+            and "doc-1" not in context.visible_document_ids
+        ):
+            raise GenerationUnavailableError(
+                "Generated citation escaped visibility scope"
+            )
+        return GenerationResult(
+            generation_id=context.generation_id,
+            authoritative_revision=context.authoritative_revision,
+            answer="Grounded answer [S1].",
+            citations=(
+                Citation(
+                    id="S1",
+                    document_id="doc-1",
+                    source_name="source.txt",
+                    page_number=1,
+                    chunk_index=0,
+                    score=0.9,
+                    snippet="Grounded source",
+                ),
+            ),
+        )
 
-        class Service:
-            async def submit_message(self, **kwargs: object) -> AssistantMessage:
-                del kwargs
-                runtime.calls += 1
-                return AssistantMessage(
-                    role="assistant",
-                    content="Grounded answer [S1].",
-                    citations=[
-                        Citation(
-                            id="S1",
-                            document_id="doc-1",
-                            source_name="source.txt",
-                            page_number=1,
-                            chunk_index=0,
-                            score=0.9,
-                            snippet="Grounded source",
-                        )
-                    ],
-                )
 
-        return Service()
+class Unused:
+    async def list_document_units(self, request: object, context: object) -> object:
+        raise AssertionError
+
+    async def delete_document_index(self, request: object, context: object) -> object:
+        raise AssertionError
+
+    async def prepare(self, request: object, context: object) -> object:
+        raise AssertionError
+
+    async def cancel(self, request: object, context: object) -> object:
+        raise AssertionError
+
+
+def service(generation: Generation, redis: Redis) -> InferenceGrpcService:
+    return InferenceGrpcService(
+        GenerationGrpcHandler(
+            generation,
+            ProtobufGenerationResultCache(
+                redis, prefix="ccn:v1", ttl_seconds=600  # type: ignore[arg-type]
+            ),
+        ),
+        Unused(),  # type: ignore[arg-type]
+        Unused(),  # type: ignore[arg-type]
+        Unused(),  # type: ignore[arg-type]
+    )
 
 
 def request() -> pb.GenerateAnswerRequest:
@@ -80,38 +116,28 @@ def request() -> pb.GenerateAnswerRequest:
 
 @pytest.mark.asyncio
 async def test_generation_context_is_supplied_and_result_is_deduplicated() -> None:
-    runtime = Runtime()
+    generation = Generation()
     redis = Redis()
-    service = InferenceGrpcService(
-        Settings(_env_file=()),
-        runtime,
-        redis,  # type: ignore[arg-type]
-    )
+    grpc_service = service(generation, redis)
 
-    first = await service.GenerateAnswer(request(), Context())  # type: ignore[arg-type]
-    second = await service.GenerateAnswer(request(), Context())  # type: ignore[arg-type]
+    first = await grpc_service.GenerateAnswer(request(), Context())  # type: ignore[arg-type]
+    second = await grpc_service.GenerateAnswer(request(), Context())  # type: ignore[arg-type]
 
     assert first.authoritative_revision == 7
     assert first.citations[0].document_id == "doc-1"
-    assert runtime.calls == 1
+    assert generation.calls == 1
     assert second.cache_tier == "generation_id"
-    assert runtime.store is not None
-    assert runtime.store.session.authoritative_revision == 7  # type: ignore[attr-defined]
-    assert [item.content for item in runtime.store.prior_messages] == [  # type: ignore[attr-defined]
-        "Earlier"
-    ]
+    assert generation.context is not None
+    assert generation.context.authoritative_revision == 7
+    assert [item.content for item in generation.context.prior_messages] == ["Earlier"]
 
 
 @pytest.mark.asyncio
 async def test_customer_visibility_rejects_out_of_scope_citation() -> None:
-    runtime = Runtime()
-    service = InferenceGrpcService(
-        Settings(_env_file=()),
-        runtime,
-        Redis(),  # type: ignore[arg-type]
-    )
     invalid = request()
     invalid.visible_document_ids[:] = []
 
     with pytest.raises(RuntimeError, match="visibility scope"):
-        await service.GenerateAnswer(invalid, Context())  # type: ignore[arg-type]
+        await service(Generation(), Redis()).GenerateAnswer(
+            invalid, Context()  # type: ignore[arg-type]
+        )

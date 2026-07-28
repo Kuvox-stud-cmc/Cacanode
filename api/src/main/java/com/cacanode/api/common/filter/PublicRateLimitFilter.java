@@ -24,7 +24,6 @@ import java.util.HexFormat;
 import java.util.List;
 
 @Component
-@RequiredArgsConstructor
 @Slf4j
 public class PublicRateLimitFilter extends OncePerRequestFilter {
 
@@ -37,6 +36,14 @@ public class PublicRateLimitFilter extends OncePerRequestFilter {
 
     private final StringRedisTemplate redisTemplate;
     private final CacheMetrics cacheMetrics;
+    private final TrustedProxyClientIpResolver clientIps;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public PublicRateLimitFilter(StringRedisTemplate redisTemplate,CacheMetrics cacheMetrics,
+            TrustedProxyClientIpResolver clientIps){this.redisTemplate=redisTemplate;this.cacheMetrics=cacheMetrics;this.clientIps=clientIps;}
+    PublicRateLimitFilter(StringRedisTemplate redisTemplate,CacheMetrics cacheMetrics){
+        this(redisTemplate,cacheMetrics,new TrustedProxyClientIpResolver("127.0.0.1/32,::1/128"));
+    }
 
     @Value("${app.rate-limit.enabled:true}")
     private boolean enabled;
@@ -51,6 +58,9 @@ public class PublicRateLimitFilter extends OncePerRequestFilter {
         }
         String path = request.getRequestURI();
         if (path.equals("/api/v1/public/billing/payos/webhook")) {
+            return true;
+        }
+        if (path.startsWith("/api/v1/public/twilio/interviews/")) {
             return true;
         }
         return !(path.startsWith("/api/v1/auth/")
@@ -117,17 +127,11 @@ public class PublicRateLimitFilter extends OncePerRequestFilter {
     }
 
     private String clientIdentity(HttpServletRequest request) {
-        String forwardedFor = request.getHeader("X-Forwarded-For");
         String authorization = request.getHeader(HttpHeaders.AUTHORIZATION);
         if (authorization != null && !authorization.isBlank()) {
             return sha256(authorization);
         }
-        String ipAddress = request.getRemoteAddr();
-        if (forwardedFor != null && !forwardedFor.isBlank()) {
-            String[] addresses = forwardedFor.split(",");
-            ipAddress = addresses[addresses.length - 1].trim();
-        }
-        return sha256(ipAddress);
+        return sha256(clientIps.resolve(request));
     }
 
     private String sha256(String value) {

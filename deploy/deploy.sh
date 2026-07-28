@@ -22,7 +22,8 @@ if ! flock -n 9; then
   exit 1
 fi
 
-compose=(docker compose --project-name "${PROJECT_NAME}" --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}")
+compose=(docker compose --project-name "${PROJECT_NAME}" --env-file "${ENV_FILE}" \
+  -f "${COMPOSE_FILE}" --profile dedicated-workers)
 
 env_value() {
   local name="$1"
@@ -37,8 +38,15 @@ is_unconfigured() {
 embedding_model="$(env_value TEXT_EMBEDDING_MODEL_ID)"
 public_url="$(env_value ADMIN_WEB_URL)"
 reranker_enabled="$(env_value RERANKER_ENABLED)"
+worker_mode="$(env_value WORKER_MODE)"
 embedding_model="${embedding_model:-embeddinggemma}"
 reranker_enabled="${reranker_enabled:-true}"
+worker_mode="${worker_mode:-disabled}"
+
+if [[ "${worker_mode}" != "disabled" ]]; then
+  echo "Production AI API must use WORKER_MODE=disabled; the dedicated worker is deployed separately" >&2
+  exit 1
+fi
 
 for required_name in \
   DEPLOY_DOMAIN CADDY_ACME_EMAIL ADMIN_WEB_URL PUBLIC_API_BASE_URL \
@@ -53,6 +61,26 @@ for required_name in \
     exit 1
   fi
 done
+
+calling_enabled="$(env_value RECRUITMENT_CALLING_ENABLED)"
+if [[ "${calling_enabled,,}" == "true" ]]; then
+  engine_enabled="$(env_value INTERVIEW_ENGINE_ENABLED)"
+  smoke_enabled="$(env_value INTERVIEW_TRANSPORT_SMOKE_MODE)"
+  if [[ "${engine_enabled,,}" != "true" || "${smoke_enabled,,}" == "true" ]]; then
+    echo "Production calling requires INTERVIEW_ENGINE_ENABLED=true and smoke mode off" >&2
+    exit 1
+  fi
+  for interview_name in TWILIO_ACCOUNT_SID TWILIO_API_KEY_SID TWILIO_API_KEY_SECRET \
+    TWILIO_AUTH_TOKEN TWILIO_FROM_NUMBER TWILIO_CALLBACK_BASE_URL \
+    TWILIO_MEDIA_STREAM_WSS_URL CARTESIA_API_KEY CARTESIA_ENGLISH_VOICE_ID \
+    CARTESIA_VIETNAMESE_VOICE_ID INTERVIEW_RUNTIME_TOKEN_SECRET; do
+    interview_value="$(env_value "${interview_name}")"
+    if is_unconfigured "${interview_value}"; then
+      echo "${interview_name} is required when recruitment calling is enabled" >&2
+      exit 1
+    fi
+  done
+fi
 
 sendgrid_api_key="$(env_value SENDGRID_API_KEY)"
 brevo_api_key="$(env_value BREVO_API_KEY)"
@@ -113,6 +141,25 @@ COMPOSE_PARALLEL_LIMIT=1 "${compose[@]}" pull \
 COMPOSE_PARALLEL_LIMIT=1 "${compose[@]}" build --pull \
   admin-web business-api ai-api graph-service
 
+# Pause ingestion before taking pre-activation snapshots. RabbitMQ continues accepting requests.
+"${compose[@]}" stop document-worker >/dev/null 2>&1 || true
+snapshot_id="$(date -u +%Y%m%dT%H%M%SZ)"
+if "${compose[@]}" ps --status running --services | grep -qx redis; then
+  "${compose[@]}" exec -T redis redis-cli SAVE >/dev/null
+  "${compose[@]}" exec -T redis sh -c \
+    "cp /data/dump.rdb /data/pre-activation-${snapshot_id}.rdb"
+fi
+if "${compose[@]}" ps --status running --services | grep -qx qdrant && \
+   "${compose[@]}" ps --status running --services | grep -qx ai-api; then
+  "${compose[@]}" exec -T ai-api python -c \
+    "import os,urllib.request; r=urllib.request.Request('http://qdrant:6333/snapshots',method='POST',headers={'api-key':os.getenv('QDRANT_API_KEY','')}); urllib.request.urlopen(r,timeout=30).read()"
+fi
+if "${compose[@]}" ps --status running --services | grep -qx graph-service; then
+  "${compose[@]}" stop graph-service
+  "${compose[@]}" run --rm --no-deps graph-service python -c \
+    "import shutil; shutil.make_archive('/backups/kuzu-${snapshot_id}','gztar','/data/kuzu')"
+fi
+
 "${compose[@]}" up -d ollama
 for attempt in {1..24}; do
   if "${compose[@]}" exec -T ollama ollama list >/dev/null 2>&1; then
@@ -126,7 +173,11 @@ for attempt in {1..24}; do
 done
 
 "${compose[@]}" exec -T ollama ollama pull "${embedding_model}"
-"${compose[@]}" up -d --remove-orphans --wait --wait-timeout 300
+# Activate the graph role first, then API roles, then resume the dedicated worker.
+"${compose[@]}" up -d --wait --wait-timeout 300 graph-service
+"${compose[@]}" up -d --remove-orphans --wait --wait-timeout 300 \
+  --scale document-worker=0
+"${compose[@]}" up -d --wait --wait-timeout 300 document-worker
 
 if [[ "${reranker_enabled,,}" == "true" ]]; then
   for attempt in {1..60}; do

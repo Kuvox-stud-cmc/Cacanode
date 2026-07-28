@@ -9,15 +9,15 @@ from datetime import timedelta
 import pytest
 from prometheus_client import REGISTRY
 
-from app.core.cache import (
+from app.bootstrap.settings import Settings
+from app.common.cache import (
     CacheOperationStatus,
     CacheReadResult,
     CacheReadStatus,
     CacheStore,
 )
-from app.core.concurrent_loads import ConcurrentLoadTracker
-from app.core.config import Settings
-from app.ingestion.embedding import (
+from app.common.concurrent_loads import ConcurrentLoadTracker
+from app.modules.model.internal.embedding import (
     CachedEmbeddingClient,
     EmbeddingCacheKeyBuilder,
     EmbeddingClient,
@@ -190,11 +190,11 @@ async def test_query_overlap_is_observed_without_coalescing_or_waiting(
 ) -> None:
     starts: list[int] = []
     monkeypatch.setattr(
-        "app.core.concurrent_loads.record_authoritative_load_started",
+        "app.common.concurrent_loads.record_authoritative_load_started",
         lambda _cache, concurrency: starts.append(concurrency),
     )
     monkeypatch.setattr(
-        "app.core.concurrent_loads.record_authoritative_load_finished", lambda *_: None
+        "app.common.concurrent_loads.record_authoritative_load_finished", lambda *_: None
     )
     entered = 0
     release = asyncio.Event()
@@ -228,11 +228,11 @@ async def test_document_batch_observes_each_unique_missed_key_and_preserves_orde
 ) -> None:
     starts: list[int] = []
     monkeypatch.setattr(
-        "app.core.concurrent_loads.record_authoritative_load_started",
+        "app.common.concurrent_loads.record_authoritative_load_started",
         lambda _cache, concurrency: starts.append(concurrency),
     )
     monkeypatch.setattr(
-        "app.core.concurrent_loads.record_authoritative_load_finished", lambda *_: None
+        "app.common.concurrent_loads.record_authoritative_load_finished", lambda *_: None
     )
     tracker = ConcurrentLoadTracker()
     delegate = RecordingEmbeddingClient({"first": [1.0, 0.0, 0.0], "second": [0.0, 1.0, 0.0]})
@@ -348,7 +348,7 @@ async def test_unique_misses_still_respect_underlying_ollama_batch_limit(
             calls.append(inputs)
             return Response(inputs)
 
-    monkeypatch.setattr("app.ingestion.embedding.httpx.AsyncClient", HttpClient)
+    monkeypatch.setattr("app.modules.model.internal.embedding.httpx.AsyncClient", HttpClient)
     settings = Settings(_env_file=(), TEXT_EMBEDDING_DIMENSION=2, TEXT_EMBEDDING_BATCH_SIZE=2)
     store = MemoryCacheStore()
     client = CachedEmbeddingClient(

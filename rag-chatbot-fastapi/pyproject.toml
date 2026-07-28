@@ -10,6 +10,7 @@ requires-python = ">=3.11,<3.13"
 dependencies = [
     "aio-pika==9.6.2",
     "boto3==1.42.94",
+    "cartesia[websockets]==3.5.0",
     "fastapi==0.136.0",
     "grpcio>=1.71,<2",
     "fastembed==0.8.0",
@@ -33,6 +34,8 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
+    "grpcio-tools==1.71.0",
+    "jsonschema>=4.23,<5",
     "mypy>=1.15,<2",
     "pytest>=9,<10",
     "pytest-asyncio>=1.0,<2",

@@ -4,7 +4,7 @@ import com.cacanode.api.auth.dto.request.MobileLoginRequest;
 import com.cacanode.api.auth.dto.request.LoginRequest;
 import com.cacanode.api.auth.dto.response.LoginStep1Response;
 import com.cacanode.api.auth.dto.response.MobileAuthResponse;
-import com.cacanode.api.auth.enums.Login2FAChallengeType;
+import com.cacanode.api.auth.api.Login2FAChallengeType;
 import com.cacanode.api.auth.model.Login2FAState;
 import com.cacanode.api.auth.model.RefreshToken;
 import com.cacanode.api.auth.repository.Login2FAStateRepository;
@@ -13,10 +13,10 @@ import com.cacanode.api.auth.repository.UserSuspensionStateRepository;
 import com.cacanode.api.auth.repository.VerificationResendStateRepository;
 import com.cacanode.api.auth.service.implement.AuthServiceImpl;
 import com.cacanode.api.common.exception.custom.UnauthorizedException;
-import com.cacanode.api.common.event.Login2FARequestedEvent;
-import com.cacanode.api.tenant.api.TenantModuleApi;
+import com.cacanode.api.auth.api.event.Login2FARequestedEvent;
+import com.cacanode.api.tenant.api.TenantIdentityApi;
 import com.cacanode.api.tenant.api.TenantUserResult;
-import com.cacanode.api.tenant.dto.UserAuthDto;
+import com.cacanode.api.tenant.api.UserAuthDto;
 import io.jsonwebtoken.Claims;
 import jakarta.servlet.http.HttpServletResponse;
 import org.junit.jupiter.api.BeforeEach;
@@ -47,7 +47,7 @@ import static org.mockito.Mockito.when;
 
 class AuthServiceImplTest {
 
-    private TenantModuleApi tenants;
+    private TenantIdentityApi tenants;
     private RefreshTokenRepository refreshTokens;
     private UserSuspensionStateRepository suspensions;
     private Login2FAStateRepository loginStates;
@@ -63,7 +63,7 @@ class AuthServiceImplTest {
 
     @BeforeEach
     void setUp() {
-        tenants = mock(TenantModuleApi.class);
+        tenants = mock(TenantIdentityApi.class);
         refreshTokens = mock(RefreshTokenRepository.class);
         suspensions = mock(UserSuspensionStateRepository.class);
         loginStates = mock(Login2FAStateRepository.class);
@@ -155,13 +155,10 @@ class AuthServiceImplTest {
         assertTrue(challenge.getExpiresAt().isAfter(LocalDateTime.now().plusMinutes(9)));
         assertTrue(challenge.getExpiresAt().isBefore(LocalDateTime.now().plusMinutes(11)));
         assertEquals(0, challenge.getVerificationAttemptCount());
-        ArgumentCaptor<ApplicationEvent> published = ArgumentCaptor.forClass(ApplicationEvent.class);
-        verify(events, times(2)).publishEvent(published.capture());
-        Login2FARequestedEvent codeEvent = published.getAllValues().stream()
-                .filter(Login2FARequestedEvent.class::isInstance)
-                .map(Login2FARequestedEvent.class::cast)
-                .findFirst()
-                .orElseThrow();
+        ArgumentCaptor<Object> published = ArgumentCaptor.forClass(Object.class);
+        verify(events).publishEvent(published.capture());
+        Login2FARequestedEvent codeEvent = (Login2FARequestedEvent) published.getValue();
+        verify(events).publishEvent(any(ApplicationEvent.class));
         assertTrue(codeEvent.getVerificationSecret().matches("\\d{6}"));
         assertTrue(passwordEncoder.matches(codeEvent.getVerificationSecret(), challenge.getTokenHash()));
         assertFalse(challenge.getTokenHash().contains(codeEvent.getVerificationSecret()));

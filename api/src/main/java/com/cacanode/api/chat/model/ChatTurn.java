@@ -58,4 +58,7 @@ public class ChatTurn extends BaseEntity {
 
     @Column(name = "failure_code", length = 100)
     private String failureCode;
+
+    @Column(name = "quota_consumption_id")
+    private UUID quotaConsumptionId;
 }

@@ -17,7 +17,7 @@ import {
 import { useAuthStore } from "@/components/providers/StoreProvider"
 import { authApiErrorMessage, verifyEmailApi } from "@/lib/auth-api"
 import {
-  consumeAuthDestination,
+  consumeAuthDestinationForRole,
   rememberAuthDestination,
   safeInternalPath,
   withNext,
@@ -48,7 +48,7 @@ function VerifyEmailContent() {
         setStatus("success")
         // Redirect to dashboard after a brief delay
         setTimeout(() => {
-          router.push(consumeAuthDestination())
+          router.push(consumeAuthDestinationForRole(res.user.role))
         }, 1500)
       })
       .catch((e) => {

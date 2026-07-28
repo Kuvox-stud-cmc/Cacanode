@@ -8,6 +8,7 @@ import org.springframework.stereotype.Service;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.UUID;
+import java.time.Instant;
 
 import lombok.extern.slf4j.Slf4j;
 
@@ -222,6 +223,72 @@ public class EmailService {
                         ticketLabel, reference, titleLabel, safeTitle,
                         descriptionLabel, safeDescription, statusLabel, status, followUp, footer)
         );
+        sendWithFallback(message);
+    }
+
+    public void sendRecruitmentCandidateAccessEmail(String toEmail,String fullName,String companyName,
+            String jobTitle,String locale,String accessUrl,boolean verification) {
+        boolean vi=locale!=null&&locale.startsWith("vi");
+        String subject=vi?(verification?"Xác nhận hồ sơ ứng tuyển":"Quản lý hồ sơ ứng tuyển")
+                :(verification?"Verify your job application":"Manage your job application");
+        String action=vi?(verification?"Xác nhận hồ sơ":"Mở hồ sơ"):(verification?"Verify application":"Open application");
+        String intro=vi?"Bạn đã ứng tuyển vị trí <strong>%s</strong> tại <strong>%s</strong>."
+                .formatted(escapeHtml(jobTitle),escapeHtml(companyName))
+                :"You applied for <strong>%s</strong> at <strong>%s</strong>."
+                .formatted(escapeHtml(jobTitle),escapeHtml(companyName));
+        EmailMessage message=new EmailMessage(toEmail,fullName,subject,"""
+                <!doctype html><html><body style="font-family:Arial,sans-serif;background:#f8fafc;padding:32px">
+                <div style="max-width:600px;margin:auto;background:white;padding:36px;border-radius:10px">
+                <h1 style="color:#0f172a;font-size:22px">%s</h1><p style="color:#475569;line-height:1.6">%s</p>
+                <a href="%s" style="display:inline-block;background:#4f46e5;color:white;padding:12px 22px;border-radius:6px;text-decoration:none">%s</a>
+                <p style="color:#94a3b8;font-size:12px;margin-top:28px">CacaNode recruitment</p>
+                </div></body></html>
+                """.formatted(escapeHtml(fullName),intro,escapeHtml(accessUrl),action));
+        sendWithFallback(message);
+    }
+
+    public void sendRecruitmentPrivacyDeletionConfirmation(String toEmail,String fullName,String companyName,
+            String jobTitle,String locale,String confirmationUrl) {
+        boolean vi=locale!=null&&locale.startsWith("vi");
+        String subject=vi?"Xác nhận xóa dữ liệu ứng tuyển":"Confirm application data deletion";
+        String intro=vi?"Bạn đã yêu cầu xóa vĩnh viễn dữ liệu hồ sơ <strong>%s</strong> tại <strong>%s</strong>. Liên kết hết hạn sau một giờ."
+                .formatted(escapeHtml(jobTitle),escapeHtml(companyName))
+                :"You requested permanent deletion of your <strong>%s</strong> application at <strong>%s</strong>. This link expires in one hour."
+                .formatted(escapeHtml(jobTitle),escapeHtml(companyName));
+        String action=vi?"Xác nhận xóa dữ liệu":"Confirm deletion";
+        EmailMessage message=new EmailMessage(toEmail,fullName,subject,"""
+                <!doctype html><html><body style="font-family:Arial,sans-serif;background:#f8fafc;padding:32px">
+                <div style="max-width:600px;margin:auto;background:white;padding:36px;border-radius:10px">
+                <h1 style="color:#0f172a;font-size:22px">%s</h1><p style="color:#475569;line-height:1.6">%s</p>
+                <a href="%s" style="display:inline-block;background:#b91c1c;color:white;padding:12px 22px;border-radius:6px;text-decoration:none">%s</a>
+                </div></body></html>
+                """.formatted(escapeHtml(fullName),intro,escapeHtml(confirmationUrl),action));
+        sendWithFallback(message);
+    }
+
+    public void sendRecruitmentInterviewEmail(String toEmail,String fullName,String companyName,String jobTitle,
+            String locale,String managementUrl,String kind,Instant scheduledStartAt,String timezone){
+        boolean vi=locale!=null&&locale.startsWith("vi");
+        String subject=switch(kind){
+            case "INVITATION" -> vi?"Mời đặt lịch phỏng vấn":"Schedule your interview";
+            case "CONFIRMATION" -> vi?"Đã xác nhận lịch phỏng vấn":"Interview confirmed";
+            case "RESCHEDULE_CONFIRMATION" -> vi?"Đã đổi lịch phỏng vấn":"Interview rescheduled";
+            default -> vi?"Nhắc lịch phỏng vấn":"Interview reminder";
+        };
+        String schedule=scheduledStartAt==null?"":(vi?"<p>Lịch đã chọn: %s (%s).</p>":"<p>Scheduled time: %s (%s).</p>")
+                .formatted(escapeHtml(scheduledStartAt.toString()),escapeHtml(timezone));
+        String intro=vi?"Vui lòng quản lý lịch phỏng vấn cho vị trí <strong>%s</strong> tại <strong>%s</strong>."
+                .formatted(escapeHtml(jobTitle),escapeHtml(companyName))
+                :"Please manage your interview for <strong>%s</strong> at <strong>%s</strong>."
+                .formatted(escapeHtml(jobTitle),escapeHtml(companyName));
+        String action=vi?"Mở lịch phỏng vấn":"Manage interview";
+        EmailMessage message=new EmailMessage(toEmail,fullName,subject,"""
+                <!doctype html><html><body style="font-family:Arial,sans-serif;background:#f8fafc;padding:32px">
+                <div style="max-width:600px;margin:auto;background:white;padding:36px;border-radius:10px">
+                <h1 style="color:#0f172a;font-size:22px">%s</h1><p style="color:#475569;line-height:1.6">%s</p>%s
+                <a href="%s" style="display:inline-block;background:#4f46e5;color:white;padding:12px 22px;border-radius:6px;text-decoration:none">%s</a>
+                </div></body></html>
+                """.formatted(escapeHtml(fullName),intro,schedule,escapeHtml(managementUrl),action));
         sendWithFallback(message);
     }
 

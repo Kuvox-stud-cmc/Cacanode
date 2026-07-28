@@ -1,8 +1,28 @@
 app:
+  platform-administration:
+    diagnostics:
+      ai-api-url: ${PLATFORM_DIAGNOSTICS_AI_API_URL:http://ai-api:8000/health/ready}
+      graph-service-url: ${PLATFORM_DIAGNOSTICS_GRAPH_SERVICE_URL:http://graph-service:8010/health/ready}
+      qdrant-url: ${PLATFORM_DIAGNOSTICS_QDRANT_URL:http://qdrant:6333/healthz}
+      qdrant-api-key: ${PLATFORM_DIAGNOSTICS_QDRANT_API_KEY:${QDRANT_API_KEY:}}
+      ollama-url: ${PLATFORM_DIAGNOSTICS_OLLAMA_URL:http://ollama:11434/api/tags}
+      reranker-url: ${PLATFORM_DIAGNOSTICS_RERANKER_URL:http://reranker-service:80/health}
+      reranker-enabled: ${PLATFORM_DIAGNOSTICS_RERANKER_ENABLED:${RERANKER_ENABLED:true}}
+      public-edge-url: ${PLATFORM_DIAGNOSTICS_PUBLIC_EDGE_URL:}
+  recruitment:
+    activation:
+      ga-unlocked: ${RECRUITMENT_GA_UNLOCKED:false}
+    cost:
+      rate-card-version: ${RECRUITMENT_COST_RATE_CARD_VERSION}
+    public:
+      cookie-secure: ${RECRUITMENT_COOKIE_SECURE:true}
+      scanner-enabled: ${RECRUITMENT_SCANNER_ENABLED:${RECRUITMENT_PUBLIC_JOBS_ENABLED:false}}
+      turnstile-enabled: ${RECRUITMENT_TURNSTILE_ENABLED:${RECRUITMENT_PUBLIC_JOBS_ENABLED:false}}
   cors:
     allowed-origins: ${CORS_ORIGINS}
   security:
     cookie-secure: ${COOKIE_SECURE:true}
+    trusted-proxy-cidrs: ${TRUSTED_PROXY_CIDRS}
     login-2fa-bypass-emails: ${LOGIN_2FA_BYPASS_EMAILS:}
   seaweedfs:
     s3-endpoint: ${SEAWEEDFS_S3_ENDPOINT}
@@ -32,12 +52,13 @@ app:
       answer-deadline-seconds: ${AI_ANSWER_DEADLINE_SECONDS:100}
       document-units-deadline-seconds: ${AI_DOCUMENT_UNITS_DEADLINE_SECONDS:10}
       deletion-deadline-seconds: ${AI_DELETION_DEADLINE_SECONDS:15}
+      interview-deadline-seconds: ${AI_INTERVIEW_DEADLINE_SECONDS:10}
   webhooks:
     encryption-key: ${WEBHOOK_ENCRYPTION_KEY}
     allow-private-networks: false
   billing:
     payos-enabled: ${PAYOS_ENABLED:false}
-    catalog-version: ${BILLING_CATALOG_VERSION:2026-07-15}
+    catalog-version: ${BILLING_CATALOG_VERSION:2026-07-23}
     frontend-return-url: ${PAYOS_RETURN_URL}
     frontend-cancel-url: ${PAYOS_CANCEL_URL}
     sales-url: ${BILLING_SALES_URL:mailto:sales@cacanode.com}

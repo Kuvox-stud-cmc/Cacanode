@@ -1,8 +1,8 @@
 package com.cacanode.api.billing.service;
 
-import com.cacanode.api.billing.enums.BillingInterval;
-import com.cacanode.api.billing.enums.BillingPlanCode;
-import com.cacanode.api.billing.enums.BillingStatus;
+import com.cacanode.api.billing.api.BillingInterval;
+import com.cacanode.api.billing.api.BillingPlanCode;
+import com.cacanode.api.billing.api.BillingStatus;
 import com.cacanode.api.billing.model.BillingSubscription;
 import org.junit.jupiter.api.Test;
 
@@ -50,6 +50,22 @@ class BillingPeriodsTest {
 
         assertEquals(subscription.getQuotaAnchorAt(), period.start());
         assertEquals(subscription.getTrialEndsAt(), period.end());
+    }
+
+    @Test
+    void starterBusinessAndEnterpriseUseMonthlyAnniversaryWindows() {
+        for (BillingPlanCode plan : java.util.List.of(
+                BillingPlanCode.STARTER, BillingPlanCode.BUSINESS, BillingPlanCode.ENTERPRISE)) {
+            BillingSubscription subscription = proSubscription();
+            subscription.setPlanCode(plan);
+            if (plan != BillingPlanCode.BUSINESS) subscription.setPaidThroughAt(null);
+            else subscription.setPaidThroughAt(LocalDateTime.of(2027, 1, 31, 10, 15));
+
+            var period = periods.currentQuotaPeriod(subscription, LocalDateTime.of(2026, 3, 15, 12, 0));
+
+            assertEquals(LocalDateTime.of(2026, 2, 28, 10, 15), period.start(), plan.name());
+            assertEquals(LocalDateTime.of(2026, 3, 28, 10, 15), period.end(), plan.name());
+        }
     }
 
     private BillingSubscription proSubscription() {

@@ -1,6 +1,6 @@
 package com.cacanode.api.notification.listener;
 
-import com.cacanode.api.common.event.TicketCreatedEvent;
+import com.cacanode.api.support.api.event.TicketCreatedEvent;
 import com.cacanode.api.notification.service.NotificationService;
 import org.junit.jupiter.api.Test;
 

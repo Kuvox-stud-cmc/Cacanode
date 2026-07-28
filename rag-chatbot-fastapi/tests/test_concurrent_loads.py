@@ -2,7 +2,7 @@ import asyncio
 
 import pytest
 
-from app.core.concurrent_loads import ConcurrentLoadTracker
+from app.common.concurrent_loads import ConcurrentLoadTracker
 
 
 def test_same_key_overlap_different_key_isolation_and_hashed_state(
@@ -11,11 +11,11 @@ def test_same_key_overlap_different_key_isolation_and_hashed_state(
     starts: list[tuple[str, int]] = []
     finishes: list[str] = []
     monkeypatch.setattr(
-        "app.core.concurrent_loads.record_authoritative_load_started",
+        "app.common.concurrent_loads.record_authoritative_load_started",
         lambda cache, concurrency: starts.append((cache, concurrency)),
     )
     monkeypatch.setattr(
-        "app.core.concurrent_loads.record_authoritative_load_finished", finishes.append
+        "app.common.concurrent_loads.record_authoritative_load_finished", finishes.append
     )
     tracker = ConcurrentLoadTracker()
     raw_key = "tenant:model:private-query"
@@ -35,10 +35,10 @@ def test_same_key_overlap_different_key_isolation_and_hashed_state(
 
 def test_tracker_cleans_up_after_exception(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        "app.core.concurrent_loads.record_authoritative_load_started", lambda *_: None
+        "app.common.concurrent_loads.record_authoritative_load_started", lambda *_: None
     )
     monkeypatch.setattr(
-        "app.core.concurrent_loads.record_authoritative_load_finished", lambda *_: None
+        "app.common.concurrent_loads.record_authoritative_load_finished", lambda *_: None
     )
     tracker = ConcurrentLoadTracker()
 
@@ -55,7 +55,9 @@ def test_metric_failure_does_not_change_execution_or_leak_state(
     def fail_metrics(*_args: object) -> None:
         raise RuntimeError("registry unavailable")
 
-    monkeypatch.setattr("app.core.concurrent_loads.record_authoritative_load_started", fail_metrics)
+    monkeypatch.setattr(
+        "app.common.concurrent_loads.record_authoritative_load_started", fail_metrics
+    )
     tracker = ConcurrentLoadTracker()
 
     with tracker.observe("embedding", "private-key"):
@@ -69,10 +71,10 @@ async def test_tracker_cleans_up_after_cancellation_and_timeout(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        "app.core.concurrent_loads.record_authoritative_load_started", lambda *_: None
+        "app.common.concurrent_loads.record_authoritative_load_started", lambda *_: None
     )
     monkeypatch.setattr(
-        "app.core.concurrent_loads.record_authoritative_load_finished", lambda *_: None
+        "app.common.concurrent_loads.record_authoritative_load_finished", lambda *_: None
     )
     tracker = ConcurrentLoadTracker()
     entered = asyncio.Event()

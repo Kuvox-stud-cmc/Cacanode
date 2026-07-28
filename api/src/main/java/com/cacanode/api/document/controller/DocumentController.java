@@ -32,8 +32,7 @@ import com.cacanode.api.document.enums.DocumentStatus;
 import com.cacanode.api.document.enums.DocumentType;
 import jakarta.validation.Valid;
 import com.cacanode.api.document.service.DocumentService;
-import com.cacanode.api.chat.ai.AiInferenceClient;
-import com.cacanode.api.chat.dto.ChatDtos;
+import com.cacanode.api.ai.api.AiInferenceApi;
 
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -43,10 +42,10 @@ import org.springframework.beans.factory.annotation.Autowired;
 public class DocumentController extends BaseController {
 
     private final DocumentService documentService;
-    private final AiInferenceClient inferenceClient;
+    private final AiInferenceApi inferenceClient;
 
     @Autowired
-    public DocumentController(DocumentService documentService, AiInferenceClient inferenceClient) {
+    public DocumentController(DocumentService documentService, AiInferenceApi inferenceClient) {
         this.documentService = documentService;
         this.inferenceClient = inferenceClient;
     }
@@ -158,7 +157,7 @@ public class DocumentController extends BaseController {
     }
 
     @GetMapping("/{documentId}/units")
-    public List<ChatDtos.DocumentUnitResponse> units(
+    public List<AiInferenceApi.DocumentUnit> units(
             @PathVariable UUID documentId,
             @RequestHeader(value = "X-Request-ID", required = false) String requestId,
             HttpServletRequest request

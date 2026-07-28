@@ -5,24 +5,26 @@ from typing import Any
 
 import pytest
 
-from app.core.config import Settings
-from app.rag.chat_service import RagChatService
-from app.rag.models import (
+from app.bootstrap.settings import Settings
+from app.modules.generation.internal.models import (
     AssistantMessage,
     ChatMessage,
     ChatSession,
     Citation,
-    ModelCompletion,
     RetrievedChunk,
 )
-from app.rag.retrieval import QueryProfile
-from app.rag.semantic_answer_cache import (
+from app.modules.generation.internal.semantic_answer_cache import (
     SemanticAnswerCache,
     SemanticCacheCandidate,
     SemanticCacheContext,
     cleanup_expired_semantic_points,
 )
-from app.rag.sessions import InMemoryChatSessionStore
+from app.modules.generation.internal.service import RagChatService
+from app.modules.generation.internal.sessions import InMemoryChatSessionStore
+from app.modules.model.api import ModelCompletion
+from app.modules.retrieval.api import QueryProfile, RetrievalFingerprint, RetrievalPlan
+from app.modules.retrieval.internal.cache import retrieval_configuration_fingerprint
+from app.modules.retrieval.internal.retrieval import QueryRouter
 
 
 class FakeRedis:
@@ -45,6 +47,17 @@ class FakeRedis:
 
     async def delete(self, key: str) -> None:
         self.values.pop(key, None)
+
+
+class FakeRetrievalPlan:
+    def __init__(self, settings: Settings) -> None:
+        self._router = QueryRouter(settings)
+        self._fingerprint = retrieval_configuration_fingerprint(settings)
+
+    def plan(self, query_text: str) -> RetrievalPlan:
+        return RetrievalPlan(
+            RetrievalFingerprint(self._router.route(query_text), self._fingerprint)
+        )
 
 
 class FakeRevisionStore:
@@ -169,9 +182,11 @@ def make_cache(
     redis = redis or FakeRedis()
     qdrant = qdrant or FakeQdrant()
     revision = revision or FakeRevisionStore()
+    settings = settings or configured()
     cache = SemanticAnswerCache(
-        settings or configured(),
+        settings,
         redis_client=redis,  # type: ignore[arg-type]
+        retrieval=FakeRetrievalPlan(settings),  # type: ignore[arg-type]
         qdrant_client=qdrant,  # type: ignore[arg-type]
         revision_store=revision,
         now=lambda: 1_000.0,

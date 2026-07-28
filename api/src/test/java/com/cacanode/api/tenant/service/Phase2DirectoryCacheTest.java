@@ -52,8 +52,7 @@ class Phase2DirectoryCacheTest {
         when(users.findByTenant_IdOrderByFullNameAsc(tenantId)).thenReturn(List.of(first, second));
         when(invitations.findByTenant_IdOrderByCreatedAtDesc(tenantId)).thenReturn(List.of(invitation));
         TenantUserManagementService service = new TenantUserManagementService(
-                users, invitations, mock(RefreshTokenRepository.class), mock(JwtService.class),
-                mock(PasswordEncoder.class), mock(AuthService.class), mock(ApplicationEventPublisher.class));
+                users, invitations, mock(ApplicationEventPublisher.class));
         CacheProperties properties = new CacheProperties();
         properties.setEnabled(true);
         properties.setBusinessReadEnabled(true);

@@ -10,7 +10,10 @@ export function getBillingPresentation(
   status?: string | null,
 ): BillingPresentation {
   if (status?.trim().toUpperCase() === 'GRACE') {
-    return { label: 'Pro · Grace', tone: 'danger' };
+    return {
+      label: plan?.trim().toUpperCase() === 'BUSINESS' ? 'Business · Grace' : 'Pro · Grace',
+      tone: 'danger',
+    };
   }
 
   switch (plan?.trim().toUpperCase()) {
@@ -22,6 +25,7 @@ export function getBillingPresentation(
     case 'PRO':
       return { label: 'Pro', tone: 'primary' };
     case 'BUSINESS':
+      return { label: 'Business', tone: 'success' };
     case 'ENTERPRISE':
       return { label: 'Enterprise', tone: 'success' };
     default:

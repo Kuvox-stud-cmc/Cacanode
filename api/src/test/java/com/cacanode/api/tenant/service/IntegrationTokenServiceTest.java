@@ -2,6 +2,8 @@ package com.cacanode.api.tenant.service;
 
 import com.cacanode.api.common.exception.custom.BadRequestException;
 import com.cacanode.api.common.exception.custom.UnauthorizedException;
+import com.cacanode.api.tenant.api.TenantStatus;
+import com.cacanode.api.tenant.api.WidgetOriginNotAllowedException;
 import com.cacanode.api.tenant.dto.IntegrationTokenDtos;
 import com.cacanode.api.tenant.cache.IntegrationTokenCacheInvalidationPublisher;
 import com.cacanode.api.tenant.model.Chatbot;
@@ -22,6 +24,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -50,6 +53,7 @@ class IntegrationTokenServiceTest {
         tenantId = UUID.randomUUID();
         Tenant tenant = new Tenant();
         tenant.setId(tenantId);
+        tenant.setStatus(TenantStatus.ACTIVE);
         KnowledgeBase knowledgeBase = new KnowledgeBase();
         knowledgeBase.setId(UUID.randomUUID());
         chatbot = new Chatbot();
@@ -105,8 +109,88 @@ class IntegrationTokenServiceTest {
 
         assertThrows(UnauthorizedException.class, () -> service.authenticate(
                 "Bearer " + secret,
-                IntegrationTokenService.API_SCOPE
+                IntegrationTokenService.API_SCOPE,
+                null
         ));
+    }
+
+    @Test
+    void widgetTokenFromAllowlistedOriginAuthenticates() {
+        chatbot.setAllowedOrigins(List.of("http://localhost:5173", "https://shop.example"));
+        String secret = widgetToken();
+
+        var principal = service.authenticate(
+                "Bearer " + secret, IntegrationTokenService.WIDGET_SCOPE, "http://localhost:5173");
+
+        assertEquals(tenantId, principal.tenantId());
+        assertEquals(chatbot.getId(), principal.chatbotId());
+    }
+
+    @Test
+    void widgetTokenFromUnlistedOriginIsRejected() {
+        chatbot.setAllowedOrigins(List.of("http://localhost:5173"));
+        String secret = widgetToken();
+
+        assertThrows(WidgetOriginNotAllowedException.class, () -> service.authenticate(
+                "Bearer " + secret, IntegrationTokenService.WIDGET_SCOPE, "https://blocked.example"));
+    }
+
+    @Test
+    void widgetTokenWithoutParentOriginIsRejected() {
+        chatbot.setAllowedOrigins(List.of("http://localhost:5173"));
+        String secret = widgetToken();
+
+        assertThrows(WidgetOriginNotAllowedException.class, () -> service.authenticate(
+                "Bearer " + secret, IntegrationTokenService.WIDGET_SCOPE, null));
+    }
+
+    @Test
+    void widgetTokenWithUnrestrictedChatbotAllowsAnyOrigin() {
+        String secret = widgetToken();
+
+        var principal = service.authenticate(
+                "Bearer " + secret, IntegrationTokenService.WIDGET_SCOPE, "https://anywhere.example");
+
+        assertEquals(tenantId, principal.tenantId());
+    }
+
+    @Test
+    void apiTokenIgnoresChatbotOriginAllowlist() {
+        chatbot.setAllowedOrigins(List.of("http://localhost:5173"));
+        IntegrationToken token = new IntegrationToken();
+        token.setId(UUID.randomUUID());
+        token.setTenant(chatbot.getTenant());
+        token.setChatbot(chatbot);
+        token.setScopes(List.of(IntegrationTokenService.API_SCOPE));
+        String secret = "ccn_it_api_scope";
+        when(repository.findByTokenHash(service.hash(secret))).thenReturn(Optional.of(token));
+
+        var principal = service.authenticate(
+                "Bearer " + secret, IntegrationTokenService.API_SCOPE, null);
+
+        assertEquals(tenantId, principal.tenantId());
+    }
+
+    /**
+     * Registers an active widget token plus the active widget configuration that widget-scope
+     * authentication requires, and returns its plaintext secret.
+     */
+    private String widgetToken() {
+        WidgetConfigRepository widgetConfigRepository = mock(WidgetConfigRepository.class);
+        ReflectionTestUtils.setField(service, "widgetConfigRepository", widgetConfigRepository);
+        WidgetConfig config = new WidgetConfig();
+        config.setActive(true);
+        when(widgetConfigRepository.findByChatbot_IdAndTenant_Id(chatbot.getId(), tenantId))
+                .thenReturn(Optional.of(config));
+
+        IntegrationToken token = new IntegrationToken();
+        token.setId(UUID.randomUUID());
+        token.setTenant(chatbot.getTenant());
+        token.setChatbot(chatbot);
+        token.setScopes(List.of(IntegrationTokenService.WIDGET_SCOPE));
+        String secret = "ccn_it_widget_scope";
+        when(repository.findByTokenHash(service.hash(secret))).thenReturn(Optional.of(token));
+        return secret;
     }
 
     @Test

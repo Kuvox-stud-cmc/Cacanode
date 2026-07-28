@@ -1,7 +1,7 @@
 import pytest
 
-from app.core.config import Settings
-from app.workers.manager import WorkerManager
+from app.bootstrap.settings import Settings
+from app.bootstrap.workers import WorkerManager
 
 
 def test_environment_parsing() -> None:

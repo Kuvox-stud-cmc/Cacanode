@@ -1,7 +1,7 @@
 package com.cacanode.api.billing.gateway;
 
 import com.cacanode.api.billing.config.BillingProperties;
-import com.cacanode.api.billing.enums.PaymentOrderStatus;
+import com.cacanode.api.billing.api.PaymentOrderStatus;
 import lombok.RequiredArgsConstructor;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;

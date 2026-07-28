@@ -26,6 +26,8 @@ import com.cacanode.api.common.cache.BusinessCache;
 import com.cacanode.api.common.cache.BusinessCacheInvalidationPublisher;
 import com.cacanode.api.common.cache.DocumentListGenerationStore;
 import com.cacanode.api.common.cache.VersionedJsonCache;
+import com.cacanode.api.common.event.durable.DurableEventPublisher;
+import com.cacanode.api.document.api.event.DocumentProjectionEvent;
 import com.cacanode.api.document.cache.DocumentListCacheKeyFactory;
 import com.cacanode.api.document.cache.DocumentListCacheValue;
 import com.cacanode.api.document.dto.DocumentListItemResponse;
@@ -41,11 +43,9 @@ import com.cacanode.api.document.messaging.DocumentIngestionPublisher;
 import com.cacanode.api.document.messaging.DocumentStatusEvent;
 import com.cacanode.api.document.model.Document;
 import com.cacanode.api.document.repository.DocumentRepository;
-import com.cacanode.api.document.storage.DocumentStorage;
-import com.cacanode.api.tenant.enums.KnowledgeBaseStatus;
-import com.cacanode.api.tenant.repository.KnowledgeBaseRepository;
-import com.cacanode.api.tenant.api.TenantModuleApi;
-import com.cacanode.api.tenant.service.KnowledgeBaseRevisionService;
+import com.cacanode.api.common.storage.DocumentStorage;
+import com.cacanode.api.tenant.api.TenantEntitlementApi;
+import com.cacanode.api.tenant.api.TenantWorkspaceApi;
 
 import org.springframework.beans.factory.annotation.Autowired;
 
@@ -57,13 +57,12 @@ public class DocumentService {
     private static final int MAX_PAGE_SIZE = 100;
     private static final int MAX_SEARCH_LENGTH = 200;
     private final DocumentRepository documentRepository;
-    private final KnowledgeBaseRepository knowledgeBaseRepository;
+    private final TenantWorkspaceApi tenantWorkspaceApi;
     private final DocumentStorage documentStorage;
     private final DocumentIngestionPublisher ingestionPublisher;
     private final DocumentIndexCleanup indexCleanup;
     private final ApplicationEventPublisher eventPublisher;
-    private final TenantModuleApi tenantModuleApi;
-    private final KnowledgeBaseRevisionService revisionService;
+    private final TenantEntitlementApi tenantModuleApi;
     @Autowired(required = false)
     private VersionedJsonCache businessCache;
     @Autowired(required = false)
@@ -72,38 +71,38 @@ public class DocumentService {
     private DocumentListCacheKeyFactory documentCacheKeyFactory;
     @Autowired(required = false)
     private BusinessCacheInvalidationPublisher businessInvalidationPublisher;
+    @Autowired(required = false)
+    private DurableEventPublisher durableEventPublisher;
 
     @Autowired
     public DocumentService(
             DocumentRepository documentRepository,
-            KnowledgeBaseRepository knowledgeBaseRepository,
+            TenantWorkspaceApi tenantWorkspaceApi,
             DocumentStorage documentStorage,
             DocumentIngestionPublisher ingestionPublisher,
             DocumentIndexCleanup indexCleanup,
             ApplicationEventPublisher eventPublisher,
-            TenantModuleApi tenantModuleApi,
-            KnowledgeBaseRevisionService revisionService
+            TenantEntitlementApi tenantModuleApi
     ) {
         this.documentRepository = documentRepository;
-        this.knowledgeBaseRepository = knowledgeBaseRepository;
+        this.tenantWorkspaceApi = tenantWorkspaceApi;
         this.documentStorage = documentStorage;
         this.ingestionPublisher = ingestionPublisher;
         this.indexCleanup = indexCleanup;
         this.eventPublisher = eventPublisher;
         this.tenantModuleApi = tenantModuleApi;
-        this.revisionService = revisionService;
     }
 
     public DocumentService(
             DocumentRepository documentRepository,
-            KnowledgeBaseRepository knowledgeBaseRepository,
+            TenantWorkspaceApi tenantWorkspaceApi,
             DocumentStorage documentStorage,
             DocumentIngestionPublisher ingestionPublisher,
             DocumentIndexCleanup indexCleanup,
             ApplicationEventPublisher eventPublisher
     ) {
-        this(documentRepository, knowledgeBaseRepository, documentStorage, ingestionPublisher,
-                indexCleanup, eventPublisher, null, null);
+        this(documentRepository, tenantWorkspaceApi, documentStorage, ingestionPublisher,
+                indexCleanup, eventPublisher, null);
     }
 
     DocumentUploadResponse upload(UUID tenantId, UUID userId, UUID knowledgeBaseId, MultipartFile file) {
@@ -120,10 +119,9 @@ public class DocumentService {
         if (!"TENANT_ADMIN".equals(role) && visibility != DocumentVisibility.EMPLOYEE_ONLY) {
             throw new AccessDeniedException("Only tenant admins can share documents with customers");
         }
-        var knowledgeBase = knowledgeBaseRepository.findByIdAndTenantId(knowledgeBaseId, tenantId)
-                .orElseThrow(() -> new BadRequestException("Knowledge base is not active or not found"));
-
-        if (knowledgeBase.getStatus() != KnowledgeBaseStatus.ACTIVE) {
+        try {
+            tenantWorkspaceApi.requireActiveKnowledgeBase(tenantId, knowledgeBaseId);
+        } catch (RuntimeException exception) {
             throw new BadRequestException("Knowledge base is not active or not found");
         }
 
@@ -155,6 +153,7 @@ public class DocumentService {
         } catch (RuntimeException e) {
             document.setStatus(DocumentStatus.FAILED);
             document.setErrorMessage("DOCUMENT_STORAGE_FAILED");
+            publishProjection(document, null);
             invalidateDocuments(tenantId, knowledgeBaseId);
             if (e instanceof InternalServerErrorException) {
                 throw e;
@@ -182,6 +181,7 @@ public class DocumentService {
         } catch (RuntimeException e) {
             document.setStatus(DocumentStatus.FAILED);
             document.setErrorMessage("INGESTION_PUBLISH_FAILED");
+            publishProjection(document, null);
             invalidateDocuments(tenantId, knowledgeBaseId);
             if (e instanceof InternalServerErrorException) {
                 throw e;
@@ -190,6 +190,7 @@ public class DocumentService {
         }
 
         invalidateDocuments(tenantId, knowledgeBaseId);
+        publishProjection(document, null);
         return toUploadResponse(document);
     }
 
@@ -220,6 +221,7 @@ public class DocumentService {
             return toStatusResponse(document);
         }
         document.setVisibility(visibility);
+        publishProjection(document, null);
         incrementSearchRevision(tenantId, document.getKnowledgeBaseId());
         invalidateDocuments(tenantId, document.getKnowledgeBaseId());
         return toStatusResponse(document);
@@ -237,6 +239,7 @@ public class DocumentService {
             throw new BadRequestException("Wait for document processing to finish before deleting it");
         }
         if (document.getStatus() == DocumentStatus.FAILED) {
+            publishProjection(document, LocalDateTime.now());
             documentRepository.delete(document);
             eventPublisher.publishEvent(new FailedDocumentCleanupRequestedEvent(
                     tenantId,
@@ -250,6 +253,7 @@ public class DocumentService {
         }
         indexCleanup.delete(tenantId, document.getKnowledgeBaseId(), documentId);
         documentStorage.delete(document.getStoragePath());
+        publishProjection(document, LocalDateTime.now());
         documentRepository.delete(document);
         incrementSearchRevision(tenantId, document.getKnowledgeBaseId());
         invalidateDocuments(tenantId, document.getKnowledgeBaseId());
@@ -489,6 +493,7 @@ public class DocumentService {
                     document.setStatus(status);
                     document.setChunkCount(event.chunkCount());
                     document.setErrorMessage(event.errorMessage());
+                    publishProjection(document, null);
                     if (status == DocumentStatus.COMPLETED
                             && previousStatus != DocumentStatus.COMPLETED) {
                         incrementSearchRevision(event.tenantId(), document.getKnowledgeBaseId());
@@ -497,6 +502,20 @@ public class DocumentService {
                     return true;
                 })
                 .orElse(false);
+    }
+
+    private void publishProjection(Document document, LocalDateTime deletedAt) {
+        if (durableEventPublisher == null || document.getId() == null) {
+            return;
+        }
+        LocalDateTime now = LocalDateTime.now();
+        durableEventPublisher.publish("document.projection.changed.v1", 1,
+                new DocumentProjectionEvent(
+                        document.getId(), document.getTenantId(), document.getFileName(),
+                        document.getFileType().name(), document.getStatus().name(),
+                        document.getVisibility().name(), document.getFileSizeBytes(),
+                        document.getCreatedAt() == null ? now : document.getCreatedAt(),
+                        document.getUpdatedAt() == null ? now : document.getUpdatedAt(), deletedAt));
     }
 
     private boolean isMonotonicTransition(DocumentStatus current, DocumentStatus next) {
@@ -525,8 +544,8 @@ public class DocumentService {
     }
 
     private void incrementSearchRevision(UUID tenantId, UUID knowledgeBaseId) {
-        if (revisionService != null) {
-            revisionService.increment(tenantId, knowledgeBaseId);
+        if (tenantWorkspaceApi != null) {
+            tenantWorkspaceApi.incrementSearchRevision(tenantId, knowledgeBaseId);
         }
     }
 
@@ -545,9 +564,9 @@ public class DocumentService {
     }
 
     private void requireActiveKnowledgeBase(UUID tenantId, UUID knowledgeBaseId) {
-        var knowledgeBase = knowledgeBaseRepository.findByIdAndTenantId(knowledgeBaseId, tenantId)
-                .orElseThrow(() -> new BadRequestException("Knowledge base is not active or not found"));
-        if (knowledgeBase.getStatus() != KnowledgeBaseStatus.ACTIVE) {
+        try {
+            tenantWorkspaceApi.requireActiveKnowledgeBase(tenantId, knowledgeBaseId);
+        } catch (RuntimeException exception) {
             throw new BadRequestException("Knowledge base is not active or not found");
         }
     }

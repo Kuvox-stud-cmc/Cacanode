@@ -38,6 +38,7 @@ export default async function WorkspaceDocumentationPage({ params }: PageProps) 
         { name: t("documentsName"), type: t("liveTotalType"), description: t("documentsDescription") },
         { name: t("membersName"), type: t("liveTotalType"), description: t("membersDescription") },
         { name: t("storageName"), type: t("liveTotalType"), description: t("storageDescription") },
+        { name: t("hiringName"), type: t("hiringType"), description: t("hiringDescription") },
       ]} />
       <p>{t("quotaBody")}</p>
     </DocSection>
@@ -49,6 +50,7 @@ export default async function WorkspaceDocumentationPage({ params }: PageProps) 
         <li>{t("billingGrace")}</li>
         <li>{t("billingFallback")}</li>
         <li>{t("billingDowngrade")}</li>
+        <li>{t("billingSwitch")}</li>
       </BulletList>
       <Callout type="security">{t("billingSecurity")}</Callout>
     </DocSection>

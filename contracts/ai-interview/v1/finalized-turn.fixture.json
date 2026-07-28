@@ -1,0 +1,18 @@
+{
+  "schema_version": "1.0",
+  "event_id": "470cfa59-c73e-5bc6-8824-ef746c990492",
+  "event_type": "interview.turn.finalized",
+  "occurred_at": "2026-07-23T08:10:00Z",
+  "tenant_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+  "aggregate_id": "22222222-2222-4222-8222-222222222222",
+  "session_id": "22222222-2222-4222-8222-222222222222",
+  "call_attempt_id": "55555555-5555-4555-8555-555555555555",
+  "turn_id": "66666666-6666-4666-8666-666666666666",
+  "sequence": 1,
+  "speaker": "CANDIDATE",
+  "language_tag": "vi-VN",
+  "started_at_epoch_ms": 1784794195000,
+  "ended_at_epoch_ms": 1784794200000,
+  "transcript": "Tôi đã xây dựng các dịch vụ xử lý sự kiện.",
+  "interrupted": false
+}

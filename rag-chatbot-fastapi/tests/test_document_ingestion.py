@@ -10,16 +10,18 @@ import pytest
 from botocore import UNSIGNED
 from prometheus_client import REGISTRY
 
-from app.core.config import Settings
-from app.ingestion.chunking import DeterministicChunker
-from app.ingestion.embedding import OllamaEmbeddingClient
-from app.ingestion.errors import PermanentIngestionError, TransientIngestionError
-from app.ingestion.events import DocumentIngestRequestedEvent
-from app.ingestion.extraction import DocumentTextExtractor, ExtractedPage
-from app.ingestion.storage import SeaweedS3DocumentStore
-from app.ingestion.vector_store import QdrantChunkStore
-from app.workers import document as document_worker
-from app.workers.document import DocumentWorker
+from app.bootstrap.settings import Settings
+from app.common.storage import SeaweedS3DocumentStore
+from app.contracts.document_ingestion_v1 import DocumentIngestRequestedEvent
+from app.modules.index.api import IndexRejectedError
+from app.modules.index.internal.qdrant_commands import QdrantKnowledgeIndex
+from app.modules.ingestion.api import PermanentIngestionFailure, TransientIngestionFailure
+from app.modules.ingestion.internal.chunking import DeterministicChunker
+from app.modules.ingestion.internal.extraction import DocumentTextExtractor, ExtractedPage
+from app.modules.ingestion.transport import rabbitmq as document_worker
+from app.modules.ingestion.transport.rabbitmq import DocumentWorker
+from app.modules.model.api import ModelUnavailableError
+from app.modules.model.internal.embedding import OllamaEmbeddingClient
 
 
 def metric_value(name: str, labels: dict[str, str]) -> float:
@@ -95,7 +97,7 @@ def test_event_parsing_accepts_spring_contract() -> None:
 
 
 def test_event_parsing_rejects_malformed_required_fields() -> None:
-    with pytest.raises(PermanentIngestionError, match="Invalid document ingestion event"):
+    with pytest.raises(ValueError, match="Invalid document ingestion event"):
         DocumentIngestRequestedEvent.parse_payload(event_bytes(document_id=None))
 
 
@@ -105,7 +107,7 @@ def test_txt_extraction_uses_strict_utf8() -> None:
     pages = extractor.extract(b"hello\nworld", content_type="text/plain", file_name="file.txt")
 
     assert pages == [ExtractedPage(page_number=1, text="hello\nworld")]
-    with pytest.raises(PermanentIngestionError, match="not valid UTF-8"):
+    with pytest.raises(PermanentIngestionFailure, match="not valid UTF-8"):
         extractor.extract(b"\xff", content_type="text/plain", file_name="bad.txt")
 
 
@@ -121,7 +123,7 @@ def test_pdf_extraction_and_no_text_failure() -> None:
 
     assert pages[0].page_number == 1
     assert "Hello PDF text" in pages[0].text
-    with pytest.raises(PermanentIngestionError, match="no extractable text"):
+    with pytest.raises(PermanentIngestionFailure, match="no extractable text"):
         extractor.extract(minimal_pdf(None), content_type="application/pdf", file_name="empty.pdf")
 
 
@@ -177,7 +179,7 @@ async def test_embedding_adapter_parses_ollama_embed_response(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     FakeOllamaClient.payload = {"embeddings": [[1, 2, 3], [4, 5, 6]]}
-    monkeypatch.setattr("app.ingestion.embedding.httpx.AsyncClient", FakeOllamaClient)
+    monkeypatch.setattr("app.modules.model.internal.embedding.httpx.AsyncClient", FakeOllamaClient)
     embedder = OllamaEmbeddingClient(
         Settings(TEXT_EMBEDDING_DIMENSION=3, TEXT_EMBEDDING_BATCH_SIZE=10)
     )
@@ -194,10 +196,10 @@ async def test_embedding_adapter_parses_ollama_embed_response(
 @pytest.mark.asyncio
 async def test_embedding_adapter_reports_model_errors(monkeypatch: pytest.MonkeyPatch) -> None:
     FakeOllamaClient.payload = {"error": "model not found"}
-    monkeypatch.setattr("app.ingestion.embedding.httpx.AsyncClient", FakeOllamaClient)
+    monkeypatch.setattr("app.modules.model.internal.embedding.httpx.AsyncClient", FakeOllamaClient)
     embedder = OllamaEmbeddingClient(Settings(TEXT_EMBEDDING_DIMENSION=3))
 
-    with pytest.raises(TransientIngestionError, match="model not found"):
+    with pytest.raises(ModelUnavailableError, match="model not found"):
         await embedder.embed_documents(["a"])
 
 
@@ -211,7 +213,7 @@ def test_seaweed_store_uses_unsigned_path_style_and_bounded_timeouts(
         captured.update(kwargs)
         return object()
 
-    monkeypatch.setattr("app.ingestion.storage.boto3.client", fake_client)
+    monkeypatch.setattr("app.common.storage.boto3.client", fake_client)
 
     SeaweedS3DocumentStore(
         Settings(
@@ -284,7 +286,7 @@ class FakeQdrantClient:
 @pytest.mark.asyncio
 async def test_qdrant_adapter_creates_collection_and_upserts_payloads() -> None:
     client = FakeQdrantClient(exists=False)
-    store = QdrantChunkStore(Settings(QDRANT_COLLECTION="chunks"), client=client)  # type: ignore[arg-type]
+    store = QdrantKnowledgeIndex(Settings(QDRANT_COLLECTION="chunks"), client=client)  # type: ignore[arg-type]
     event = DocumentIngestRequestedEvent.parse_payload(event_bytes())
     chunks = DeterministicChunker().chunk([ExtractedPage(page_number=1, text="hello")])
 
@@ -293,7 +295,7 @@ async def test_qdrant_adapter_creates_collection_and_upserts_payloads() -> None:
     assert client.created is not None
     assert len(client.upserted) == 1
     point = cast(Any, client.upserted[0])
-    assert point.id == QdrantChunkStore.point_id(str(event.document_id), chunks[0].unit_id)
+    assert point.id == QdrantKnowledgeIndex.point_id(str(event.document_id), chunks[0].unit_id)
     assert point.payload["tenant_id"] == str(event.tenant_id)
     assert point.payload["knowledge_base_id"] == str(event.knowledge_base_id)
     assert point.payload["text"] == "hello"
@@ -309,9 +311,9 @@ async def test_qdrant_adapter_creates_collection_and_upserts_payloads() -> None:
 @pytest.mark.asyncio
 async def test_qdrant_adapter_rejects_collection_dimension_mismatch() -> None:
     client = FakeQdrantClient(exists=True, dimension=4)
-    store = QdrantChunkStore(Settings(QDRANT_COLLECTION="chunks"), client=client)  # type: ignore[arg-type]
+    store = QdrantKnowledgeIndex(Settings(QDRANT_COLLECTION="chunks"), client=client)  # type: ignore[arg-type]
 
-    with pytest.raises(PermanentIngestionError, match="collection dimension"):
+    with pytest.raises(IndexRejectedError, match="collection dimension"):
         await store.ensure_collection(3)
 
 
@@ -331,12 +333,12 @@ async def test_qdrant_adapter_explains_legacy_unnamed_vector_collection() -> Non
         )
 
     client.get_collection = legacy_collection  # type: ignore[method-assign]
-    store = QdrantChunkStore(
+    store = QdrantKnowledgeIndex(
         Settings(QDRANT_COLLECTION="knowledge_units_v1"),
         client=client,  # type: ignore[arg-type]
     )
 
-    with pytest.raises(PermanentIngestionError, match="legacy unnamed-vector schema"):
+    with pytest.raises(IndexRejectedError, match="legacy unnamed-vector schema"):
         await store.ensure_collection(3)
 
 
@@ -384,13 +386,13 @@ class SuccessfulPipeline:
 class PermanentFailurePipeline:
     async def ingest(self, event: DocumentIngestRequestedEvent) -> int:
         del event
-        raise PermanentIngestionError("bad document")
+        raise PermanentIngestionFailure("bad document")
 
 
 class TransientFailurePipeline:
     async def ingest(self, event: DocumentIngestRequestedEvent) -> int:
         del event
-        raise TransientIngestionError("qdrant unavailable")
+        raise TransientIngestionFailure("qdrant unavailable")
 
 
 def worker_with(pipeline: object) -> tuple[DocumentWorker, FakeExchange]:

@@ -8,6 +8,7 @@ import {
 import { tokenVault } from '@/services/auth/token-vault';
 import { chatApi } from '@/features/chat/api/chat-api';
 import { workspaceApi } from '@/features/chat/api/workspace-api';
+import type { MobileAuthResponse } from '@/types/auth';
 
 jest.mock('@/services/auth/token-vault', () => ({
   tokenVault: { get: jest.fn(), set: jest.fn(), clear: jest.fn() },
@@ -26,7 +27,7 @@ const credentials = {
     role: 'TENANT_ADMIN',
     plan: 'PRO',
   },
-};
+} satisfies MobileAuthResponse;
 
 describe('session manager', () => {
   beforeAll(() => {

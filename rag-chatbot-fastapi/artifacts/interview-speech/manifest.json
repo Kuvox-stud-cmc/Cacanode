@@ -1,0 +1,27 @@
+{
+  "format": {"encoding": "mulaw", "sampleRateHz": 8000, "channels": 1},
+  "privacy": "Synthetic system voices reading non-identifying interview answers.",
+  "samples": [
+    {"path":"en-US/01.ulaw","languageTag":"en-US"},{"path":"en-US/02.ulaw","languageTag":"en-US"},
+    {"path":"en-US/03.ulaw","languageTag":"en-US"},{"path":"en-US/04.ulaw","languageTag":"en-US"},
+    {"path":"en-US/05.ulaw","languageTag":"en-US"},{"path":"en-US/06.ulaw","languageTag":"en-US"},
+    {"path":"en-US/07.ulaw","languageTag":"en-US"},{"path":"en-US/08.ulaw","languageTag":"en-US"},
+    {"path":"en-US/09.ulaw","languageTag":"en-US"},{"path":"en-US/10.ulaw","languageTag":"en-US"},
+    {"path":"en-US/11.ulaw","languageTag":"en-US"},{"path":"en-US/12.ulaw","languageTag":"en-US"},
+    {"path":"en-US/13.ulaw","languageTag":"en-US"},{"path":"en-US/14.ulaw","languageTag":"en-US"},
+    {"path":"en-US/15.ulaw","languageTag":"en-US"},{"path":"en-US/16.ulaw","languageTag":"en-US"},
+    {"path":"en-US/17.ulaw","languageTag":"en-US"},{"path":"en-US/18.ulaw","languageTag":"en-US"},
+    {"path":"en-US/19.ulaw","languageTag":"en-US"},{"path":"en-US/20.ulaw","languageTag":"en-US"},
+    {"path":"vi-VN/01.ulaw","languageTag":"vi-VN"},{"path":"vi-VN/02.ulaw","languageTag":"vi-VN"},
+    {"path":"vi-VN/03.ulaw","languageTag":"vi-VN"},{"path":"vi-VN/04.ulaw","languageTag":"vi-VN"},
+    {"path":"vi-VN/05.ulaw","languageTag":"vi-VN"},{"path":"vi-VN/06.ulaw","languageTag":"vi-VN"},
+    {"path":"vi-VN/07.ulaw","languageTag":"vi-VN"},{"path":"vi-VN/08.ulaw","languageTag":"vi-VN"},
+    {"path":"vi-VN/09.ulaw","languageTag":"vi-VN"},{"path":"vi-VN/10.ulaw","languageTag":"vi-VN"},
+    {"path":"vi-VN/11.ulaw","languageTag":"vi-VN"},{"path":"vi-VN/12.ulaw","languageTag":"vi-VN"},
+    {"path":"vi-VN/13.ulaw","languageTag":"vi-VN"},{"path":"vi-VN/14.ulaw","languageTag":"vi-VN"},
+    {"path":"vi-VN/15.ulaw","languageTag":"vi-VN"},{"path":"vi-VN/16.ulaw","languageTag":"vi-VN"},
+    {"path":"vi-VN/17.ulaw","languageTag":"vi-VN"},{"path":"vi-VN/18.ulaw","languageTag":"vi-VN"},
+    {"path":"vi-VN/19.ulaw","languageTag":"vi-VN"},{"path":"vi-VN/20.ulaw","languageTag":"vi-VN"}
+  ],
+  "latencyThresholdSeconds": {"p50": 1.5, "p95": 2.5}
+}

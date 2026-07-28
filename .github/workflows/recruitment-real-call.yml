@@ -1,0 +1,102 @@
+name: Recruitment protected real-call evidence
+
+on:
+  workflow_dispatch:
+    inputs:
+      interview_id:
+        description: Prepared interview UUID bound to the verified destination
+        required: true
+        type: string
+      language:
+        description: Evidence language
+        required: true
+        type: choice
+        options: [en-US, vi-VN]
+      approval_ticket:
+        description: Legal/privacy approval ticket reference
+        required: true
+        type: string
+      verified_number_reference:
+        description: Non-PII reference proving the destination is verified
+        required: true
+        type: string
+      restore_drill_evidence:
+        description: Successful restore-drill evidence URL/reference
+        required: true
+        type: string
+      sandbox_evidence:
+        description: Successful Twilio sandbox workflow URL/reference
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  real-call:
+    runs-on: ubuntu-latest
+    environment: recruitment-ga
+    timeout-minutes: 20
+    steps:
+      - name: Validate protected inputs and secrets
+        env:
+          API_BASE_URL: ${{ secrets.RECRUITMENT_GA_API_BASE_URL }}
+          ADMIN_TOKEN: ${{ secrets.RECRUITMENT_GA_TENANT_ADMIN_TOKEN }}
+          INTERVIEW_ID: ${{ inputs.interview_id }}
+          APPROVAL_TICKET: ${{ inputs.approval_ticket }}
+          VERIFIED_NUMBER_REFERENCE: ${{ inputs.verified_number_reference }}
+          RESTORE_DRILL_EVIDENCE: ${{ inputs.restore_drill_evidence }}
+          SANDBOX_EVIDENCE: ${{ inputs.sandbox_evidence }}
+        run: |
+          set -Eeuo pipefail
+          test -n "${API_BASE_URL}"
+          test -n "${ADMIN_TOKEN}"
+          test -n "${APPROVAL_TICKET}"
+          test -n "${VERIFIED_NUMBER_REFERENCE}"
+          test -n "${RESTORE_DRILL_EVIDENCE}"
+          test -n "${SANDBOX_EVIDENCE}"
+          [[ "${INTERVIEW_ID}" =~ ^[0-9a-fA-F-]{36}$ ]]
+
+      - name: Dial the prepared verified-number interview
+        env:
+          API_BASE_URL: ${{ secrets.RECRUITMENT_GA_API_BASE_URL }}
+          ADMIN_TOKEN: ${{ secrets.RECRUITMENT_GA_TENANT_ADMIN_TOKEN }}
+          INTERVIEW_ID: ${{ inputs.interview_id }}
+        run: |
+          set -Eeuo pipefail
+          curl --fail --silent --show-error \
+            -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -X POST "${API_BASE_URL%/}/api/v1/recruitment/interviews/${INTERVIEW_ID}/dial" \
+            > dial-response.json
+
+      - name: Wait for authoritative terminal call evidence
+        env:
+          API_BASE_URL: ${{ secrets.RECRUITMENT_GA_API_BASE_URL }}
+          ADMIN_TOKEN: ${{ secrets.RECRUITMENT_GA_TENANT_ADMIN_TOKEN }}
+          INTERVIEW_ID: ${{ inputs.interview_id }}
+        run: |
+          set -Eeuo pipefail
+          terminal=""
+          for _ in $(seq 1 60); do
+            attempts="$(curl --fail --silent --show-error \
+              -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+              "${API_BASE_URL%/}/api/v1/recruitment/interviews/${INTERVIEW_ID}/attempts")"
+            terminal="$(jq -r 'last | .status // empty' <<<"${attempts}")"
+            case "${terminal}" in
+              COMPLETED|FAILED|NO_ANSWER|DECLINED|CANCELLED) break ;;
+            esac
+            sleep 15
+          done
+          test "${terminal}" = "COMPLETED"
+          printf 'Real `%s` recruitment call completed. Interview `%s`; approval `%s`; verified destination reference `%s`; restore evidence `%s`; sandbox evidence `%s`.\n' \
+            '${{ inputs.language }}' '${{ inputs.interview_id }}' '${{ inputs.approval_ticket }}' \
+            '${{ inputs.verified_number_reference }}' '${{ inputs.restore_drill_evidence }}' '${{ inputs.sandbox_evidence }}' \
+            >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Retain non-PII call evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: recruitment-real-call-${{ inputs.language }}
+          path: dial-response.json
+          retention-days: 90

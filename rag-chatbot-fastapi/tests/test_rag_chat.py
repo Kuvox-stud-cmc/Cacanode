@@ -7,19 +7,20 @@ from typing import Any
 import pytest
 from prometheus_client import REGISTRY
 
-from app.core.config import Settings
-from app.ingestion.embedding import OllamaEmbeddingClient
-from app.ingestion.errors import TransientIngestionError
-from app.rag.chat_service import NO_INFORMATION_RESPONSE, RagChatService
-from app.rag.errors import (
+from app.bootstrap.settings import Settings
+from app.modules.generation.internal.errors import (
     ChatModelTimeoutError,
     ChatSessionNotFoundError,
     ChatSessionStoreUnavailableError,
 )
-from app.rag.models import ChatSession, RetrievedChunk
-from app.rag.prompts import default_customer_answer_prompt
-from app.rag.retrieval import QdrantVectorRetriever
-from app.rag.sessions import InMemoryChatSessionStore
+from app.modules.generation.internal.models import ChatSession, RetrievedChunk
+from app.modules.generation.internal.prompts import default_customer_answer_prompt
+from app.modules.generation.internal.service import NO_INFORMATION_RESPONSE, RagChatService
+from app.modules.generation.internal.sessions import InMemoryChatSessionStore
+from app.modules.index.api import KnowledgeIndexQuery
+from app.modules.index.internal.qdrant_search import QdrantKnowledgeIndexQuery
+from app.modules.model.api import ModelUnavailableError
+from app.modules.model.internal.embedding import OllamaEmbeddingClient
 
 
 def metric_value(name: str, labels: dict[str, str]) -> float:
@@ -58,7 +59,7 @@ class FakeOllamaClient:
 @pytest.mark.asyncio
 async def test_embedding_adapter_embeds_queries(monkeypatch: pytest.MonkeyPatch) -> None:
     FakeOllamaClient.payload = {"embeddings": [[1, 2, 3]]}
-    monkeypatch.setattr("app.ingestion.embedding.httpx.AsyncClient", FakeOllamaClient)
+    monkeypatch.setattr("app.modules.model.internal.embedding.httpx.AsyncClient", FakeOllamaClient)
     embedder = OllamaEmbeddingClient(Settings(TEXT_EMBEDDING_DIMENSION=3))
     labels = {"operation": "query", "provider": "ollama", "outcome": "success"}
     before = metric_value("cacanode_ai_embedding_seconds_count", labels)
@@ -72,10 +73,10 @@ async def test_embedding_adapter_reports_query_model_errors(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     FakeOllamaClient.payload = {"error": "model not found"}
-    monkeypatch.setattr("app.ingestion.embedding.httpx.AsyncClient", FakeOllamaClient)
+    monkeypatch.setattr("app.modules.model.internal.embedding.httpx.AsyncClient", FakeOllamaClient)
     embedder = OllamaEmbeddingClient(Settings(TEXT_EMBEDDING_DIMENSION=3))
 
-    with pytest.raises(TransientIngestionError, match="model not found"):
+    with pytest.raises(ModelUnavailableError, match="model not found"):
         await embedder.embed_query("hello")
 
 
@@ -104,7 +105,7 @@ class FakeQdrantClient:
 @pytest.mark.asyncio
 async def test_qdrant_retriever_filters_by_tenant_and_knowledge_base() -> None:
     client = FakeQdrantClient()
-    retriever = QdrantVectorRetriever(
+    retriever = QdrantKnowledgeIndexQuery(
         Settings(
             QDRANT_COLLECTION="chunks",
             QDRANT_TENANT_FIELD="tenant_id",
@@ -112,11 +113,13 @@ async def test_qdrant_retriever_filters_by_tenant_and_knowledge_base() -> None:
         ),
         client=client,  # type: ignore[arg-type]
     )
-    chunks = await retriever.retrieve(
-        tenant_id="tenant-1",
-        knowledge_base_id="kb-1",
-        query_vector=[0.1, 0.2, 0.3],
-        limit=5,
+    chunks = await retriever.search_dense(
+        KnowledgeIndexQuery(
+            tenant_id="tenant-1",
+            knowledge_base_id="kb-1",
+            query_vector=(0.1, 0.2, 0.3),
+            limit=5,
+        )
     )
 
     assert len(chunks) == 1
@@ -132,14 +135,16 @@ async def test_qdrant_retriever_filters_by_tenant_and_knowledge_base() -> None:
 @pytest.mark.asyncio
 async def test_qdrant_retriever_can_filter_to_allowed_document_ids() -> None:
     client = FakeQdrantClient()
-    retriever = QdrantVectorRetriever(Settings(), client=client)  # type: ignore[arg-type]
+    retriever = QdrantKnowledgeIndexQuery(Settings(), client=client)  # type: ignore[arg-type]
 
-    await retriever.retrieve(
-        tenant_id="tenant-1",
-        knowledge_base_id="kb-1",
-        query_vector=[0.1],
-        limit=5,
-        document_ids=["doc-1", "doc-2"],
+    await retriever.search_dense(
+        KnowledgeIndexQuery(
+            tenant_id="tenant-1",
+            knowledge_base_id="kb-1",
+            query_vector=(0.1,),
+            limit=5,
+            document_ids=("doc-1", "doc-2"),
+        )
     )
 
     document_condition = next(

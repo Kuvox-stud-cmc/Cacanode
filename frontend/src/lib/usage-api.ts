@@ -42,6 +42,13 @@ export type AnalyticsResponse = {
   dailyMessageVolume: Array<{ date: string; count: number }>;
   popularQuestions: Array<{ question: string; count: number }>;
 };
+export type RecruitmentAnalyticsResponse = {
+  days:AnalyticsDays;periodStart:string;periodEnd:string;jobsPublished:CountMetric;
+  verifiedApplicationsSubmitted:CountMetric;completedInterviews:CountMetric;unsuccessfulInterviews:CountMetric;
+  jobStatusDistribution:Record<string,number>;applicationStatusDistribution:Record<string,number>;
+  interviewStatusDistribution:Record<string,number>;dailyApplicationVolume:Array<{date:string;count:number}>;
+  dailyInterviewCompletionVolume:Array<{date:string;count:number}>;
+};
 
 export async function getDashboardSummary(request: ApiRequest, signal?: AbortSignal): Promise<DashboardSummary> {
   return readJsonOrThrow(await request(`${getApiBase()}/dashboard/summary`, { signal }));
@@ -55,4 +62,8 @@ export async function getAnalytics(
 ): Promise<AnalyticsResponse> {
   const params = new URLSearchParams({ scope, days: String(days) });
   return readJsonOrThrow(await request(`${getApiBase()}/analytics?${params}`, { signal }));
+}
+
+export async function getRecruitmentAnalytics(request:ApiRequest,days:AnalyticsDays,signal?:AbortSignal):Promise<RecruitmentAnalyticsResponse>{
+  return readJsonOrThrow(await request(`${getApiBase()}/analytics/recruitment?days=${days}`,{signal}));
 }

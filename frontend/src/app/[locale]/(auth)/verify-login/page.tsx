@@ -17,7 +17,7 @@ import {
 import { useAuthStore } from "@/components/providers/StoreProvider"
 import { authApiErrorMessage, verifyLogin2FAApi } from "@/lib/auth-api"
 import {
-  consumeAuthDestination,
+  consumeAuthDestinationForRole,
   rememberAuthDestination,
   safeInternalPath,
   withNext,
@@ -50,7 +50,7 @@ function VerifyLoginContent() {
         setStatus("success")
         // Redirect to dashboard after a short delay
         setTimeout(() => {
-          router.push(consumeAuthDestination())
+          router.push(consumeAuthDestinationForRole(res.user.role))
         }, 1500)
       } catch (e) {
         const msg = authApiErrorMessage(e, t("fallback.loginVerificationFailed"))

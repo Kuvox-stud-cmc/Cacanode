@@ -6,7 +6,7 @@ import com.cacanode.api.common.cache.BusinessCache;
 import com.cacanode.api.common.cache.BusinessCacheInvalidationPublisher;
 import com.cacanode.api.common.cache.CacheKeyFactory;
 import com.cacanode.api.common.cache.VersionedJsonCache;
-import com.cacanode.api.tenant.api.TenantModuleApi;
+import com.cacanode.api.tenant.api.TenantEntitlementApi;
 import com.cacanode.api.tenant.cache.IntegrationTokenCacheInvalidationPublisher;
 import com.cacanode.api.tenant.dto.WidgetConfigDtos;
 import com.cacanode.api.tenant.model.WidgetConfig;
@@ -25,7 +25,7 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class WidgetConfigService {
     private final WidgetConfigRepository repository;
-    private final TenantModuleApi tenantModuleApi;
+    private final TenantEntitlementApi tenantModuleApi;
     private final IntegrationTokenCacheInvalidationPublisher cacheInvalidationPublisher;
     @Autowired(required = false)
     private VersionedJsonCache businessCache;

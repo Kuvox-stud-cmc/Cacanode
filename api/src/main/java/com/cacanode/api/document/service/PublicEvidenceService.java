@@ -1,20 +1,14 @@
 package com.cacanode.api.document.service;
 
-import com.cacanode.api.chat.ai.AiInferenceClient;
-import com.cacanode.api.chat.dto.ChatDtos;
+import com.cacanode.api.ai.api.AiInferenceApi;
+import com.cacanode.api.document.api.DocumentApi;
 import com.cacanode.api.common.exception.custom.ResourceNotFoundException;
 import com.cacanode.api.document.dto.PublicEvidenceDtos;
 import com.cacanode.api.document.enums.DocumentStatus;
 import com.cacanode.api.document.enums.DocumentVisibility;
 import com.cacanode.api.document.model.Document;
 import com.cacanode.api.document.repository.DocumentRepository;
-import com.cacanode.api.tenant.enums.ChatbotStatus;
-import com.cacanode.api.tenant.enums.KnowledgeBaseStatus;
-import com.cacanode.api.tenant.enums.TenantStatus;
-import com.cacanode.api.tenant.model.IntegrationToken;
-import com.cacanode.api.tenant.repository.IntegrationTokenRepository;
-import com.cacanode.api.tenant.repository.WidgetConfigRepository;
-import com.cacanode.api.tenant.service.IntegrationTokenService;
+import com.cacanode.api.tenant.api.IntegrationAccessApi;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -35,9 +29,8 @@ public class PublicEvidenceService {
     private static final String SIGNATURE_PURPOSE = "cacanode-public-evidence-v1:";
 
     private final DocumentRepository documentRepository;
-    private final IntegrationTokenRepository tokenRepository;
-    private final WidgetConfigRepository widgetConfigRepository;
-    private final AiInferenceClient inferenceClient;
+    private final IntegrationAccessApi integrationAccessApi;
+    private final AiInferenceApi inferenceClient;
     private final ObjectMapper objectMapper;
 
     @Value("${app.public-evidence.signing-key:development-public-evidence-signing-key}")
@@ -51,14 +44,12 @@ public class PublicEvidenceService {
 
     public PublicEvidenceService(
             DocumentRepository documentRepository,
-            IntegrationTokenRepository tokenRepository,
-            WidgetConfigRepository widgetConfigRepository,
-            AiInferenceClient inferenceClient,
+            IntegrationAccessApi integrationAccessApi,
+            AiInferenceApi inferenceClient,
             ObjectMapper objectMapper
     ) {
         this.documentRepository = documentRepository;
-        this.tokenRepository = tokenRepository;
-        this.widgetConfigRepository = widgetConfigRepository;
+        this.integrationAccessApi = integrationAccessApi;
         this.inferenceClient = inferenceClient;
         this.objectMapper = objectMapper;
     }
@@ -67,7 +58,7 @@ public class PublicEvidenceService {
             UUID tenantId,
             UUID knowledgeBaseId,
             UUID integrationTokenId,
-            ChatDtos.CitationResponse citation
+            DocumentApi.EvidenceCitation citation
     ) {
         String focus = citation.unitId() != null && !citation.unitId().isBlank()
                 ? "unit:" + citation.unitId()
@@ -84,25 +75,10 @@ public class PublicEvidenceService {
     @Transactional(readOnly = true)
     public PublicEvidenceDtos.Response load(String signedToken, String requestId) {
         EvidencePayload payload = verify(signedToken);
-        IntegrationToken token = tokenRepository.findWithContextById(payload.integrationTokenId())
-                .orElseThrow(this::unavailable);
-        LocalDateTime now = LocalDateTime.now();
-        boolean apiToken = token.getScopes().contains(IntegrationTokenService.API_SCOPE);
-        boolean widgetToken = token.getScopes().contains(IntegrationTokenService.WIDGET_SCOPE);
-        if (!payload.tenantId().equals(token.getTenant().getId())
-                || !payload.knowledgeBaseId().equals(token.getChatbot().getKnowledgeBase().getId())
-                || token.getRevokedAt() != null
-                || token.getExpiresAt() != null && !token.getExpiresAt().isAfter(now)
-                || !apiToken && !widgetToken
-                || token.getTenant().getStatus() != TenantStatus.ACTIVE
-                        && token.getTenant().getStatus() != TenantStatus.TRIAL
-                || token.getChatbot().getStatus() != ChatbotStatus.ACTIVE
-                || token.getChatbot().getKnowledgeBase().getStatus() != KnowledgeBaseStatus.ACTIVE) {
-            throw unavailable();
-        }
-        if (!apiToken && widgetConfigRepository.findByChatbot_IdAndTenant_Id(
-                        token.getChatbot().getId(), token.getTenant().getId())
-                .filter(config -> config.isActive()).isEmpty()) {
+        try {
+            integrationAccessApi.validateEvidenceAccess(
+                    payload.integrationTokenId(), payload.tenantId(), payload.knowledgeBaseId());
+        } catch (RuntimeException exception) {
             throw unavailable();
         }
         Document document = documentRepository
