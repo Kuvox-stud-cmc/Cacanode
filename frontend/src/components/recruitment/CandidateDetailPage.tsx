@@ -62,6 +62,8 @@ export function CandidateDetailPage({ candidateId }: { candidateId: string }) {
   }, [candidateId, request, t]);
 
   useEffect(() => {
+    // Client-side route data is loaded when the candidate identity changes.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void load();
   }, [load]);
 

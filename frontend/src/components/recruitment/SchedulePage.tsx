@@ -49,6 +49,8 @@ export function SchedulePage() {
   }, [request, t]);
 
   useEffect(() => {
+    // Client-side schedule data is loaded when API access changes.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void load();
   }, [load]);
 

@@ -51,7 +51,7 @@ spring:
   brevo:
     api-key: test-brevo-key
   rabbitmq:
-    addresses: amqp://guest:guest@localhost:5672/
+    addresses: ${RABBITMQ_TEST_URL:amqp://guest:guest@localhost:5672/}
     listener:
       simple:
         auto-startup: false

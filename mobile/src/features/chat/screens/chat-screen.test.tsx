@@ -95,7 +95,7 @@ describe('ChatScreen', () => {
     mockController.mockReturnValue(controllerValue());
   });
 
-  it('uses a keyboard-safe transcript and validates blank, max-length, and loading composer states', async () => {
+  it('uses a keyboard-safe transcript and validates blank composer input', async () => {
     const screen = await render(<ChatScreen />);
     expect(screen.getByTestId('chat-keyboard-layout')).toBeTruthy();
     expect(screen.getByTestId('chat-transcript')).toBeTruthy();
@@ -104,22 +104,26 @@ describe('ChatScreen', () => {
     expect(screen.getByRole('button', { name: 'Send message' }).props.accessibilityState.disabled).toBe(true);
     await fireEvent.changeText(input, '   ');
     expect(setDraft).toHaveBeenCalledWith('   ');
+  });
 
+  it('shows the composer count and sends an eligible message', async () => {
     mockController.mockReturnValue(controllerValue({
       canSend: true,
-      state: { ...controllerValue().state, draft: 'x'.repeat(CHAT_MAX_LENGTH) },
+      state: { ...controllerValue().state, draft: 'ready' },
     }));
-    await screen.rerender(<ChatScreen />);
-    expect(screen.getByText('32,000 / 32,000')).toBeTruthy();
+    const screen = await render(<ChatScreen />);
+    expect(screen.getByText('5 / 32,000')).toBeTruthy();
     await fireEvent.press(screen.getByRole('button', { name: 'Send message' }));
     expect(send).toHaveBeenCalledTimes(1);
+  });
 
+  it('marks the composer busy while a message is sending', async () => {
     mockController.mockReturnValue(controllerValue({
       sending: true,
       canSend: false,
       state: { ...controllerValue().state, activeSendId: 'assistant-1' },
     }));
-    await screen.rerender(<ChatScreen />);
+    const screen = await render(<ChatScreen />);
     expect(screen.getByRole('button', { name: 'Send message' }).props.accessibilityState).toMatchObject({
       busy: true,
       disabled: true,

@@ -156,7 +156,11 @@ export function JobForm({ jobId }: { jobId?: string }) {
     }
   }, [jobId, request, t]);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    // Client-side route data is loaded when the job identity changes.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void load();
+  }, [load]);
 
   const editable = !record || record.status === "DRAFT" || record.status === "PAUSED";
   const canPublish = !record || record.status === "DRAFT" || record.status === "PAUSED";

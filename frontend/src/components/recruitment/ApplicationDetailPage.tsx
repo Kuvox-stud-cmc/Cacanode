@@ -76,6 +76,8 @@ export function ApplicationDetailPage({ applicationId }: { applicationId: string
   }, [applicationId, request, t]);
 
   useEffect(() => {
+    // Client-side route data is loaded when the application identity changes.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void load();
   }, [load]);
 

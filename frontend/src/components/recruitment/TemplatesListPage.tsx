@@ -65,6 +65,8 @@ export function TemplatesListPage() {
   }, [page, q, request, t]);
 
   useEffect(() => {
+    // Client-side filters trigger an intentional loading-state refresh.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void load();
   }, [load]);
 
