@@ -36,6 +36,24 @@ logging:
     web: INFO
 
 app:
+  platform-administration:
+    enabled: ${PLATFORM_ADMINISTRATION_ENABLED:false}
+    failure-stalled-after: ${PLATFORM_FAILURE_STALLED_AFTER:10m}
+    diagnostics:
+      probe-timeout: ${PLATFORM_DIAGNOSTICS_PROBE_TIMEOUT:2s}
+      refresh-budget: ${PLATFORM_DIAGNOSTICS_REFRESH_BUDGET:3s}
+      cache-ttl: ${PLATFORM_DIAGNOSTICS_CACHE_TTL:10s}
+      parallelism: ${PLATFORM_DIAGNOSTICS_PARALLELISM:12}
+      warning-depth: ${PLATFORM_DIAGNOSTICS_QUEUE_WARNING_DEPTH:25}
+      critical-depth: ${PLATFORM_DIAGNOSTICS_QUEUE_CRITICAL_DEPTH:100}
+      ai-api-url: ${PLATFORM_DIAGNOSTICS_AI_API_URL:}
+      graph-service-url: ${PLATFORM_DIAGNOSTICS_GRAPH_SERVICE_URL:}
+      qdrant-url: ${PLATFORM_DIAGNOSTICS_QDRANT_URL:}
+      qdrant-api-key: ${PLATFORM_DIAGNOSTICS_QDRANT_API_KEY:}
+      ollama-url: ${PLATFORM_DIAGNOSTICS_OLLAMA_URL:}
+      reranker-url: ${PLATFORM_DIAGNOSTICS_RERANKER_URL:}
+      reranker-enabled: ${PLATFORM_DIAGNOSTICS_RERANKER_ENABLED:false}
+      public-edge-url: ${PLATFORM_DIAGNOSTICS_PUBLIC_EDGE_URL:}
   recruitment:
     enabled: ${RECRUITMENT_ENABLED:false}
     auto-activate-new-tenants: ${RECRUITMENT_AUTO_ACTIVATE_NEW_TENANTS:false}

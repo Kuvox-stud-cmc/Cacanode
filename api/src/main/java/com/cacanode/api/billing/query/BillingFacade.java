@@ -20,6 +20,8 @@ import com.cacanode.api.billing.repository.BillingPaymentOrderRepository;
 import com.cacanode.api.billing.repository.BillingSubscriptionRepository;
 import com.cacanode.api.billing.repository.BillingWebhookEventRepository;
 import com.cacanode.api.tenant.api.event.TenantCreatedEvent;
+import com.cacanode.api.tenant.api.TenantKind;
+import com.cacanode.api.tenant.api.TenantKindApi;
 import com.cacanode.api.common.cache.BusinessCache;
 import com.cacanode.api.common.cache.BusinessCacheInvalidationPublisher;
 import com.cacanode.api.common.cache.CacheKeyFactory;
@@ -85,6 +87,8 @@ public class BillingFacade implements BillingModuleApi {
     private final ApplicationEventPublisher eventPublisher;
     private final Clock clock;
     @Autowired(required = false)
+    private TenantKindApi tenantKinds;
+    @Autowired(required = false)
     private VersionedJsonCache businessCache;
     @Autowired(required = false)
     private CacheKeyFactory cacheKeyFactory;
@@ -103,6 +107,7 @@ public class BillingFacade implements BillingModuleApi {
     @EventListener
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void onTenantCreated(TenantCreatedEvent event) {
+        if (event.kind() != TenantKind.CUSTOMER) return;
         if (inboxService != null && !inboxService.claim("billing.trial-subscription")) return;
         if (subscriptionRepository.findByTenantId(event.tenantId()).isPresent()) {
             return;
@@ -123,6 +128,7 @@ public class BillingFacade implements BillingModuleApi {
     @Override
     @Transactional
     public BillingDtos.AccountResponse account(UUID tenantId) {
+        if (tenantKinds != null) tenantKinds.requireCustomer(tenantId);
         if (businessCache == null || cacheKeyFactory == null) {
             return loadAccountAuthoritative(tenantId);
         }

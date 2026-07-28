@@ -62,10 +62,10 @@ public class AnalyticsProjectionRebuildService implements AnalyticsProjectionReb
             for (var item : snapshot.items()) {
                 jdbcTemplate.update("""
                         INSERT INTO analytics_tenant_projection
-                        (tenant_id, name, status, plan, max_storage_mb, created_at, updated_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                        (tenant_id, name, status, plan, max_storage_mb, created_at, updated_at, tenant_kind)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                         """, item.id(), item.name(), item.status(), item.plan(), item.maxStorageMb(),
-                        item.createdAt(), item.updatedAt());
+                        item.createdAt(), item.updatedAt(), item.kind().name());
                 count++;
             }
             if (!snapshot.hasMore()) return count;
@@ -111,6 +111,7 @@ public class AnalyticsProjectionRebuildService implements AnalyticsProjectionReb
         for (int page = 0; ; page++) {
             var snapshot = documentApi.projectionSnapshots(page, PAGE_SIZE);
             for (var item : snapshot.items()) {
+                if (!isCustomerTenant(item.tenantId())) continue;
                 jdbcTemplate.update("""
                         INSERT INTO analytics_document_projection
                         (document_id, tenant_id, file_name, file_type, status, visibility,
@@ -129,6 +130,7 @@ public class AnalyticsProjectionRebuildService implements AnalyticsProjectionReb
         for (int page = 0; ; page++) {
             var snapshot = chatApi.projectionConversations(page, PAGE_SIZE);
             for (var item : snapshot.items()) {
+                if (!isCustomerTenant(item.tenantId())) continue;
                 jdbcTemplate.update("""
                         INSERT INTO analytics_conversation_projection
                         (conversation_id, tenant_id, channel, status, created_at, closed_at, updated_at)
@@ -146,6 +148,7 @@ public class AnalyticsProjectionRebuildService implements AnalyticsProjectionReb
         for (int page = 0; ; page++) {
             var snapshot = chatApi.projectionMessages(page, PAGE_SIZE);
             for (var item : snapshot.items()) {
+                if (!isCustomerTenant(item.tenantId())) continue;
                 jdbcTemplate.update("""
                         INSERT INTO analytics_message_projection
                         (message_id, conversation_id, tenant_id, channel, role, question_text,
@@ -164,6 +167,7 @@ public class AnalyticsProjectionRebuildService implements AnalyticsProjectionReb
         for (int page = 0; ; page++) {
             var snapshot = supportExport.projectionTickets(page, PAGE_SIZE);
             for (var item : snapshot.items()) {
+                if (!isCustomerTenant(item.tenantId())) continue;
                 jdbcTemplate.update("""
                         INSERT INTO analytics_ticket_projection
                         (ticket_id, tenant_id, status, priority, created_at, resolved_at, updated_at)
@@ -246,8 +250,18 @@ public class AnalyticsProjectionRebuildService implements AnalyticsProjectionReb
         java.util.List<java.util.UUID> result = new java.util.ArrayList<>();
         for (int page = 0; ; page++) {
             var snapshot = tenantExport.tenants(page, PAGE_SIZE);
-            snapshot.items().forEach(item -> result.add(item.id()));
+            snapshot.items().stream()
+                    .filter(item -> item.kind() == com.cacanode.api.tenant.api.TenantKind.CUSTOMER)
+                    .forEach(item -> result.add(item.id()));
             if (!snapshot.hasMore()) return result;
         }
+    }
+
+    private boolean isCustomerTenant(java.util.UUID tenantId) {
+        Long count = jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM analytics_tenant_projection
+                WHERE tenant_id = ? AND tenant_kind = 'CUSTOMER'
+                """, Long.class, tenantId);
+        return count != null && count > 0;
     }
 }

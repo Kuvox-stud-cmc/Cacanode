@@ -34,6 +34,7 @@ import com.cacanode.api.tenant.api.RegisterTenantCommand;
 import com.cacanode.api.tenant.api.TenantIdentityApi;
 import com.cacanode.api.tenant.api.TenantUserResult;
 import com.cacanode.api.tenant.api.UserAuthDto;
+import com.cacanode.api.tenant.api.TenantRoleInvariant;
 import com.cacanode.api.tenant.api.TenantIdentityApi;
 
 import jakarta.servlet.http.HttpServletResponse;
@@ -102,7 +103,7 @@ public class AuthServiceImpl implements AuthService {
     @Override
     @Transactional(readOnly = true)
     public InvitationValidationResponse validateInvitation(String token) {
-        var invitation = tenantModuleApi.validateInvitation(jwtService.hashToken(token));
+        var invitation = tenantModuleApi.validateInvitation(token);
         return new InvitationValidationResponse(
                 invitation.email(), invitation.tenantName(), invitation.role(), invitation.expiresAt());
     }
@@ -111,13 +112,13 @@ public class AuthServiceImpl implements AuthService {
     @Transactional
     public AuthResponse acceptInvitation(AcceptInvitationRequest request, HttpServletResponse response) {
         var accepted = tenantModuleApi.acceptInvitation(
-                jwtService.hashToken(request.getToken()), request.getFullName(),
+                request.getToken(), request.getFullName(),
                 passwordEncoder.encode(request.getPassword()));
         UserAuthDto user = UserAuthDto.builder()
                 .userId(accepted.userId()).tenantId(accepted.tenantId()).email(accepted.email())
                 .fullName(accepted.fullName()).role(accepted.role()).status(accepted.status())
                 .plan(accepted.plan()).tenantStatus(accepted.tenantStatus())
-                .passwordHash(accepted.passwordHash()).build();
+                .passwordHash(accepted.passwordHash()).tenantKind(accepted.tenantKind()).build();
         return issueAuthTokens(user, response, true);
     }
 
@@ -211,7 +212,8 @@ public class AuthServiceImpl implements AuthService {
                     "Account suspended due to verification abuse. Please contact " + supportEmail + " for assistance.");
         }
 
-        if (isLogin2FABypassed(result.getEmail())) {
+        TenantRoleInvariant.requireValid(result.getRole(), result.getTenantKind());
+        if (!"PLATFORM_ADMIN".equals(result.getRole()) && isLogin2FABypassed(result.getEmail())) {
             UserAuthDto user = tenantModuleApi.findUserById(result.getUserId());
             validateActiveUser(user, result.getUserId(), result.getTenantId());
 
@@ -724,6 +726,11 @@ public class AuthServiceImpl implements AuthService {
                 || !user.getUserId().equals(expectedUserId)
                 || (expectedTenantId != null && !user.getTenantId().equals(expectedTenantId))) {
             throw new UnauthorizedException("Refresh token scope is invalid");
+        }
+        try {
+            TenantRoleInvariant.requireValid(user.getRole(), user.getTenantKind());
+        } catch (IllegalStateException exception) {
+            throw new UnauthorizedException(exception.getMessage());
         }
     }
 

@@ -7,8 +7,9 @@ import type {
 } from "@/types";
 import { getApiBase } from "@/lib/auth-api";
 import { readJsonOrThrow } from "@/lib/api-error";
+import type { ApiRequest } from "@/lib/api-request";
 
-export type ApiRequest = (endpoint: string, options?: RequestInit) => Promise<Response>;
+export type { ApiRequest } from "@/lib/api-request";
 
 export type DocumentQuery = {
   page?: number;

@@ -17,7 +17,7 @@ import static com.tngtech.archunit.library.dependencies.SlicesRuleDefinition.sli
 class ModularMonolithArchitectureTest {
     private static final Set<String> BUSINESS_MODULES = Set.of(
             "ai", "analytics", "auth", "billing", "chat", "document",
-            "integration", "notification", "recruitment", "support", "tenant");
+            "integration", "notification", "platform", "recruitment", "support", "tenant");
 
     private static final ImportOption MAIN_OUTPUT_ONLY = location -> {
         String path = location.asURI().getPath();
@@ -101,6 +101,16 @@ class ModularMonolithArchitectureTest {
                         "com.cacanode.api.bootstrap..")
                 .should().dependOnClassesThat().resideInAnyPackage(
                         "org.springframework.jdbc..", "jakarta.persistence.EntityManager")
+                .check(classes);
+    }
+
+    @Test
+    void platformHasNoPersistenceCacheOrContainerAccess() {
+        noClasses().that().resideInAPackage("com.cacanode.api.platform..")
+                .should().dependOnClassesThat().resideInAnyPackage(
+                        "org.springframework.jdbc..", "jakarta.persistence..",
+                        "org.springframework.data.redis..", "org.springframework.amqp..",
+                        "software.amazon.awssdk..", "org.testcontainers..", "com.github.dockerjava..")
                 .check(classes);
     }
 }

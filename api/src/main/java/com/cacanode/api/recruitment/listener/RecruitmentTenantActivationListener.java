@@ -6,6 +6,7 @@ import com.cacanode.api.recruitment.model.RecruitmentEnums.RolloutStage;
 import com.cacanode.api.recruitment.model.RecruitmentTenantActivation;
 import com.cacanode.api.recruitment.repository.RecruitmentTenantActivationRepository;
 import com.cacanode.api.tenant.api.event.TenantCreatedEvent;
+import com.cacanode.api.tenant.api.TenantKind;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
@@ -24,6 +25,7 @@ public class RecruitmentTenantActivationListener {
     @EventListener
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void onTenantCreated(TenantCreatedEvent event) {
+        if (event.kind() != TenantKind.CUSTOMER) return;
         if (!properties.autoActivateNewTenants() || !inboxService.claim(CONSUMER_NAME)) return;
 
         RecruitmentTenantActivation activation = activations.findById(event.tenantId()).orElseGet(() -> {

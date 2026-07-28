@@ -24,7 +24,7 @@ public class TenantAnalyticsExportApiImpl implements TenantAnalyticsExportApi {
         return new SnapshotPage<>(result.stream().map(value -> new TenantSnapshot(
                 value.getId(), value.getName(), value.getStatus().name(), value.getPlan().name(),
                 value.getMaxStorageMb() == null ? 0 : value.getMaxStorageMb(),
-                value.getCreatedAt(), value.getUpdatedAt())).toList(), result.hasNext());
+                value.getCreatedAt(), value.getUpdatedAt(), value.getKind())).toList(), result.hasNext());
     }
 
     @Override

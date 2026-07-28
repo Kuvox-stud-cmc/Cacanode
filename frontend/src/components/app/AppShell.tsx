@@ -237,13 +237,17 @@ export function ProtectedAppShell({ children }: { children: ReactNode }) {
   const common = useTranslations("Common")
   const router = useRouter()
   const status = useTokenRehydration()
+  const user = useAuthStore((state) => state.user)
 
   useEffect(() => {
     if (status === "unauthenticated") {
       const destination = `${window.location.pathname}${window.location.search}${window.location.hash}`
       router.replace(withNext("/login", destination))
     }
-  }, [router, status])
+    if (status === "authenticated" && user?.role === "PLATFORM_ADMIN") {
+      router.replace("/platform")
+    }
+  }, [router, status, user?.role])
 
   if (status === "rehydrating") {
     return (
@@ -253,7 +257,7 @@ export function ProtectedAppShell({ children }: { children: ReactNode }) {
     )
   }
 
-  if (status === "unauthenticated") {
+  if (status === "unauthenticated" || user?.role === "PLATFORM_ADMIN") {
     return null
   }
 

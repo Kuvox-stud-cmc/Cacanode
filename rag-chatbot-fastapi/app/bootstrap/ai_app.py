@@ -17,6 +17,7 @@ from app.bootstrap.workers import WorkerManager
 from app.common.cache import RedisCacheStore, TtlJitter
 from app.common.middleware import RequestIdMiddleware
 from app.common.storage import SeaweedS3DocumentStore
+from app.modules.ingestion.internal.checkpoints import RedisIngestionCheckpointStore
 from app.modules.ingestion.internal.content_extraction import DigitalContentExtractionAdapter
 from app.modules.interview.internal.media import InterviewMediaRuntime
 from app.modules.interview.internal.recovery import InterviewRecoveryWorker
@@ -103,6 +104,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         manager = WorkerManager(settings, embedder=embedding_client, redis_client=redis_client)
         await manager.start()
     app.state.redis_client = redis_client
+    app.state.ingestion_diagnostics = RedisIngestionCheckpointStore(
+        redis_client,
+        prefix=settings.CACHE_KEY_PREFIX,
+        retention_seconds=settings.INGESTION_CHECKPOINT_RETENTION_SECONDS,
+        lease_seconds=settings.INGESTION_LEASE_SECONDS,
+    )
+    app.state.interview_diagnostics = InterviewRedisState(
+        redis_client, prefix=settings.CACHE_KEY_PREFIX
+    )
     app.state.grpc_server = grpc_server
     app.state.worker_manager = manager
     app.state.interview_rabbit_connection = rabbit_connection

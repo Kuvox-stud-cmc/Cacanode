@@ -1,4 +1,14 @@
 app:
+  platform-administration:
+    diagnostics:
+      ai-api-url: ${PLATFORM_DIAGNOSTICS_AI_API_URL:http://ai-api:8000/health/ready}
+      graph-service-url: ${PLATFORM_DIAGNOSTICS_GRAPH_SERVICE_URL:http://graph-service:8010/health/ready}
+      qdrant-url: ${PLATFORM_DIAGNOSTICS_QDRANT_URL:http://qdrant:6333/healthz}
+      qdrant-api-key: ${PLATFORM_DIAGNOSTICS_QDRANT_API_KEY:${QDRANT_API_KEY:}}
+      ollama-url: ${PLATFORM_DIAGNOSTICS_OLLAMA_URL:http://ollama:11434/api/tags}
+      reranker-url: ${PLATFORM_DIAGNOSTICS_RERANKER_URL:http://reranker-service:80/health}
+      reranker-enabled: ${PLATFORM_DIAGNOSTICS_RERANKER_ENABLED:${RERANKER_ENABLED:true}}
+      public-edge-url: ${PLATFORM_DIAGNOSTICS_PUBLIC_EDGE_URL:}
   recruitment:
     activation:
       ga-unlocked: ${RECRUITMENT_GA_UNLOCKED:false}

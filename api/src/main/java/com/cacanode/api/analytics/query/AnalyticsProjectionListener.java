@@ -39,13 +39,14 @@ public class AnalyticsProjectionListener {
         if (!inboxService.claim("analytics.tenant")) return;
         jdbcTemplate.update("""
                 INSERT INTO analytics_tenant_projection
-                    (tenant_id, name, status, plan, max_storage_mb, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                    (tenant_id, name, status, plan, max_storage_mb, created_at, updated_at, tenant_kind)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT (tenant_id) DO UPDATE SET
                     name = EXCLUDED.name, status = EXCLUDED.status, plan = EXCLUDED.plan,
-                    max_storage_mb = EXCLUDED.max_storage_mb, updated_at = EXCLUDED.updated_at
+                    max_storage_mb = EXCLUDED.max_storage_mb, updated_at = EXCLUDED.updated_at,
+                    tenant_kind = EXCLUDED.tenant_kind
                 """, event.tenantId(), event.name(), event.status(), event.plan(),
-                event.maxStorageMb(), event.createdAt(), event.createdAt());
+                event.maxStorageMb(), event.createdAt(), event.createdAt(), event.kind().name());
     }
 
     @EventListener
@@ -84,13 +85,14 @@ public class AnalyticsProjectionListener {
         if (!inboxService.claim("analytics.tenant-changed")) return;
         jdbcTemplate.update("""
                 INSERT INTO analytics_tenant_projection
-                    (tenant_id, name, status, plan, max_storage_mb, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                    (tenant_id, name, status, plan, max_storage_mb, created_at, updated_at, tenant_kind)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT (tenant_id) DO UPDATE SET
                     name = EXCLUDED.name, status = EXCLUDED.status, plan = EXCLUDED.plan,
-                    max_storage_mb = EXCLUDED.max_storage_mb, updated_at = EXCLUDED.updated_at
+                    max_storage_mb = EXCLUDED.max_storage_mb, updated_at = EXCLUDED.updated_at,
+                    tenant_kind = EXCLUDED.tenant_kind
                 """, event.tenantId(), event.name(), event.status(), event.plan(), event.maxStorageMb(),
-                event.createdAt(), event.updatedAt());
+                event.createdAt(), event.updatedAt(), event.kind().name());
     }
 
     @EventListener

@@ -64,6 +64,7 @@ export interface User {
   joinedAt: string;
 }
 
+export type AuthRole = "PLATFORM_ADMIN" | "TENANT_ADMIN" | "USER";
 export type UserRole = "TENANT_ADMIN" | "USER";
 export type UserStatus = "ACTIVE" | "INACTIVE";
 export type InvitationStatus = "PENDING" | "EXPIRED" | "CANCELLED" | "ACCEPTED";
@@ -91,7 +92,7 @@ export interface TeamDirectory {
 export interface InvitationValidation {
   email: string;
   tenantName: string;
-  role: UserRole;
+  role: AuthRole;
   expiresAt: string;
 }
 
@@ -101,7 +102,7 @@ export interface AuthUser {
   tenantId: string;
   email: string;
   fullName: string;
-  role: string;
+  role: AuthRole;
   plan: "STARTER" | "TRIAL" | "PRO" | "BUSINESS" | "ENTERPRISE";
 }
 

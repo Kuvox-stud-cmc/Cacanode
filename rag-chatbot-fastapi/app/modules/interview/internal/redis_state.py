@@ -10,6 +10,8 @@ from uuid import uuid4
 
 from redis.asyncio import Redis
 
+from app.modules.interview.api.diagnostics import InterviewDiagnostic
+
 SESSION_RETENTION_SECONDS = 7 * 24 * 60 * 60
 CHECKPOINT_RETENTION_SECONDS = 7 * 24 * 60 * 60
 LEASE_SECONDS = 30
@@ -218,6 +220,16 @@ class InterviewRedisState:
     def __init__(self, redis_client: Redis, *, prefix: str) -> None:
         self._redis = redis_client
         self.keys = InterviewRedisKeys(prefix)
+
+    async def inspect(self) -> InterviewDiagnostic:
+        now = time.time()
+        active, recovery_due = await self._redis.zcount(
+            self.keys.global_concurrency(), now, "+inf"
+        ), await self._redis.zcount(self.keys.recovery_index(), "-inf", now)
+        return InterviewDiagnostic(
+            active_session_count=int(active),
+            recovery_due_count=int(recovery_due),
+        )
 
     async def store_prepared_session(
         self, session_id: str, payload: bytes | str | Mapping[str, Any]

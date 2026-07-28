@@ -5,6 +5,7 @@ INSERT INTO tenants (
     id,
     name,
     slug,
+    kind,
     plan,
     status,
     max_documents,
@@ -23,6 +24,7 @@ VALUES (
     '00000000-0000-0000-0000-000000000001',
     'CacaNode Demo',
     'cacanode-demo',
+    'CUSTOMER',
     'PRO',
     'ACTIVE',
     150,
@@ -40,6 +42,7 @@ VALUES (
 ON CONFLICT (slug) DO UPDATE
 SET
     name = EXCLUDED.name,
+    kind = EXCLUDED.kind,
     plan = EXCLUDED.plan,
     status = EXCLUDED.status,
     max_documents = EXCLUDED.max_documents,
@@ -124,9 +127,9 @@ SET
 
 -- Development seed data is loaded after Flyway, so keep analytics projections in sync explicitly.
 INSERT INTO analytics_tenant_projection (
-    tenant_id, name, status, plan, max_storage_mb, created_at, updated_at
+    tenant_id, name, status, plan, max_storage_mb, created_at, updated_at, tenant_kind
 )
-SELECT id, name, status, plan, COALESCE(max_storage_mb, 0), created_at, updated_at
+SELECT id, name, status, plan, COALESCE(max_storage_mb, 0), created_at, updated_at, kind
 FROM tenants
 WHERE slug = 'cacanode-demo'
 ON CONFLICT (tenant_id) DO UPDATE
@@ -135,6 +138,7 @@ SET
     status = EXCLUDED.status,
     plan = EXCLUDED.plan,
     max_storage_mb = EXCLUDED.max_storage_mb,
+    tenant_kind = EXCLUDED.tenant_kind,
     updated_at = EXCLUDED.updated_at;
 
 INSERT INTO analytics_user_projection (

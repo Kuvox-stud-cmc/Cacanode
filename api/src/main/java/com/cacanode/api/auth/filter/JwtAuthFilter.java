@@ -17,6 +17,7 @@ import com.cacanode.api.common.security.AppUserDetailsService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.cacanode.api.auth.service.JwtService;
 import com.cacanode.api.tenant.api.TenantIdentityApi;
+import com.cacanode.api.tenant.api.TenantRoleInvariant;
 
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -50,6 +51,10 @@ public class JwtAuthFilter extends OncePerRequestFilter {
     HttpServletResponse response,
     FilterChain filterChain
   ) throws ServletException, IOException {
+
+    if (request.getRequestURI().startsWith("/api/v1/platform/")) {
+      response.setHeader("Cache-Control", "no-store");
+    }
 
     final String authHeader = request.getHeader("Authorization");
     
@@ -85,6 +90,10 @@ public class JwtAuthFilter extends OncePerRequestFilter {
                 java.util.UUID.fromString(tenantId), java.util.UUID.fromString(tokenUserId));
         if (!"ACTIVE".equals(user.status())) {
           throw new IllegalStateException("User account is disabled or token scope is invalid");
+        }
+        TenantRoleInvariant.requireValid(user.role(), user.tenantKind());
+        if (!user.role().equals(role)) {
+          throw new IllegalStateException("JWT role is stale or invalid");
         }
         authenticatedRole = user.role();
 

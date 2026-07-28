@@ -63,7 +63,7 @@ class AnalyticsProjectionRebuildServiceTest {
     }
 
     private void createProjectionTables(JdbcTemplate jdbc) {
-        jdbc.execute("CREATE TABLE analytics_tenant_projection (tenant_id UUID PRIMARY KEY, name VARCHAR, status VARCHAR, plan VARCHAR, max_storage_mb BIGINT, created_at TIMESTAMP, updated_at TIMESTAMP)");
+        jdbc.execute("CREATE TABLE analytics_tenant_projection (tenant_id UUID PRIMARY KEY, name VARCHAR, status VARCHAR, plan VARCHAR, max_storage_mb BIGINT, created_at TIMESTAMP, updated_at TIMESTAMP, tenant_kind VARCHAR)");
         jdbc.execute("CREATE TABLE analytics_user_projection (user_id UUID PRIMARY KEY, tenant_id UUID, status VARCHAR, role VARCHAR, created_at TIMESTAMP, updated_at TIMESTAMP)");
         jdbc.execute("CREATE TABLE analytics_invitation_projection (invitation_id UUID PRIMARY KEY, tenant_id UUID, status VARCHAR, created_at TIMESTAMP, expires_at TIMESTAMP, updated_at TIMESTAMP)");
         jdbc.execute("CREATE TABLE analytics_document_projection (document_id UUID PRIMARY KEY, tenant_id UUID, file_name VARCHAR, file_type VARCHAR, status VARCHAR, visibility VARCHAR, file_size_bytes BIGINT, created_at TIMESTAMP, updated_at TIMESTAMP, deleted_at TIMESTAMP)");

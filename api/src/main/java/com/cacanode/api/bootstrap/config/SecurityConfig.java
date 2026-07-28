@@ -4,6 +4,7 @@ import com.cacanode.api.auth.filter.JwtAuthFilter;
 import com.cacanode.api.common.config.CorsProperties;
 import com.cacanode.api.common.filter.PublicRateLimitFilter;
 import com.cacanode.api.common.security.AppUserDetailsService;
+import com.cacanode.api.platform.filter.PlatformSurfaceFilter;
 import com.sendgrid.SendGrid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
@@ -39,6 +40,7 @@ public class SecurityConfig {
     private final PublicRateLimitFilter publicRateLimitFilter;
     private final AppUserDetailsService userDetailsService;     // common interface
     private final CorsProperties corsProperties;
+    private final PlatformSurfaceFilter platformSurfaceFilter;
 
     @Value("${spring.sendgrid.api-key}")
     private String sendgridApiKey;
@@ -78,7 +80,8 @@ public class SecurityConfig {
             )
             .authenticationProvider(authenticationProvider)
             .addFilterBefore(publicRateLimitFilter, UsernamePasswordAuthenticationFilter.class)
-            .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
+            .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class)
+            .addFilterAfter(platformSurfaceFilter, JwtAuthFilter.class);
 
         return http.build();
     }

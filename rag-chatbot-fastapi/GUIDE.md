@@ -12,6 +12,11 @@ and PostgreSQL data. Python consumes the context supplied by Java, reads Java-ow
 and owns only its AI indexes, caches, graph projection, and ingestion checkpoints. Do not add a
 PostgreSQL driver, business SQL, or direct access to Java-owned tables.
 
+The Java control plane also owns the single `PLATFORM_INTERNAL` tenant. That tenant is never an AI
+customer workspace: Python must not provision indexes, ingestion state, chat state, recruitment
+runtime state, or customer quota artifacts for it. Platform administration reaches Python only
+through future explicit operational contracts; Phase 1 adds no such contract.
+
 External compatibility is a first-class constraint. An internal refactor must not silently change
 protobuf fields or statuses, RabbitMQ payloads, graph HTTP routes, authentication, health paths,
 Qdrant or Kuzu identities, Redis keys/codecs, citations, ticket drafts, token usage, visibility, or

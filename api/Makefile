@@ -38,7 +38,7 @@ endif
 
 FLYWAY_PROPS = -Dflyway.url="$(POSTGRES_URL)" -Dflyway.user="$(POSTGRES_USER)" -Dflyway.password="$(POSTGRES_PASSWORD)" -Dflyway.locations=filesystem:src/main/resources/db/migration
 
-.PHONY: help deps run dev run-dev run-prod test verify package clean migrate migrate-info migrate-validate migrate-repair migrate-baseline db-reset db-seed db-reset-seed baseline-credentials
+.PHONY: help deps run dev run-dev run-prod seed-platform-admin test verify package clean migrate migrate-info migrate-validate migrate-repair migrate-baseline db-reset db-seed db-reset-seed baseline-credentials
 
 help:
 	$(info Available targets:)
@@ -47,6 +47,7 @@ help:
 	$(info   make dev        Run Spring Boot with the dev profile)
 	$(info   make run-dev    Run Spring Boot with the dev profile)
 	$(info   make run-prod   Run Spring Boot with the prod profile)
+	$(info   make seed-platform-admin  Interactively seed the first platform administrator)
 	$(info   make test       Run tests with the test profile)
 	$(info   make verify     Run the full Maven verification lifecycle)
 	$(info   make package    Build the production JAR)
@@ -75,6 +76,10 @@ run-dev:
 
 run-prod:
 	$(ENV_RUN) $(MVNW) -Pprod spring-boot:run $(MAVEN_ARGS)
+
+seed-platform-admin:
+	$(ENV_RUN) $(MVNW) -P$(PROFILE) package -DskipTests $(MAVEN_ARGS)
+	$(ENV_RUN) java -jar target/cacanode-api.jar --app.command.mode=seed-platform-admin --server.port=0 --spring.task.scheduling.enabled=false
 
 test:
 	$(TEST_ENV_RUN) $(MVNW) -Ptest -Dspring.profiles.active=test test $(MAVEN_ARGS)
@@ -117,6 +122,7 @@ db-reset:
 
 db-seed:
 	$(ENV_RUN) docker compose --env-file $(ENV_FILE) -f $(ROOT_COMPOSE_FILE) exec -T postgres psql -v ON_ERROR_STOP=1 -U "$(POSTGRES_USER)" -d "$(POSTGRES_DB)" < $(DEV_SEED_FILE)
+	$(ENV_RUN) docker compose --env-file $(ENV_FILE) -f $(ROOT_COMPOSE_FILE) exec -T postgres psql -v ON_ERROR_STOP=1 -U "$(POSTGRES_USER)" -d "$(POSTGRES_DB)" < src/main/resources/db/seed/dev/platform_admin.sql
 
 db-reset-seed: db-reset db-seed
 

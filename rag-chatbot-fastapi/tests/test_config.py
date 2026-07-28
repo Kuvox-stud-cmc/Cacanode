@@ -18,6 +18,15 @@ def test_grpc_defaults_are_plaintext_for_local_development() -> None:
     assert configured.GRPC_PLAINTEXT is True
     assert configured.GRPC_PORT == 50051
     assert configured.GENERATION_RESULT_CACHE_TTL_SECONDS == 600
+    assert configured.READINESS_DIAGNOSTICS_TIMEOUT_SECONDS == 0.5
+    assert configured.READINESS_INGESTION_SCAN_LIMIT == 200
+
+
+def test_readiness_diagnostic_bounds_are_validated() -> None:
+    with pytest.raises(ValidationError, match="diagnostics timeout"):
+        Settings(_env_file=(), READINESS_DIAGNOSTICS_TIMEOUT_SECONDS=2.1)
+    with pytest.raises(ValidationError, match="scan limit"):
+        Settings(_env_file=(), READINESS_INGESTION_SCAN_LIMIT=0)
 
 
 def test_mtls_requires_complete_server_material() -> None:

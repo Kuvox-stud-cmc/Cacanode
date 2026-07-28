@@ -13,6 +13,7 @@ import com.cacanode.api.tenant.model.Chatbot;
 import com.cacanode.api.tenant.model.KnowledgeBase;
 import com.cacanode.api.tenant.model.Tenant;
 import com.cacanode.api.tenant.model.WidgetConfig;
+import com.cacanode.api.tenant.api.TenantKind;
 import com.cacanode.api.tenant.repository.ChatbotRepository;
 import com.cacanode.api.tenant.repository.KnowledgeBaseRepository;
 import com.cacanode.api.tenant.repository.TenantRepository;
@@ -60,6 +61,7 @@ public class TenantWorkspaceService {
     private TenantWorkspaceResponse loadOrProvisionAuthoritative(UUID tenantId) {
         Tenant tenant = tenantRepository.findById(tenantId)
                 .orElseThrow(() -> new ResourceNotFoundException("Tenant workspace was not found"));
+        requireCustomer(tenant);
 
         KnowledgeBase knowledgeBase = getOrCreateKnowledgeBase(tenant);
         Chatbot chatbot = getOrCreateChatbot(tenant, knowledgeBase);
@@ -70,9 +72,16 @@ public class TenantWorkspaceService {
 
     @Transactional
     public void provisionDefaultWorkspace(Tenant tenant) {
+        requireCustomer(tenant);
         KnowledgeBase knowledgeBase = getOrCreateKnowledgeBase(tenant);
         Chatbot chatbot = getOrCreateChatbot(tenant, knowledgeBase);
         ensureWidgetConfig(tenant, chatbot);
+    }
+
+    private void requireCustomer(Tenant tenant) {
+        if (tenant.getKind() != TenantKind.CUSTOMER) {
+            throw new ResourceNotFoundException("Tenant workspace was not found");
+        }
     }
 
     private KnowledgeBase getOrCreateKnowledgeBase(Tenant tenant) {

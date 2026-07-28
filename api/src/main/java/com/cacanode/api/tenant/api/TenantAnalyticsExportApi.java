@@ -14,7 +14,13 @@ public interface TenantAnalyticsExportApi {
     }
 
     record TenantSnapshot(UUID id, String name, String status, String plan, long maxStorageMb,
-                          LocalDateTime createdAt, LocalDateTime updatedAt) {}
+                          LocalDateTime createdAt, LocalDateTime updatedAt, TenantKind kind) {
+        public TenantSnapshot { kind = TenantKind.defaulted(kind); }
+        public TenantSnapshot(UUID id, String name, String status, String plan, long maxStorageMb,
+                              LocalDateTime createdAt, LocalDateTime updatedAt) {
+            this(id, name, status, plan, maxStorageMb, createdAt, updatedAt, TenantKind.CUSTOMER);
+        }
+    }
     record UserSnapshot(UUID id, UUID tenantId, String status, String role,
                         LocalDateTime createdAt, LocalDateTime updatedAt) {}
     record InvitationSnapshot(UUID id, UUID tenantId, String status, LocalDateTime createdAt,

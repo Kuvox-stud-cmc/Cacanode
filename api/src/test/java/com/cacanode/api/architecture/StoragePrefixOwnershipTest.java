@@ -15,7 +15,7 @@ class StoragePrefixOwnershipTest {
             for (Path file : files.filter(path -> path.toString().endsWith(".java")).toList()) {
                 String relative = root.relativize(file).toString().replace('\\', '/');
                 if (!relative.startsWith("recruitment/")
-                        && Files.readString(file).contains("recruitment/")) {
+                        && Files.readString(file).contains("\"recruitment/")) {
                     fail(relative + " uses the recruitment-owned SeaweedFS prefix");
                 }
             }

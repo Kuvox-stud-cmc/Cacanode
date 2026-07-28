@@ -11,6 +11,8 @@ from uuid import uuid4
 
 from redis.asyncio import Redis
 
+from app.modules.ingestion.api.diagnostics import IngestionDiagnostic
+
 
 class IngestionPhase(StrEnum):
     CLAIMED = "CLAIMED"
@@ -202,6 +204,39 @@ class RedisIngestionCheckpointStore:
             if cursor == 0:
                 break
         return requests
+
+    async def inspect(self, *, scan_limit: int) -> IngestionDiagnostic:
+        inspected = 0
+        incomplete = 0
+        cursor: int = 0
+        pattern = f"{self._prefix}:ingestion:job:*"
+        truncated = False
+        while inspected < scan_limit:
+            cursor, keys = await self._redis.scan(
+                cursor=cursor,
+                match=pattern,
+                count=min(scan_limit - inspected, 100),
+            )
+            remaining = scan_limit - inspected
+            selected = keys[:remaining]
+            for key in selected:
+                phase = _text(
+                    await cast(Awaitable[Any], self._redis.hget(key, "phase"))
+                )
+                if phase not in {IngestionPhase.COMPLETE, IngestionPhase.FAILED}:
+                    incomplete += 1
+            inspected += len(selected)
+            if len(keys) > len(selected):
+                truncated = True
+                break
+            if cursor == 0:
+                break
+        if cursor != 0:
+            truncated = True
+        return IngestionDiagnostic(
+            incomplete_checkpoint_count=incomplete,
+            truncated=truncated,
+        )
 
     def event_key(self, event_id: str) -> str:
         return f"{self._prefix}:ingestion:event:{event_id}"

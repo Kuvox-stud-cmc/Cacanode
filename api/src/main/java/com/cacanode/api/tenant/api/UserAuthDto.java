@@ -17,4 +17,5 @@ public class UserAuthDto {
     private String role;
     private String status;
     private String tenantStatus;
+    private TenantKind tenantKind;
 }

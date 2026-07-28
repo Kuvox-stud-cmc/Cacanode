@@ -25,17 +25,31 @@ public interface TenantIdentityApi {
 
     List<UserSnapshot> listUsers(UUID tenantId);
 
-    InvitationSnapshot validateInvitation(String tokenHash);
+    InvitationSnapshot validateInvitation(String rawToken);
 
     AcceptedUserSnapshot acceptInvitation(
-            String tokenHash, String fullName, String passwordHash);
+            String rawToken, String fullName, String passwordHash);
 
     long memberUsage(UUID tenantId, LocalDateTime now);
 
-    record TenantSnapshot(UUID id, String name) {
+    record TenantSnapshot(UUID id, String name, TenantKind kind) {
+        public TenantSnapshot {
+            kind = TenantKind.defaulted(kind);
+        }
+
+        public TenantSnapshot(UUID id, String name) {
+            this(id, name, TenantKind.CUSTOMER);
+        }
     }
 
-    record UserSnapshot(UUID id, UUID tenantId, String fullName, String email, String role, String status) {
+    record UserSnapshot(UUID id, UUID tenantId, String fullName, String email, String role, String status,
+                        TenantKind tenantKind) {
+        public UserSnapshot {
+            tenantKind = TenantKind.defaulted(tenantKind);
+        }
+        public UserSnapshot(UUID id, UUID tenantId, String fullName, String email, String role, String status) {
+            this(id, tenantId, fullName, email, role, status, TenantKind.CUSTOMER);
+        }
     }
 
     record InvitationSnapshot(String email, String tenantName, String role, LocalDateTime expiresAt) {
@@ -50,7 +64,11 @@ public interface TenantIdentityApi {
             String status,
             String plan,
             String tenantStatus,
-            String passwordHash
+            String passwordHash,
+            TenantKind tenantKind
     ) {
+        public AcceptedUserSnapshot {
+            tenantKind = TenantKind.defaulted(tenantKind);
+        }
     }
 }

@@ -18,6 +18,8 @@ import com.cacanode.api.tenant.cache.IntegrationTokenCacheInvalidationPublisher;
 import com.cacanode.api.tenant.api.UserAuthDto;
 import com.cacanode.api.tenant.api.TenantPlan;
 import com.cacanode.api.tenant.api.TenantStatus;
+import com.cacanode.api.tenant.api.TenantKind;
+import com.cacanode.api.tenant.api.TenantKindApi;
 import com.cacanode.api.tenant.enums.UserRole;
 import com.cacanode.api.tenant.enums.UserStatus;
 import com.cacanode.api.tenant.model.Tenant;
@@ -42,7 +44,7 @@ import java.util.regex.Pattern;
 @Service
 @Slf4j(topic = "TENANT-API")
 @RequiredArgsConstructor
-public class TenantModuleApiImpl implements TenantIdentityApi, TenantEntitlementApi, TenantPublicProfileApi {
+public class TenantModuleApiImpl implements TenantIdentityApi, TenantEntitlementApi, TenantPublicProfileApi, TenantKindApi {
 
         private final PasswordEncoder passwordEncoder;
         private final TenantRepository tenantRepository;
@@ -64,6 +66,7 @@ public class TenantModuleApiImpl implements TenantIdentityApi, TenantEntitlement
                 // 1. Create tenant
                 Tenant tenant = new Tenant();
                 tenant.setName(command.getCompanyName());
+                tenant.setKind(TenantKind.CUSTOMER);
                 tenant.setCustomerAnswerPrompt(
                                 CustomerAnswerPromptDefaults.forTenant(command.getCompanyName()));
                 tenant.setSlug(generateSlug(command.getCompanyName()));
@@ -109,6 +112,7 @@ public class TenantModuleApiImpl implements TenantIdentityApi, TenantEntitlement
                                 .role(user.getRole().name())
                                 .plan(tenant.getPlan().name())
                                 .status(tenant.getStatus().name())
+                                .tenantKind(tenant.getKind())
                                 .build();
         }
 
@@ -125,6 +129,7 @@ public class TenantModuleApiImpl implements TenantIdentityApi, TenantEntitlement
                                                 .role(user.getRole().name())
                                                 .plan(user.getTenant().getPlan().name())
                                                 .status(user.getStatus().name())
+                                                .tenantKind(user.getTenant().getKind())
                                                 .build())
                                 .orElse(null);
         }
@@ -142,6 +147,7 @@ public class TenantModuleApiImpl implements TenantIdentityApi, TenantEntitlement
                                                 .role(user.getRole().name())
                                                 .status(user.getStatus().name())
                                                 .tenantStatus(user.getTenant().getStatus().name())
+                                                .tenantKind(user.getTenant().getKind())
                                                 .build())
                                 .orElse(null);
         }
@@ -159,6 +165,7 @@ public class TenantModuleApiImpl implements TenantIdentityApi, TenantEntitlement
                                                 .role(user.getRole().name())
                                                 .status(user.getStatus().name())
                                                 .tenantStatus(user.getTenant().getStatus().name())
+                                                .tenantKind(user.getTenant().getKind())
                                                 .build())
                                 .orElse(null);
         }
@@ -211,7 +218,7 @@ public class TenantModuleApiImpl implements TenantIdentityApi, TenantEntitlement
         public TenantSnapshot getTenant(UUID tenantId) {
                 Tenant tenant = tenantRepository.findById(tenantId)
                                 .orElseThrow(() -> new ResourceNotFoundException("Tenant was not found"));
-                return new TenantSnapshot(tenant.getId(), tenant.getName());
+                return new TenantSnapshot(tenant.getId(), tenant.getName(), tenant.getKind());
         }
 
         @Override
@@ -219,8 +226,11 @@ public class TenantModuleApiImpl implements TenantIdentityApi, TenantEntitlement
         public TenantPublicProfile getPublicProfile(UUID tenantId) {
                 Tenant tenant = tenantRepository.findById(tenantId)
                                 .orElseThrow(() -> new ResourceNotFoundException("Tenant was not found"));
+                if (tenant.getKind() != TenantKind.CUSTOMER) {
+                        throw new ResourceNotFoundException("Tenant was not found");
+                }
                 return new TenantPublicProfile(
-                                tenant.getId(), tenant.getSlug(), tenant.getName(), tenant.getStatus());
+                                tenant.getId(), tenant.getSlug(), tenant.getName(), tenant.getStatus(), tenant.getKind());
         }
 
         @Override
@@ -239,13 +249,13 @@ public class TenantModuleApiImpl implements TenantIdentityApi, TenantEntitlement
         }
 
         @Override
-        public InvitationSnapshot validateInvitation(String tokenHash) {
-                return userManagementService.validateInvitationHash(tokenHash);
+        public InvitationSnapshot validateInvitation(String rawToken) {
+                return userManagementService.validateInvitationToken(rawToken);
         }
 
         @Override
-        public AcceptedUserSnapshot acceptInvitation(String tokenHash, String fullName, String passwordHash) {
-                return userManagementService.acceptInvitationHash(tokenHash, fullName, passwordHash);
+        public AcceptedUserSnapshot acceptInvitation(String rawToken, String fullName, String passwordHash) {
+                return userManagementService.acceptInvitationToken(rawToken, fullName, passwordHash);
         }
 
         @Override
@@ -258,7 +268,15 @@ public class TenantModuleApiImpl implements TenantIdentityApi, TenantEntitlement
 
         private UserSnapshot userSnapshot(User user) {
                 return new UserSnapshot(user.getId(), user.getTenant().getId(), user.getFullName(),
-                                user.getEmail(), user.getRole().name(), user.getStatus().name());
+                                user.getEmail(), user.getRole().name(), user.getStatus().name(),
+                                user.getTenant().getKind());
+        }
+
+        @Override
+        @Transactional(readOnly = true)
+        public TenantKind kind(UUID tenantId) {
+                return tenantRepository.findById(tenantId).map(Tenant::getKind)
+                                .orElseThrow(() -> new ResourceNotFoundException("Tenant was not found"));
         }
 
         @Override
@@ -306,7 +324,7 @@ public class TenantModuleApiImpl implements TenantIdentityApi, TenantEntitlement
                 publishBusinessEvent("tenant.projection.changed.v1", new TenantProjectionChangedEvent(
                                 tenant.getId(), tenant.getName(), tenant.getStatus().name(),
                                 tenant.getPlan().name(), tenant.getMaxStorageMb() == null ? 0 : tenant.getMaxStorageMb(),
-                                tenant.getCreatedAt() == null ? now : tenant.getCreatedAt(), now));
+                                tenant.getCreatedAt() == null ? now : tenant.getCreatedAt(), now, tenant.getKind()));
         }
 
         private TenantEntitlements toEntitlements(Tenant tenant) {

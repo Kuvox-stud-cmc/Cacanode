@@ -5,4 +5,5 @@ export const publicConfig = {
   siteUrl: process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000",
   turnstileSiteKey: process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY ?? "",
   recruitmentEnabled: process.env.NEXT_PUBLIC_RECRUITMENT_ENABLED === "true",
+  platformAdministrationEnabled: process.env.NEXT_PUBLIC_PLATFORM_ADMINISTRATION_ENABLED === "true",
 } as const;

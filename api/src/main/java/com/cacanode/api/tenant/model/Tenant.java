@@ -23,6 +23,10 @@ public class Tenant extends BaseEntity {
     private String slug;
 
     @Enumerated(EnumType.STRING)
+    @Column(name = "kind", nullable = false, length = 32)
+    private com.cacanode.api.tenant.api.TenantKind kind = com.cacanode.api.tenant.api.TenantKind.CUSTOMER;
+
+    @Enumerated(EnumType.STRING)
     @Column(name = "plan", nullable = false, length = 50)
     private TenantPlan plan = TenantPlan.TRIAL;
 

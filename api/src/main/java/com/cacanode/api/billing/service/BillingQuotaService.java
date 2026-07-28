@@ -21,6 +21,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Clock;
 import java.time.LocalDateTime;
 import java.util.UUID;
+import com.cacanode.api.tenant.api.TenantKindApi;
 
 @Service
 @RequiredArgsConstructor
@@ -33,10 +34,13 @@ public class BillingQuotaService implements BillingQuotaApi {
     private final Clock clock;
     @Autowired(required = false)
     private DurableEventPublisher durableEventPublisher;
+    @Autowired(required = false)
+    private TenantKindApi tenantKinds;
 
     @Override
     @Transactional
     public QuotaConsumption consumeMessageQuota(UUID tenantId) {
+        requireCustomer(tenantId);
         BillingSubscription subscription = lockOrCreateTrial(tenantId);
         var period = periods.currentQuotaPeriod(subscription, now());
         UsageMetrics usage = usageRepository.findByTenantIDAndPeriodStart(tenantId, period.start())
@@ -64,6 +68,7 @@ public class BillingQuotaService implements BillingQuotaApi {
     @Override
     @Transactional
     public void rollbackMessageQuota(UUID tenantId, UUID consumptionId) {
+        requireCustomer(tenantId);
         BillingSubscription subscription = subscriptionRepository.findByTenantIdForUpdate(tenantId).orElse(null);
         if (subscription == null) {
             return;
@@ -118,5 +123,9 @@ public class BillingQuotaService implements BillingQuotaApi {
 
     private LocalDateTime now() {
         return LocalDateTime.now(clock);
+    }
+
+    private void requireCustomer(UUID tenantId) {
+        if (tenantKinds != null) tenantKinds.requireCustomer(tenantId);
     }
 }

@@ -9,6 +9,7 @@ import com.cacanode.api.billing.repository.HiringQuotaReservationRepository;
 import com.cacanode.api.billing.repository.UsageMetricsRepository;
 import com.cacanode.api.common.cache.BusinessCacheInvalidationPublisher;
 import com.cacanode.api.common.exception.custom.ResourceNotFoundException;
+import com.cacanode.api.tenant.api.TenantKindApi;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -47,10 +48,13 @@ public class HiringQuotaService implements HiringQuotaApi {
     private final Clock clock;
     @Autowired(required = false)
     private BusinessCacheInvalidationPublisher cacheInvalidationPublisher;
+    @Autowired(required = false)
+    private TenantKindApi tenantKinds;
 
     @Override
     @Transactional
     public Reservation reserveActiveJob(UUID tenantId, UUID jobId) {
+        requireCustomer(tenantId);
         return reserve(tenantId, jobId, HiringQuotaKind.ACTIVE_JOB, 1,
                 EntitlementSnapshot::maxActiveJobs, "ACTIVE_JOB_QUOTA_EXCEEDED", false, null);
     }
@@ -58,6 +62,7 @@ public class HiringQuotaService implements HiringQuotaApi {
     @Override
     @Transactional
     public void releaseActiveJob(UUID tenantId, UUID jobId, UUID reservationId) {
+        requireCustomer(tenantId);
         BillingSubscription subscription = lockSubscription(tenantId);
         HiringQuotaReservation reservation = reservationRepository
                 .findByTenantIdAndQuotaKindAndAggregateId(tenantId, HiringQuotaKind.ACTIVE_JOB, jobId)
@@ -76,6 +81,7 @@ public class HiringQuotaService implements HiringQuotaApi {
     @Override
     @Transactional
     public Consumption consumeVerifiedApplication(UUID tenantId, UUID applicationId) {
+        requireCustomer(tenantId);
         return consumeOne(tenantId, applicationId, HiringQuotaKind.VERIFIED_APPLICATION,
                 EntitlementSnapshot::maxVerifiedApplications, UsageMetrics::getVerifiedApplicationCount,
                 UsageMetrics::setVerifiedApplicationCount, "VERIFIED_APPLICATION_QUOTA_EXCEEDED");
@@ -84,6 +90,7 @@ public class HiringQuotaService implements HiringQuotaApi {
     @Override
     @Transactional(noRollbackFor = HiringQuotaApi.HiringQuotaExceededException.class)
     public Consumption consumeCvAnalysis(UUID tenantId, UUID analysisId) {
+        requireCustomer(tenantId);
         return consumeOne(tenantId, analysisId, HiringQuotaKind.CV_ANALYSIS,
                 EntitlementSnapshot::maxCvAnalyses, UsageMetrics::getCvAnalysisCount,
                 UsageMetrics::setCvAnalysisCount, "CV_ANALYSIS_QUOTA_EXCEEDED");
@@ -92,6 +99,7 @@ public class HiringQuotaService implements HiringQuotaApi {
     @Override
     @Transactional
     public Reservation reserveStorage(UUID tenantId, UUID aggregateId, long bytes) {
+        requireCustomer(tenantId);
         return reserve(tenantId, aggregateId, HiringQuotaKind.RECRUITMENT_STORAGE, bytes,
                 EntitlementSnapshot::maxRecruitmentStorageBytes, "HIRING_STORAGE_QUOTA_EXCEEDED", true, null);
     }
@@ -99,6 +107,7 @@ public class HiringQuotaService implements HiringQuotaApi {
     @Override
     @Transactional
     public Consumption commitStorage(UUID tenantId, UUID reservationId, long actualBytes) {
+        requireCustomer(tenantId);
         requireNonNegative(actualBytes);
         BillingSubscription subscription = lockSubscription(tenantId);
         long limit = limit(subscription, EntitlementSnapshot::maxRecruitmentStorageBytes);
@@ -137,6 +146,7 @@ public class HiringQuotaService implements HiringQuotaApi {
     @Override
     @Transactional
     public void releaseStorage(UUID tenantId, UUID reservationId) {
+        requireCustomer(tenantId);
         BillingSubscription subscription = lockSubscription(tenantId);
         HiringQuotaReservation reservation = reservation(tenantId, reservationId, HiringQuotaKind.RECRUITMENT_STORAGE);
         if (reservation.getState() == HiringQuotaReservationState.RELEASED) return;
@@ -150,13 +160,14 @@ public class HiringQuotaService implements HiringQuotaApi {
     @Override
     @Transactional
     public Reservation reserveInterviewSeconds(UUID tenantId, UUID callAttemptId, long seconds) {
+        requireCustomer(tenantId);
         return reserve(tenantId, callAttemptId, HiringQuotaKind.INTERVIEW_SECONDS, seconds,
                 EntitlementSnapshot::maxInterviewSeconds, "INTERVIEW_SECONDS_QUOTA_EXCEEDED", true, null);
     }
 
     @Override
     @Transactional
-    public Reservation reserveInterviewSeconds(UUID tenantId,UUID aggregateId,long seconds,LocalDateTime expiresAt){
+    public Reservation reserveInterviewSeconds(UUID tenantId,UUID aggregateId,long seconds,LocalDateTime expiresAt){requireCustomer(tenantId);
         if(expiresAt==null||!expiresAt.isAfter(now()))throw error(INVALID_AMOUNT,"Interview reservation expiry must be in the future");
         return reserve(tenantId,aggregateId,HiringQuotaKind.INTERVIEW_SECONDS,seconds,
                 EntitlementSnapshot::maxInterviewSeconds,"INTERVIEW_SECONDS_QUOTA_EXCEEDED",true,expiresAt);
@@ -164,7 +175,7 @@ public class HiringQuotaService implements HiringQuotaApi {
 
     @Override
     @Transactional
-    public void updateInterviewReservationExpiry(UUID tenantId,UUID reservationId,LocalDateTime expiresAt){
+    public void updateInterviewReservationExpiry(UUID tenantId,UUID reservationId,LocalDateTime expiresAt){requireCustomer(tenantId);
         if(expiresAt==null||!expiresAt.isAfter(now()))throw error(INVALID_AMOUNT,"Interview reservation expiry must be in the future");
         lockSubscription(tenantId);
         HiringQuotaReservation reservation=reservation(tenantId,reservationId,HiringQuotaKind.INTERVIEW_SECONDS);
@@ -174,7 +185,7 @@ public class HiringQuotaService implements HiringQuotaApi {
 
     @Override
     @Transactional(readOnly=true)
-    public boolean isInterviewReservationActive(UUID tenantId,UUID reservationId,long expectedSeconds){
+    public boolean isInterviewReservationActive(UUID tenantId,UUID reservationId,long expectedSeconds){requireCustomer(tenantId);
         if(reservationId==null||expectedSeconds<=0)return false;
         return reservationRepository.findByIdAndTenantId(reservationId,tenantId)
                 .filter(value->value.getQuotaKind()==HiringQuotaKind.INTERVIEW_SECONDS)
@@ -187,6 +198,7 @@ public class HiringQuotaService implements HiringQuotaApi {
     @Override
     @Transactional
     public Consumption settleInterviewSeconds(UUID tenantId, UUID reservationId, long connectedSeconds) {
+        requireCustomer(tenantId);
         requireNonNegative(connectedSeconds);
         BillingSubscription subscription = lockSubscription(tenantId);
         long limit = limit(subscription, EntitlementSnapshot::maxInterviewSeconds);
@@ -219,6 +231,7 @@ public class HiringQuotaService implements HiringQuotaApi {
     @Override
     @Transactional
     public void releaseInterviewSeconds(UUID tenantId, UUID reservationId) {
+        requireCustomer(tenantId);
         BillingSubscription subscription = lockSubscription(tenantId);
         HiringQuotaReservation reservation = reservation(tenantId, reservationId, HiringQuotaKind.INTERVIEW_SECONDS);
         if (reservation.getState() != HiringQuotaReservationState.RESERVED) return;
@@ -417,6 +430,10 @@ public class HiringQuotaService implements HiringQuotaApi {
 
     private void invalidate(UUID tenantId) {
         if (cacheInvalidationPublisher != null) cacheInvalidationPublisher.billing(tenantId);
+    }
+
+    private void requireCustomer(UUID tenantId) {
+        if (tenantKinds != null) tenantKinds.requireCustomer(tenantId);
     }
 
     @FunctionalInterface

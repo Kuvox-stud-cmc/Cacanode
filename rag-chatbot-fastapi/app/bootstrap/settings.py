@@ -24,6 +24,8 @@ class Settings(BaseSettings):
     CORS_ORIGINS: str = "http://localhost:3000"
     DEFAULT_LOCALE: str = "vi-VN"
     READINESS_REQUIRE_MODELS: bool = False
+    READINESS_DIAGNOSTICS_TIMEOUT_SECONDS: float = 0.5
+    READINESS_INGESTION_SCAN_LIMIT: int = 200
 
     REDIS_URL: str = "redis://localhost:16379/0"
     REDIS_CONNECT_TIMEOUT_SECONDS: float = 1.0
@@ -245,6 +247,10 @@ class Settings(BaseSettings):
             raise ValueError("RERANKER_TIMEOUT_SECONDS must be positive")
         if self.REDIS_CONNECT_TIMEOUT_SECONDS <= 0 or self.REDIS_OPERATION_TIMEOUT_SECONDS <= 0:
             raise ValueError("Redis timeouts must be positive")
+        if not 0 < self.READINESS_DIAGNOSTICS_TIMEOUT_SECONDS <= 2:
+            raise ValueError("Readiness diagnostics timeout must be between 0 and 2 seconds")
+        if not 1 <= self.READINESS_INGESTION_SCAN_LIMIT <= 1000:
+            raise ValueError("Readiness ingestion scan limit must be between 1 and 1000")
         if (
             min(
                 self.INGESTION_CHECKPOINT_RETENTION_SECONDS,

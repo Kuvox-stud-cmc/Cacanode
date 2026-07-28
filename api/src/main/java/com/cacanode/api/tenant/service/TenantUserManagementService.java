@@ -6,12 +6,14 @@ import com.cacanode.api.common.cache.BusinessCacheInvalidationPublisher;
 import com.cacanode.api.common.cache.CacheKeyFactory;
 import com.cacanode.api.common.cache.VersionedJsonCache;
 import com.cacanode.api.common.event.AuditLogEvent;
+import com.cacanode.api.common.service.SynchronousAuditRecorder;
 import com.cacanode.api.common.event.durable.DurableEventPublisher;
 import com.cacanode.api.tenant.api.event.UserInvitedEvent;
 import com.cacanode.api.tenant.api.event.UserProjectionChangedEvent;
 import com.cacanode.api.tenant.api.event.InvitationProjectionChangedEvent;
 import com.cacanode.api.tenant.api.event.UserDeactivatedEvent;
 import com.cacanode.api.tenant.api.TenantIdentityApi;
+import com.cacanode.api.tenant.api.TenantKind;
 import com.cacanode.api.common.exception.custom.BadRequestException;
 import com.cacanode.api.common.exception.custom.ConflictException;
 import com.cacanode.api.common.exception.custom.ResourceNotFoundException;
@@ -60,6 +62,8 @@ public class TenantUserManagementService {
     private CacheKeyFactory cacheKeyFactory;
     @Autowired(required = false)
     private BusinessCacheInvalidationPublisher businessInvalidationPublisher;
+    @Autowired(required = false)
+    private SynchronousAuditRecorder synchronousAudits;
 
     @Autowired
     public TenantUserManagementService(
@@ -150,7 +154,7 @@ public class TenantUserManagementService {
 
         publishInvitationEmail(invitation, token);
         audit(tenantId, actorId, LogAction.USER_INVITE, "invitation", invitation.getId(),
-                Map.of("email", email, "role", role.name()));
+                Map.of("role", role.name(), "transition", "NONE->PENDING"));
         invalidateMembers(tenantId);
         return toInvitation(invitation);
     }
@@ -182,7 +186,7 @@ public class TenantUserManagementService {
 
         publishInvitationEmail(invitation, token);
         audit(tenantId, actorId, LogAction.USER_INVITATION_RESENT, "invitation", invitationId,
-                Map.of("email", invitation.getEmail()));
+                Map.of("transition", "PENDING_OR_EXPIRED->PENDING"));
         invalidateMembers(tenantId);
         return toInvitation(invitation);
     }
@@ -197,7 +201,7 @@ public class TenantUserManagementService {
         invitationRepository.save(invitation);
         publishInvitationProjection(invitation);
         audit(tenantId, actorId, LogAction.USER_INVITATION_CANCELLED, "invitation", invitationId,
-                Map.of("email", invitation.getEmail()));
+                Map.of("transition", "PENDING->CANCELLED"));
         invalidateMembers(tenantId);
     }
 
@@ -250,6 +254,16 @@ public class TenantUserManagementService {
     }
 
     @Transactional(readOnly = true)
+    public TenantIdentityApi.InvitationSnapshot validateInvitationToken(String rawToken) {
+        Invitation invitation = findInvitation(rawToken, false);
+        validateAcceptable(invitation);
+        validateInvitationRoleInvariant(invitation);
+        return new TenantIdentityApi.InvitationSnapshot(invitation.getEmail(), invitation.getTenant().getName(),
+                invitation.getRole().name(), invitation.getExpiresAt());
+    }
+
+    @Deprecated
+    @Transactional(readOnly = true)
     public TenantIdentityApi.InvitationSnapshot validateInvitationHash(String tokenHash) {
         Invitation invitation = invitationRepository.findByTokenHash(tokenHash)
                 .orElseThrow(() -> new ResourceNotFoundException("Invitation is invalid or no longer available"));
@@ -259,12 +273,19 @@ public class TenantUserManagementService {
     }
 
     @Transactional
-    public TenantIdentityApi.AcceptedUserSnapshot acceptInvitationHash(
-            String tokenHash, String fullName, String passwordHash) {
-        Invitation invitation = invitationRepository.findByTokenHashForUpdate(tokenHash)
-                .orElseThrow(() -> new ResourceNotFoundException("Invitation is invalid or no longer available"));
+    public TenantIdentityApi.AcceptedUserSnapshot acceptInvitationToken(
+            String rawToken, String fullName, String passwordHash) {
+        Invitation invitation = findInvitation(rawToken, true);
+        return acceptLockedInvitation(invitation, fullName, passwordHash);
+    }
+
+    private TenantIdentityApi.AcceptedUserSnapshot acceptLockedInvitation(
+            Invitation invitation, String fullName, String passwordHash) {
         validateAcceptable(invitation);
-        if (entitlementService != null) entitlementService.assertCanAcceptInvitation(invitation.getTenant().getId());
+        validateInvitationRoleInvariant(invitation);
+        if (invitation.getTenant().getKind() == TenantKind.CUSTOMER && entitlementService != null) {
+            entitlementService.assertCanAcceptInvitation(invitation.getTenant().getId());
+        }
         String email = normalizeEmail(invitation.getEmail());
         if (userRepository.existsByEmailIgnoreCase(email)) {
             throw new ConflictException("An account already exists for this email");
@@ -286,13 +307,28 @@ public class TenantUserManagementService {
         publishUserProjection(user);
         publishInvitationProjection(invitation);
 
-        audit(invitation.getTenant().getId(), user.getId(), LogAction.USER_INVITATION_ACCEPTED,
-                "invitation", invitation.getId(), Map.of("email", email));
+        if (invitation.getTenant().getKind() == TenantKind.PLATFORM_INTERNAL && synchronousAudits != null) {
+            synchronousAudits.record(invitation.getTenant().getId(), user.getId(),
+                    LogAction.PLATFORM_STAFF_INVITATION_ACCEPTED, "invitation", invitation.getId(),
+                    null, null, Map.of("transition", "PENDING->ACCEPTED", "targetId", user.getId().toString()));
+        } else {
+            audit(invitation.getTenant().getId(), user.getId(), LogAction.USER_INVITATION_ACCEPTED,
+                    "invitation", invitation.getId(), Map.of("transition", "PENDING->ACCEPTED"));
+        }
         invalidateMembers(invitation.getTenant().getId());
         return new TenantIdentityApi.AcceptedUserSnapshot(
                 user.getId(), user.getTenant().getId(), user.getEmail(), user.getFullName(),
                 user.getRole().name(), user.getStatus().name(), user.getTenant().getPlan().name(),
-                user.getTenant().getStatus().name(), user.getPasswordHash());
+                user.getTenant().getStatus().name(), user.getPasswordHash(), user.getTenant().getKind());
+    }
+
+    @Deprecated
+    @Transactional
+    public TenantIdentityApi.AcceptedUserSnapshot acceptInvitationHash(
+            String tokenHash, String fullName, String passwordHash) {
+        Invitation invitation = invitationRepository.findByTokenHashForUpdate(tokenHash)
+                .orElseThrow(() -> new ResourceNotFoundException("Invitation is invalid or no longer available"));
+        return acceptLockedInvitation(invitation, fullName, passwordHash);
     }
 
     private DirectoryResponse decorateDirectory(DirectoryResponse snapshot, UUID currentUserId, LocalDateTime now) {
@@ -413,12 +449,42 @@ public class TenantUserManagementService {
                 invitation.getLastSentAt());
     }
 
-    private String hashToken(String token) {
+    String hashToken(String token) {
+        try {
+            return Base64.getUrlEncoder().withoutPadding().encodeToString(MessageDigest.getInstance("SHA-256")
+                    .digest(token.getBytes(StandardCharsets.UTF_8)));
+        } catch (NoSuchAlgorithmException exception) {
+            throw new IllegalStateException("SHA-256 is unavailable", exception);
+        }
+    }
+
+    private String legacyHashToken(String token) {
         try {
             return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
                     .digest(token.getBytes(StandardCharsets.UTF_8)));
         } catch (NoSuchAlgorithmException exception) {
             throw new IllegalStateException("SHA-256 is unavailable", exception);
+        }
+    }
+
+    private Invitation findInvitation(String rawToken, boolean lock) {
+        if (rawToken == null || rawToken.isBlank()) {
+            throw new ResourceNotFoundException("Invitation is invalid or no longer available");
+        }
+        var canonical = lock
+                ? invitationRepository.findByTokenHashForUpdate(hashToken(rawToken))
+                : invitationRepository.findByTokenHash(hashToken(rawToken));
+        return canonical.orElseGet(() -> (lock
+                ? invitationRepository.findByTokenHashForUpdate(legacyHashToken(rawToken))
+                : invitationRepository.findByTokenHash(legacyHashToken(rawToken)))
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        "Invitation is invalid or no longer available")));
+    }
+
+    private void validateInvitationRoleInvariant(Invitation invitation) {
+        boolean platform = invitation.getTenant().getKind() == TenantKind.PLATFORM_INTERNAL;
+        if (platform != (invitation.getRole() == UserRole.PLATFORM_ADMIN)) {
+            throw new BadRequestException("Invitation role is incompatible with tenant kind");
         }
     }
 }
