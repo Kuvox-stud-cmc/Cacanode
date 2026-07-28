@@ -6,6 +6,7 @@ import com.cacanode.api.common.exception.custom.UnauthorizedException;
 import com.cacanode.api.common.cache.BusinessCacheInvalidationPublisher;
 import com.cacanode.api.tenant.api.TenantEntitlementApi;
 import com.cacanode.api.tenant.api.IntegrationAccessApi;
+import com.cacanode.api.tenant.api.WidgetOriginNotAllowedException;
 import com.cacanode.api.tenant.cache.IntegrationTokenCacheInvalidationPublisher;
 import com.cacanode.api.tenant.dto.IntegrationTokenDtos;
 import com.cacanode.api.tenant.model.Chatbot;
@@ -152,11 +153,6 @@ public class IntegrationTokenService implements IntegrationAccessApi {
     }
 
     @Transactional
-    public Principal authenticate(String authorization, String requiredScope) {
-        return authenticate(authorization, requiredScope, null);
-    }
-
-    @Transactional
     public Principal authenticate(String authorization, String requiredScope, String parentOrigin) {
         if (WIDGET_SCOPE.equals(requiredScope) && isWidgetPreviewAuthorization(authorization)) {
             return widgetPreviewTokenService.authenticate(authorization.substring("Bearer ".length()));
@@ -186,9 +182,9 @@ public class IntegrationTokenService implements IntegrationAccessApi {
         }
         if (WIDGET_SCOPE.equals(requiredScope)
                 && !token.getChatbot().getAllowedOrigins().isEmpty()
-                && !token.getChatbot().getAllowedOrigins().contains(parentOrigin)) {
-            throw new org.springframework.security.access.AccessDeniedException(
-                    "Website origin is not allowed");
+                && (parentOrigin == null
+                        || !token.getChatbot().getAllowedOrigins().contains(parentOrigin))) {
+            throw new WidgetOriginNotAllowedException();
         }
         if (tenantModuleApi != null && API_SCOPE.equals(requiredScope)
                 && !tenantModuleApi.getEntitlements(token.getTenant().getId()).apiAccess()) {

@@ -4,6 +4,7 @@ import type { PublicJob } from "@/lib/recruitment-api";
 
 export function localizedPath(locale:string,path:string){return `${publicConfig.siteUrl.replace(/\/$/,"")}${locale==="vi"?"/vi":""}${path}`;}
 export function languageAlternates(path:string){return {en:localizedPath("en",path),vi:localizedPath("vi",path),"x-default":localizedPath("en",path)};}
+export function tenantCareersPath(tenantSlug:string){return `/careers/${encodeURIComponent(tenantSlug)}`;}
 
 export function publicJobMetadata(locale:string,job:PublicJob):Metadata {
   const path=`/jobs/${job.publicId}`;

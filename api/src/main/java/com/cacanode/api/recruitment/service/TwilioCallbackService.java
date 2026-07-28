@@ -30,6 +30,7 @@ import java.util.*;
 @RequiredArgsConstructor
 @ConditionalOnProperty(prefix="app.recruitment",name="calling-enabled",havingValue="true")
 public class TwilioCallbackService {
+    private static final long STALE_PRE_ANSWER_SECONDS=120;
     private static final String FALLBACK_DISCLOSURE="This is an automated AI interview. "
             +"Your responses will be processed for recruitment and may be recorded when recording is enabled.";
     private final RecruitmentCallingProperties properties;
@@ -231,6 +232,20 @@ public class TwilioCallbackService {
                 projectionEvents.interview(interview,"interview.failed"));
         if(!reconciled.isEmpty())metrics.counter("recruitment.interview.transport_reconciliation",
                 "result","missing_runtime_result").increment(reconciled.size());
+    }
+
+    @Scheduled(fixedDelayString="${app.recruitment.calling.reconcile-delay-ms:10000}")
+    @Transactional
+    public void reconcileStalePreAnswerCalls() {
+        LocalDateTime staleBefore=LocalDateTime.now(clock).minusSeconds(STALE_PRE_ANSWER_SECONDS);
+        List<RecruitmentInterviewCallAttempt> stale=attempts.lockStalePreAnswer(staleBefore);
+        for(RecruitmentInterviewCallAttempt attempt:stale) {
+            if(terminal(attempt.getStatus()))continue;
+            terminal(attempt,CallAttemptStatus.FAILED,InterviewStatus.FAILED,
+                    "TWILIO_CALLBACK_ERROR",true);
+        }
+        if(!stale.isEmpty())metrics.counter("recruitment.interview.transport_reconciliation",
+                "result","missing_pre_answer_callback").increment(stale.size());
     }
 
     private void settleTerminalDuration(RecruitmentInterviewCallAttempt attempt,String rawDuration) {

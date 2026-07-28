@@ -40,7 +40,12 @@ public class PublicJobQueryService {
                 .addValue("now", LocalDateTime.now(clock)).addValue("size", size + 1)
                 .addValue("query", blankToNull(request.query()))
                 .addValue("hasQuery", !isBlank(request.query()));
-        StringBuilder where = new StringBuilder(" WHERE p.closing_at > :now AND p.discoverable");
+        StringBuilder where = new StringBuilder(" WHERE p.closing_at > :now");
+        // Discoverability controls the global board; tenant careers pages also show unlisted
+        // published jobs that are already available through their direct public URLs.
+        if (isBlank(request.tenantSlug())) {
+            where.append(" AND p.discoverable");
+        }
         add(where, params, "p.tenant_slug=:tenantSlug", "tenantSlug", blankToNull(request.tenantSlug()));
         add(where, params, "p.department=:department", "department", blankToNull(request.department()));
         add(where, params, "p.location=:location", "location", blankToNull(request.location()));

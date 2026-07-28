@@ -7,6 +7,7 @@ import com.cacanode.api.common.exception.custom.InternalServerErrorException;
 import com.cacanode.api.common.exception.custom.ResourceNotFoundException;
 import com.cacanode.api.common.exception.custom.UnauthorizedException;
 import com.cacanode.api.billing.gateway.PaymentGatewayException;
+import com.cacanode.api.tenant.api.WidgetOriginNotAllowedException;
 import com.cacanode.api.recruitment.exception.PublicRecruitmentRateLimitException;
 import com.cacanode.api.recruitment.exception.PublicRecruitmentUnavailableException;
 import lombok.extern.slf4j.Slf4j;
@@ -48,6 +49,19 @@ public class GlobalExceptionHandler {
         return ErrorResponse.builder().timestamp(LocalDateTime.now()).status(503)
                 .path(safePath(request))
                 .error(HttpStatus.SERVICE_UNAVAILABLE.getReasonPhrase()).message(e.getMessage()).build();
+    }
+
+    @ExceptionHandler(WidgetOriginNotAllowedException.class)
+    @ResponseStatus(HttpStatus.FORBIDDEN)
+    public ErrorResponse handleWidgetOriginNotAllowed(
+            WidgetOriginNotAllowedException e, WebRequest request) {
+        return ErrorResponse.builder()
+                .timestamp(LocalDateTime.now())
+                .status(HttpStatus.FORBIDDEN.value())
+                .path(safePath(request))
+                .error(HttpStatus.FORBIDDEN.getReasonPhrase())
+                .message(e.getMessage())
+                .build();
     }
 
     @ExceptionHandler(AccessDeniedException.class)

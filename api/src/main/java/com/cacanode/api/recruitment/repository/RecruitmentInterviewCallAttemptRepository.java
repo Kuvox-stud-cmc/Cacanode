@@ -7,6 +7,7 @@ import org.springframework.data.jpa.repository.*;
 import org.springframework.data.repository.query.Param;
 
 import java.time.Instant;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -36,6 +37,21 @@ public interface RecruitmentInterviewCallAttemptRepository extends JpaRepository
             ORDER BY create_uncertain_until,id FOR UPDATE SKIP LOCKED LIMIT 50
             """,nativeQuery=true)
     List<RecruitmentInterviewCallAttempt> lockExpiredUncertain(@Param("now") Instant now);
+
+    @Query(value="""
+            SELECT ca.* FROM recruitment_interview_call_attempts ca
+            WHERE ca.status IN ('CALLING','RINGING')
+              AND ca.twilio_call_sid IS NOT NULL
+              AND ca.updated_at<=:staleBefore
+              AND EXISTS (
+                  SELECT 1 FROM recruitment_interviews i
+                  WHERE i.tenant_id=ca.tenant_id AND i.id=ca.interview_id
+                    AND i.active_call_attempt_id=ca.id AND i.status IN ('CALLING','RINGING')
+              )
+            ORDER BY ca.updated_at,ca.id FOR UPDATE OF ca SKIP LOCKED LIMIT 50
+            """,nativeQuery=true)
+    List<RecruitmentInterviewCallAttempt> lockStalePreAnswer(
+            @Param("staleBefore") LocalDateTime staleBefore);
 
     @Modifying
     @Query(value="""

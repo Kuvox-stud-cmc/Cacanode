@@ -156,6 +156,24 @@ class TwilioCallbackSettlementTest {
     }
 
     @Test
+    void reconcilesStaleCallingAttemptWhenPublicCallbacksWereUnavailable() {
+        attempt.setStatus(CallAttemptStatus.CALLING);attempt.setAnsweredAt(null);
+        attempt.setConsentedAt(null);attempt.setFailureCode(null);
+        interview.setStatus(InterviewStatus.CALLING);interview.setActiveCallAttemptId(attemptId);
+        when(attempts.lockStalePreAnswer(any())).thenReturn(List.of(attempt));
+
+        service.reconcileStalePreAnswerCalls();
+
+        assertEquals(CallAttemptStatus.FAILED,attempt.getStatus());
+        assertEquals("TWILIO_CALLBACK_ERROR",attempt.getFailureCode());
+        assertEquals(InterviewStatus.FAILED,interview.getStatus());
+        assertNull(interview.getActiveCallAttemptId());
+        verify(quota).releaseInterviewSeconds(tenant,reservationId);
+        assertEquals(1.0,metrics.get("recruitment.interview.transport_reconciliation")
+                .tag("result","missing_pre_answer_callback").counter().count());
+    }
+
+    @Test
     void twilioCompletedBeforeConsentDoesNotLeaveInterviewStuck() {
         attempt.setStatus(CallAttemptStatus.CONSENT_PENDING);
         attempt.setAnsweredAt(Instant.parse("2026-01-01T00:00:00Z"));

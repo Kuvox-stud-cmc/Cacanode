@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { jobPostingJsonLd, publicJobMetadata } from "./recruitment-seo";
+import { jobPostingJsonLd, publicJobMetadata, tenantCareersPath } from "./recruitment-seo";
 import type { PublicJob } from "./recruitment-api";
 
 function job(discoverable:boolean):PublicJob {
@@ -10,6 +10,10 @@ function job(discoverable:boolean):PublicJob {
 }
 
 describe("public job SEO",()=>{
+  it("routes job detail back to the owning tenant careers board",()=>{
+    expect(tenantCareersPath("acme")).toBe("/careers/acme");
+  });
+
   it("keeps canonical, alternates, OpenGraph, and plain-text JSON-LD for discoverable jobs",()=>{
     const value=job(true);const metadata=publicJobMetadata("vi",value);const jsonLd=jobPostingJsonLd(value);
     expect(metadata.alternates?.canonical).toBe("http://localhost:3000/vi/jobs/public-1");

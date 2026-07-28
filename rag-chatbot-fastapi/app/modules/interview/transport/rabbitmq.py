@@ -426,7 +426,8 @@ class ResumeAnalysisWorker:
             )
             accepted_versions = (
                 request.policy_version == self._policy_version
-                and request.model_version == self._model_version
+                and request.model_version
+                in {self._model_version, f"{self._model_version}+pipeline-v2"}
             )
             accepted_identities = (expected,)
         else:

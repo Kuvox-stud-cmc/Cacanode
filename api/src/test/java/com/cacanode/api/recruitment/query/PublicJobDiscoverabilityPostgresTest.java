@@ -1,6 +1,7 @@
 package com.cacanode.api.recruitment.query;
 
 import com.cacanode.api.recruitment.config.PublicRecruitmentProperties;
+import com.cacanode.api.recruitment.dto.PublicRecruitmentDtos;
 import com.cacanode.api.recruitment.service.PublicJobCursorCodec;
 import com.cacanode.api.recruitment.service.ScreeningSupport;
 import com.cacanode.api.testsupport.PostgresTestContainer;
@@ -17,7 +18,9 @@ import java.sql.PreparedStatement;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -47,13 +50,20 @@ class PublicJobDiscoverabilityPostgresTest {
         }
     }
 
-    @Test void listingsExcludeUnlistedButDirectDetailReturnsBothWithRichContentAndFlag() {
+    @Test void globalListingsExcludeUnlistedButTenantCareersIncludesEveryPublishedJob() {
         var page=jobs.search(new PublicJobQueryService.Search(null,null,null,null,null,null,null,null,"newest",null,20));
         assertEquals(1,page.items().size());
         assertEquals(LISTED,page.items().getFirst().publicId());
         assertTrue(page.items().getFirst().discoverable());
         assertEquals("<h2>Listed</h2><p>Visible content</p>",page.items().getFirst().descriptionHtml());
 
+        var careers=jobs.search(new PublicJobQueryService.Search(
+                null,"acme",null,null,null,null,null,null,"newest",null,20));
+        assertEquals(Set.of(LISTED,UNLISTED),careers.items().stream()
+                .map(PublicRecruitmentDtos.PublicJob::publicId).collect(Collectors.toSet()));
+    }
+
+    @Test void directDetailReturnsUnlistedJobWithRichContentAndFlag() {
         var unlisted=jobs.detail(UNLISTED);
         assertEquals("Unlisted role",unlisted.title());
         assertFalse(unlisted.discoverable());

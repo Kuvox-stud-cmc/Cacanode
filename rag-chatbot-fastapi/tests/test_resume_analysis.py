@@ -12,6 +12,7 @@ from app.contracts.ai_interview_v1 import (
     ResumeAnalysisRequestV12,
     current_resume_analysis_id,
     interview_event_id,
+    resume_analysis_id_v12,
 )
 from app.modules.ingestion.api import ContentExtractionCommand, ExtractedContent, SourceSegment
 from app.modules.ingestion.internal.content_extraction import DigitalContentExtractionAdapter
@@ -88,6 +89,38 @@ def test_resume_worker_accepts_legacy_and_current_analysis_identities() -> None:
             "model_version": f"{legacy.model_version}+pipeline-v2",
         }
     )
+    worker._validate_request(retry)
+
+
+def test_resume_worker_accepts_v12_pipeline_retry_identity() -> None:
+    current = request_v12()
+    worker = object.__new__(ResumeAnalysisWorker)
+    worker._policy_version = current.policy_version
+    worker._model_version = current.model_version
+    retry_model = f"{current.model_version}+pipeline-v2"
+    retry_id = resume_analysis_id_v12(
+        current.tenant_id,
+        current.application_id,
+        current.document_id,
+        current.cv_sha256,
+        current.analysis_mode,
+        current.policy_version,
+        retry_model,
+        current.analysis_revision,
+    )
+    retry = current.model_copy(
+        update={
+            "analysis_id": retry_id,
+            "aggregate_id": retry_id,
+            "event_id": interview_event_id(
+                "interview.resume-analysis.requested",
+                retry_id,
+                f"requested:v1.2:revision:{current.analysis_revision}",
+            ),
+            "model_version": retry_model,
+        }
+    )
+
     worker._validate_request(retry)
 
 

@@ -4,7 +4,7 @@ import { FormEvent, useEffect, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import { usePathname, useRouter } from "@/i18n/navigation";
 import { useSearchParams } from "next/navigation";
-import { BriefcaseBusiness, Clock3, MapPin } from "lucide-react";
+import { BriefcaseBusiness, Building2, Clock3, MapPin } from "lucide-react";
 import { listPublicJobs, type PublicJob } from "@/lib/recruitment-api";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
@@ -21,11 +21,16 @@ export function JobBoard({ tenantSlug }: { tenantSlug?: string }) {
   const [cursor, setCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [tenantName, setTenantName] = useState(() => tenantSlug ? tenantSlug
+    .split("-").filter(Boolean).map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(" ") : null);
 
   useEffect(() => {
     let active = true;
     listPublicJobs(new URLSearchParams(queryString), tenantSlug).then((page) => {
-      if (active) { setItems(page.items); setCursor(page.nextCursor); setError(null); }
+      if (active) {
+        setItems(page.items); setCursor(page.nextCursor); setError(null);
+        if (tenantSlug && page.items[0]?.companyName) setTenantName(page.items[0].companyName);
+      }
     }).catch(() => active && setError(t("loadError"))).finally(() => active && setLoading(false));
     return () => { active = false; };
   }, [queryString, tenantSlug, t]);
@@ -50,8 +55,11 @@ export function JobBoard({ tenantSlug }: { tenantSlug?: string }) {
 
   return <>
     <section className="mb-8">
-      <p className="mb-2 text-sm font-semibold uppercase tracking-wider text-indigo-600">{t("eyebrow")}</p>
-      <h1 className="text-3xl font-bold tracking-tight text-slate-950 sm:text-4xl">{tenantSlug ? t("careerTitle") : t("title")}</h1>
+      {tenantSlug && tenantName ? <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-sm font-medium text-indigo-800">
+        <Building2 className="h-4 w-4" aria-hidden="true" />
+        {t("tenantBoard", { company: tenantName })}
+      </div> : <p className="mb-2 text-sm font-semibold uppercase tracking-wider text-indigo-600">{t("eyebrow")}</p>}
+      <h1 className="text-3xl font-bold tracking-tight text-slate-950 sm:text-4xl">{tenantSlug && tenantName ? t("careerTitle", { company: tenantName }) : t("title")}</h1>
       <p className="mt-3 max-w-2xl text-slate-600">{t("description")}</p>
     </section>
     <form onSubmit={filter} className="mb-8 grid gap-3 rounded-xl border bg-white p-4 shadow-sm md:grid-cols-4" aria-label={t("filters")}>

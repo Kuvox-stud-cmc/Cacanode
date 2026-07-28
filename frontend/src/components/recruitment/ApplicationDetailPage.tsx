@@ -17,7 +17,6 @@ import {
   inviteApplication,
   sendApplicationCompletionLink,
   transitionApplication,
-  deleteRecruitmentApplication,
   type ApplicationDetail,
   type CvAnalysisResponse,
 } from "@/lib/recruitment-admin-api";
@@ -146,16 +145,6 @@ export function ApplicationDetailPage({ applicationId }: { applicationId: string
     }
   };
 
-  const handleDeleteApp = async () => {
-    if (!await confirm({ title: t("dialogs.deleteApplicationTitle"), description: t("dialogs.deleteApplication"), confirmLabel: t("forms.delete"), destructive: true })) return;
-    try {
-      await deleteRecruitmentApplication(request, applicationId);
-      router.push("/recruitment/applications");
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : t("loadError"));
-    }
-  };
-
   const handleRefreshAnalysis = async () => {
     if(!cvAnalysis?.refreshAvailable||cvAnalysis.refreshStatus==="PENDING"||acting)return;
     if(!await confirm({title:a("refreshTitle"),description:a("refreshConfirmation"),confirmLabel:a("refreshAction")}))return;
@@ -226,10 +215,6 @@ export function ApplicationDetailPage({ applicationId }: { applicationId: string
               </Button>
             </>
           )}
-
-          <Button variant="ghost" size="sm" className="text-red-600 hover:bg-red-50" onClick={() => void handleDeleteApp()}>
-            <Trash2 className="h-4 w-4" />
-          </Button>
         </div>
       </div>
 

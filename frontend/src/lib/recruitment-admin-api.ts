@@ -62,7 +62,6 @@ export const listRecruitmentTemplates=(request:ApiRequest,query:Record<string,st
 export const getApplicationDetail=(request:ApiRequest,id:string)=>json<ApplicationDetail>(request,`/applications/${id}/detail`);
 export const createRecruitmentApplication=(request:ApiRequest,body:{jobId:string;candidateId:string})=>json<RecruitmentApplication>(request,"/applications",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
 export const sendApplicationCompletionLink=(request:ApiRequest,id:string)=>json<{sent:boolean;message?:string}>(request,`/applications/${id}/completion-link`,{method:"POST"});
-export const deleteRecruitmentApplication=(request:ApiRequest,id:string)=>empty(request,`/applications/${id}`,{method:"DELETE"});
 
 export const getInterviewAttempts=(request:ApiRequest,id:string)=>json<CallAttempt[]>(request,`/interviews/${id}/attempts`);
 export const getInterviewTranscript=(request:ApiRequest,id:string,page=0,size=100)=>json<InterviewTranscript>(request,`/interviews/${id}/transcript?page=${page}&size=${size}`);

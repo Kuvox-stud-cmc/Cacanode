@@ -58,7 +58,6 @@ vi.mock("@/lib/recruitment-admin-api", () => ({
   deleteRecruitmentCv: vi.fn(),
   inviteApplication: vi.fn(),
   transitionApplication: vi.fn(),
-  deleteRecruitmentApplication: vi.fn(),
   cvUrl: () => "/cv",
 }));
 
