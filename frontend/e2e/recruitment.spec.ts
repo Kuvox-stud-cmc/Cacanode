@@ -152,6 +152,7 @@ test("exchanges a candidate token and requests confirmed erasure", async ({ page
 });
 
 test("exchanges an interview invitation and renders available slots", async ({ page }) => {
+  const slotStart = "2026-07-28T02:00:00Z";
   await page.route("**/api/v1/public/interview-invitations/**", async (route) => {
     const path = new URL(route.request().url()).pathname;
     if (path.endsWith("/exchange")) return json(route, {
@@ -159,7 +160,7 @@ test("exchanges an interview invitation and renders available slots", async ({ p
       invitation: { interviewId: "44444444-4444-4444-8444-444444444444", companyName: "CacaNode", jobTitle: "AI Engineer", candidateName: "Candidate", status: "INVITED", scheduledStartAt: null, scheduledEndAt: null, schedulingTimezone: "Asia/Ho_Chi_Minh", invitationExpiresAt: "2026-07-31T00:00:00Z", rescheduleCount: 0 },
     });
     if (path.endsWith("/me/slots")) return json(route, {
-      items: [{ startAt: "2026-07-28T02:00:00Z", endAt: "2026-07-28T02:30:00Z", schedulingTimezone: "Asia/Ho_Chi_Minh" }],
+      items: [{ startAt: slotStart, endAt: "2026-07-28T02:30:00Z", schedulingTimezone: "Asia/Ho_Chi_Minh" }],
       nextFrom: null, schedulingTimezone: "Asia/Ho_Chi_Minh",
     });
     await route.fulfill({ status: 404, contentType: "application/json", body: "{}" });
@@ -167,6 +168,6 @@ test("exchanges an interview invitation and renders available slots", async ({ p
   await page.goto("/applications/manage#invitation=fragment-only-invitation");
   await expect(page).not.toHaveURL(/fragment-only-invitation/);
   await expect(page.getByRole("heading", { name: "Choose an interview time" })).toBeVisible();
-  await expect(page.getByRole("button", { name: /9:00/ })).toBeVisible();
+  await expect(page.getByTestId(`interview-slot-${slotStart}`)).toBeVisible();
   await assertNoSeriousAxeViolations(page);
 });
