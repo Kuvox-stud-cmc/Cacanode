@@ -111,11 +111,7 @@ migrate-baseline:
 db-reset:
 	$(ENV_RUN) docker compose --env-file $(ENV_FILE) -f $(ROOT_COMPOSE_FILE) rm -s -f \
 		postgres qdrant graph-service seaweedfs-s3 seaweedfs-filer seaweedfs-volume seaweedfs-master
-	$(ENV_RUN) volumes="$$(docker compose --env-file $(ENV_FILE) -f $(ROOT_COMPOSE_FILE) config --format json | \
-		$(PYTHON) -c 'import json,sys; data=json.load(sys.stdin); keys=("postgres_data","qdrant_data","kuzu_data","seaweedfs_master","seaweedfs_volume","seaweedfs_filer"); print(" ".join(data["volumes"][key]["name"] for key in keys))')"; \
-		for volume in $$volumes; do \
-			if docker volume inspect "$$volume" >/dev/null 2>&1; then docker volume rm "$$volume"; fi; \
-		done
+	$(ENV_RUN) $(PYTHON) scripts/clean_docker_volumes.py $(ENV_FILE) $(ROOT_COMPOSE_FILE)
 	$(ENV_RUN) docker compose --env-file $(ENV_FILE) -f $(ROOT_COMPOSE_FILE) up -d --wait --wait-timeout 120 \
 		postgres qdrant graph-service seaweedfs-master seaweedfs-volume seaweedfs-filer seaweedfs-s3
 	$(MAKE) migrate ENV_FILE=$(ENV_FILE)
