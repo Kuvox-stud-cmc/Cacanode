@@ -64,10 +64,19 @@ done
 
 calling_enabled="$(env_value RECRUITMENT_CALLING_ENABLED)"
 if [[ "${calling_enabled,,}" == "true" ]]; then
+  interview_enabled="$(env_value INTERVIEW_ENABLED)"
+  messaging_enabled="$(env_value INTERVIEW_MESSAGING_ENABLED)"
+  media_stream_enabled="$(env_value INTERVIEW_MEDIA_STREAM_ENABLED)"
   engine_enabled="$(env_value INTERVIEW_ENGINE_ENABLED)"
+  durable_results_enabled="$(env_value INTERVIEW_DURABLE_RESULTS_ENABLED)"
   smoke_enabled="$(env_value INTERVIEW_TRANSPORT_SMOKE_MODE)"
-  if [[ "${engine_enabled,,}" != "true" || "${smoke_enabled,,}" == "true" ]]; then
-    echo "Production calling requires INTERVIEW_ENGINE_ENABLED=true and smoke mode off" >&2
+  if [[ "${interview_enabled,,}" != "true" || \
+        "${messaging_enabled,,}" != "true" || \
+        "${media_stream_enabled,,}" != "true" || \
+        "${engine_enabled,,}" != "true" || \
+        "${durable_results_enabled,,}" != "true" || \
+        "${smoke_enabled,,}" == "true" ]]; then
+    echo "Production calling requires interview, messaging, media streaming, engine, and durable results enabled with smoke mode off" >&2
     exit 1
   fi
   for interview_name in TWILIO_ACCOUNT_SID TWILIO_API_KEY_SID TWILIO_API_KEY_SECRET \
@@ -174,7 +183,18 @@ done
 
 "${compose[@]}" exec -T ollama ollama pull "${embedding_model}"
 # Activate the graph role first, then API roles, then resume the dedicated worker.
-"${compose[@]}" up -d --wait --wait-timeout 300 graph-service
+if ! "${compose[@]}" up -d --wait --wait-timeout 300 graph-service; then
+  echo "Graph service failed to become ready; collecting diagnostics" >&2
+  "${compose[@]}" ps graph-service >&2 || true
+  "${compose[@]}" logs --tail=200 graph-service >&2 || true
+  graph_container_id="$("${compose[@]}" ps -q graph-service 2>/dev/null || true)"
+  if [[ -n "${graph_container_id}" ]]; then
+    docker inspect "${graph_container_id}" \
+      --format 'status={{.State.Status}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}} error={{.State.Error}} health={{json .State.Health}}' \
+      >&2 || true
+  fi
+  exit 1
+fi
 "${compose[@]}" up -d --remove-orphans --wait --wait-timeout 300 \
   --scale document-worker=0
 "${compose[@]}" up -d --wait --wait-timeout 300 document-worker

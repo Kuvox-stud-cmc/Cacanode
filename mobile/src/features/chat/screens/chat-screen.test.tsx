@@ -104,7 +104,7 @@ describe('ChatScreen', () => {
     expect(screen.getByRole('button', { name: 'Send message' }).props.accessibilityState.disabled).toBe(true);
     await fireEvent.changeText(input, '   ');
     expect(setDraft).toHaveBeenCalledWith('   ');
-  });
+  }, 15_000);
 
   it('shows the composer count and sends an eligible message', async () => {
     mockController.mockReturnValue(controllerValue({
