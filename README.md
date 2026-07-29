@@ -706,7 +706,7 @@ semantic-cache, structural parsing, constrained reasoning, and consistency algor
 
 ### Formal hybrid-retrieval model
 
-Let the normalized user query be \(q\), and let the deterministic router assign one profile:
+Let the normalized user query be $q$, and let the deterministic router assign one profile:
 
 $$
 p = r(q), \qquad
@@ -724,27 +724,27 @@ treated as a simple exact-match query when its primary intent is calculation.
 
 For each query, the pipeline obtains three ordered candidate rankings:
 
-- \(R_d(q)\): dense semantic retrieval from Qdrant;
-- \(R_s(q)\): BM25 sparse retrieval from Qdrant;
-- \(R_g(q)\): entity-evidence retrieval from Kuzu.
+- $R_d(q)$: dense semantic retrieval from Qdrant;
+- $R_s(q)$: BM25 sparse retrieval from Qdrant;
+- $R_g(q)$: entity-evidence retrieval from Kuzu.
 
 The current default profile weights are configuration values rather than learned parameters:
 
-| Profile | Dense \(w_d\) | Sparse \(w_s\) | Graph \(w_g\) | Intended behavior |
+| Profile | Dense $w_d$ | Sparse $w_s$ | Graph $w_g$ | Intended behavior |
 |---|---:|---:|---:|---|
 | Semantic | 0.55 | 0.30 | 0.15 | Prefer conceptual similarity |
 | Exact | 0.25 | 0.60 | 0.15 | Prefer lexical identifiers and literal values |
 | Relational | 0.30 | 0.15 | 0.55 | Prefer entity-oriented evidence |
 | Calculation | 0.35 | 0.50 | 0.15 | Prefer table rows, columns, and exact values |
 
-The rankings are merged using **Weighted Reciprocal Rank Fusion**. For knowledge unit \(u\), query
-\(q\), profile \(p\), channel set \(C=\{d,s,g\}\), channel weight \(w_{p,c}\), and RRF constant
-\(k=30\):
+The rankings are merged using **Weighted Reciprocal Rank Fusion**. For knowledge unit $u$, query
+$q$, profile $p$, channel set $C=\{d,s,g\}$, channel weight $w_{p,c}$, and RRF constant
+$k=30$:
 
 $$
-\operatorname{WRRF}(u \mid q,p)
+\mathrm{WRRF}(u \mid q,p)
 = \sum_{c \in C}
-\frac{w_{p,c}}{k + \operatorname{rank}_{c}(u)}.
+\frac{w_{p,c}}{k + \mathrm{rank}_{c}(u)}.
 $$
 
 A unit absent from a channel contributes zero for that channel. Candidate identity is the tuple
@@ -799,14 +799,14 @@ The ingestion pipeline does not flatten every file into anonymous fixed-size str
 typed `KnowledgeBlock` records with provenance such as section path, heading context, page number,
 sheet name, cell range, table identity, and source offsets.
 
-For prose longer than the configured character limit \(L\), the chunker prefers a sentence or space
-boundary. With overlap \(O\), the next start position is:
+For prose longer than the configured character limit $L$, the chunker prefers a sentence or space
+boundary. With overlap $O$, the next start position is:
 
 $$
 s_{i+1}=\max(e_i-O,\ s_i+1),
 $$
 
-where \(s_i\) and \(e_i\) are the current chunk's start and end positions. The `+1` term guarantees
+where $s_i$ and $e_i$ are the current chunk's start and end positions. The `+1` term guarantees
 progress even for adversarial input.
 
 Structural content follows different rules:
@@ -868,13 +868,13 @@ Entity and relation extraction is requested from a chat model, but project-owned
 - deterministic, tenant-scoped graph identities;
 - idempotent replacement of one source projection.
 
-For query token set \(T(q)\), the current graph score is a lexical entity-match count:
+For query token set $T(q)$, the current graph score is a lexical entity-match count:
 
 $$
-\operatorname{GraphScore}(e,q)
+\mathrm{GraphScore}(e,q)
 = \sum_{t \in T(q)}
 \mathbf{1}\left[t \subseteq
-\operatorname{casefold}(\operatorname{name}(e) \Vert \operatorname{aliases}(e))\right].
+\mathrm{casefold}(\mathrm{name}(e) \Vert \mathrm{aliases}(e))\right].
 $$
 
 Matching entities return the knowledge units connected through `MENTIONS`. Results are ordered by
@@ -925,38 +925,38 @@ flowchart TD
 The canonical scope hash is:
 
 $$
-H_{scope}=\operatorname{SHA256}(\operatorname{CanonicalJSON}(S)),
+H_{scope}=\mathrm{SHA256}(\mathrm{CanonicalJSON}(S)),
 $$
 
-where \(S\) includes tenant, chatbot, knowledge base, authoritative revision, channel, locale,
+where $S$ includes tenant, chatbot, knowledge base, authoritative revision, channel, locale,
 visible-document set, bounded conversation history, tenant prompt, prompt-schema version, LLM
 configuration, embedding configuration, and retrieval-pipeline fingerprint.
 
 The guard hash is:
 
 $$
-H_{guard}=\operatorname{SHA256}(p, N, V, D, C, I),
+H_{guard}=\mathrm{SHA256}(p, N, V, D, C, I),
 $$
 
-where \(p\) is the query profile and the remaining terms are normalized negations \(N\), numbers
-\(V\), dates \(D\), currencies \(C\), and privacy-hashed identifiers \(I\). Thus, semantically close
+where $p$ is the query profile and the remaining terms are normalized negations $N$, numbers
+$V$, dates $D$, currencies $C$, and privacy-hashed identifiers $I$. Thus, semantically close
 queries such as `after 7 days` and `after 14 days`, or `include archived plans` and `do not include
 archived plans`, cannot share a candidate guard.
 
-For query embedding \(x\) and cached-query embedding \(y\), cosine similarity is:
+For query embedding $x$ and cached-query embedding $y$, cosine similarity is:
 
 $$
 \cos(x,y)=\frac{x\cdot y}{\lVert x\rVert_2\lVert y\rVert_2}.
 $$
 
-With the current threshold \(\tau=0.97\), a semantic candidate is eligible only if:
+With the current threshold $\tau=0.97$, a semantic candidate is eligible only if:
 
 $$
 H_{scope}^{new}=H_{scope}^{cached}
 \land H_{guard}^{new}=H_{guard}^{cached}
 \land \cos(x,y)\ge\tau
 \land t_{expiry}>t_{now}
-\land \operatorname{GroundedPayloadValid}.
+\land \mathrm{GroundedPayloadValid}.
 $$
 
 `GroundedPayloadValid` requires a supported schema, matching revision and visibility scope, non-expired
@@ -1031,14 +1031,14 @@ Implementation sources:
 The Java API is not the retrieval algorithm, but it supplies academically relevant correctness
 constraints for asynchronous AI execution.
 
-Let \(r_{request}\) be the knowledge-base revision captured before generation, \(r_{response}\) the
-revision echoed by FastAPI, and \(r_{current}\) the revision observed before persistence. An answer is
+Let $r_{request}$ be the knowledge-base revision captured before generation, $r_{response}$ the
+revision echoed by FastAPI, and $r_{current}$ the revision observed before persistence. An answer is
 accepted only when:
 
 $$
 r_{request}=r_{response}=r_{current}
 \land D_{citation}\subseteq D_{completed}
-\land (\operatorname{external}\Rightarrow D_{citation}\subseteq D_{visible}).
+\land (\mathrm{external}\Rightarrow D_{citation}\subseteq D_{visible}).
 $$
 
 If the knowledge base changes during inference, the Java control plane rebuilds the generation context
@@ -1161,34 +1161,34 @@ For semantic caching, compare:
 
 ### Evaluation metrics
 
-Let \(Q^+=\{q\mid |Rel_q|>0\}\) be the answerable-query subset, \(Rel_q\) the relevant unit set,
-and \(R_q^K\) the first \(K\) retrieved units. The evaluator computes:
+Let $Q^+=\{q\mid |Rel_q|>0\}$ be the answerable-query subset, $Rel_q$ the relevant unit set,
+and $R_q^K$ the first $K$ retrieved units. The evaluator computes:
 
 $$
-\operatorname{Recall@K}
+\mathrm{Recall}@K
 =\frac{1}{|Q^+|}\sum_{q\in Q^+}
 \frac{|Rel_q\cap R_q^K|}{|Rel_q|}.
 $$
 
-For the rank of the first relevant result \(rank_q\):
+For the rank of the first relevant result $rank_q$:
 
 $$
-\operatorname{MRR}
+\mathrm{MRR}
 =\frac{1}{|Q^+|}\sum_{q\in Q^+}\frac{1}{rank_q}.
 $$
 
-With graded or binary relevance \(rel_i\):
+With graded or binary relevance $rel_i$:
 
 $$
-\operatorname{DCG@K}=\sum_{i=1}^{K}\frac{rel_i}{\log_2(i+1)},
+\mathrm{DCG}@K=\sum_{i=1}^{K}\frac{rel_i}{\log_2(i+1)},
 \qquad
-\operatorname{nDCG@K}=\frac{\operatorname{DCG@K}}{\operatorname{IDCG@K}}.
+\mathrm{nDCG}@K=\frac{\mathrm{DCG}@K}{\mathrm{IDCG}@K}.
 $$
 
 No-answer precision measures whether abstentions are justified:
 
 $$
-\operatorname{NoAnswerPrecision}
+\mathrm{NoAnswerPrecision}
 =\frac{\text{correct no-answer predictions}}
 {\text{all no-answer predictions}}.
 $$
@@ -1196,7 +1196,7 @@ $$
 Semantic-cache serving must prioritize equivalence precision over hit rate:
 
 $$
-\operatorname{CacheEquivalencePrecision}
+\mathrm{CacheEquivalencePrecision}
 =\frac{\text{served hits judged equivalent and citation-valid}}
 {\text{all served semantic hits}}.
 $$
