@@ -54,6 +54,7 @@ Image, audio, video, OCR ingestion, and several broader management APIs remain i
 - [Supported Knowledge Sources](#supported-knowledge-sources)
 - [Document and Media Ingestion](#document-and-media-ingestion)
 - [GraphRAG Query Processing](#graphrag-query-processing)
+- [Academic AI and Information-Retrieval Reference](#academic-ai-and-information-retrieval-reference)
 - [Public Chat API](#public-chat-api)
 - [Chat Widget](#chat-widget)
 - [Management API](#management-api)
@@ -607,21 +608,23 @@ flowchart TD
 
     Route --> DenseQuery[EmbeddingGemma query]
     Route --> SparseQuery[BM25 sparse query]
-    Route --> GraphQuery[Entity and relation query]
+    Route --> GraphQuery[Entity-evidence query]
 
     DenseQuery --> DenseSearch[Qdrant dense top 40]
     SparseQuery --> SparseSearch[Qdrant sparse top 40]
-    GraphQuery --> GraphSearch[Kuzu traversal]
+    GraphQuery --> GraphSearch[Kuzu entity and alias matching]
 
     DenseSearch --> Fusion[Adaptive weighted RRF, k=30]
     SparseSearch --> Fusion
     GraphSearch --> Fusion
 
-    Fusion --> Rerank[TEI bge-reranker-v2-m3]
+    Fusion --> Rerank[Optional TEI bge-reranker-v2-m3]
     Rerank --> Primary[Select five diverse primary units]
     Primary --> Context[Add up to three eligible neighbors]
-    Context --> Generate[Gemma 4 grounded generation]
+    Context --> Generate[Grounded LLM generation]
     Generate --> Stream[JSON or SSE response]
+
+    GraphSearch -. future research extension .-> MultiHop[RELATED_TO multi-hop path traversal]
 ```
 
 ### Retrieval rules
@@ -634,7 +637,8 @@ flowchart TD
 - Reranking, graph search, and neighbor expansion fail open without discarding usable channel evidence.
 - Context contains five primary units plus at most three prose/page neighbors; every unit has its own citation.
 - Graph facts must retain evidence links to source units.
-- Low-confidence retrieval returns an explicit unavailable answer rather than invented tenant facts.
+- The current implementation returns an unavailable answer when no context unit is available. Calibrated
+  score-based abstention remains an evaluation and research task.
 - Uploaded content is untrusted data and cannot override system or chatbot policy.
 
 ### Grounding rules
@@ -644,6 +648,630 @@ flowchart TD
 - General knowledge is disabled by default and may be enabled per chatbot.
 - The model must distinguish unavailable information from system failure.
 - Internal prompts, hidden instructions, and raw model traces are never returned through the public API.
+
+---
+
+## Academic AI and Information-Retrieval Reference
+
+This section is the canonical technical reference for a university report, thesis chapter, or
+experimental paper based on Cacanode. It distinguishes project-owned algorithms from pretrained-model
+inference and from infrastructure integration so that academic claims remain reproducible and accurate.
+
+The strongest implemented research direction is an **adaptive hybrid Retrieval-Augmented Generation
+(RAG) pipeline with safety-constrained semantic answer caching**. The repository does not currently
+contain neural-network training, back-propagation, LoRA/QLoRA, optimizer, loss-function, or checkpoint
+creation code. It does contain substantial project-owned Information Retrieval (IR), grounding,
+semantic-cache, structural parsing, constrained reasoning, and consistency algorithms.
+
+### Academic terminology
+
+| Term | Meaning in Cacanode |
+|---|---|
+| Retrieval-Augmented Generation (RAG) | Retrieve tenant evidence before asking a generative model to answer |
+| Dense retrieval | Semantic nearest-neighbor search over pretrained text-embedding vectors |
+| Sparse retrieval | Lexical BM25 sparse-vector search, useful for identifiers, prices, and exact wording |
+| Knowledge graph | Evidence-linked `Source`, `KnowledgeUnit`, and `Entity` nodes stored in Kuzu |
+| Graph-assisted retrieval | Match query terms to graph entities and return their evidence-bearing knowledge units |
+| Hybrid retrieval | Combine dense, sparse, and graph rankings rather than trusting one retrieval channel |
+| Query routing | Deterministically classify a query into semantic, exact, relational, or calculation profiles |
+| Rank fusion | Merge independently scored rankings through weighted Reciprocal Rank Fusion (RRF) |
+| Reranking | Re-estimate query-document relevance for fused candidates with an optional cross-encoder |
+| Context diversification | Limit early domination by one document before filling the final context window |
+| Neighbor expansion | Restore nearby prose units after selecting high-relevance primary evidence |
+| Grounding | Require answers and graph facts to retain traceable source-unit evidence |
+| Provenance | Document, page, section, cell range, unit identity, and citation metadata attached to evidence |
+| Semantic caching | Reuse a previously grounded answer for an embedding-similar query under strict scope guards |
+| Cache equivalence | Degree to which a cached response and a fresh RAG response preserve meaning and citations |
+| Abstention | Return an unavailable-information response instead of generating an unsupported answer |
+| Neuro-symbolic execution | Use an LLM to select a validated operation, then execute it with deterministic code |
+| Ablation study | Disable one pipeline component at a time to measure its individual contribution |
+
+### Implementation classification
+
+| Capability | Current status | Academic classification |
+|---|---|---|
+| Query-profile router | Implemented in project code | Deterministic AI/IR heuristic |
+| Weighted dense, sparse, and graph fusion | Implemented in project code | Hybrid IR algorithm |
+| Evidence diversity and neighbor expansion | Implemented in project code | Context-selection algorithm |
+| Structural document and spreadsheet chunking | Implemented in project code | Document-representation algorithm |
+| Revision-aware semantic answer cache | Implemented in project code | AI-systems and semantic-similarity algorithm |
+| Grounded graph projection | Implemented in project code | Evidence-constrained knowledge representation |
+| Multi-hop relationship traversal | Not currently implemented | Future GraphRAG research extension |
+| Spreadsheet calculation executor | Implemented in project code | Constrained neuro-symbolic reasoning |
+| EmbeddingGemma inference | Pretrained model served locally | Model integration, not model training |
+| Qdrant/FastEmbed BM25 | Pretrained/local sparse encoder | Model integration, not BM25 implementation from first principles |
+| BGE cross-encoder reranking | Optional pretrained TEI service | Model integration, not reranker training |
+| Generative LLM and graph-extraction LLM | Provider/model adapter | External inference dependency |
+| Fine-tuning or adapter training | Not implemented | Proposed future work only |
+
+### Formal hybrid-retrieval model
+
+Let the normalized user query be \(q\), and let the deterministic router assign one profile:
+
+$$
+p = r(q), \qquad
+p \in \{\text{semantic},\text{exact},\text{relational},\text{calculation}\}.
+$$
+
+The router uses explicit precedence:
+
+$$
+\text{calculation} \succ \text{relational} \succ \text{exact} \succ \text{semantic}.
+$$
+
+This precedence prevents a query such as `Tính tổng giá cho mã "SKU-42"` from being incorrectly
+treated as a simple exact-match query when its primary intent is calculation.
+
+For each query, the pipeline obtains three ordered candidate rankings:
+
+- \(R_d(q)\): dense semantic retrieval from Qdrant;
+- \(R_s(q)\): BM25 sparse retrieval from Qdrant;
+- \(R_g(q)\): entity-evidence retrieval from Kuzu.
+
+The current default profile weights are configuration values rather than learned parameters:
+
+| Profile | Dense \(w_d\) | Sparse \(w_s\) | Graph \(w_g\) | Intended behavior |
+|---|---:|---:|---:|---|
+| Semantic | 0.55 | 0.30 | 0.15 | Prefer conceptual similarity |
+| Exact | 0.25 | 0.60 | 0.15 | Prefer lexical identifiers and literal values |
+| Relational | 0.30 | 0.15 | 0.55 | Prefer entity-oriented evidence |
+| Calculation | 0.35 | 0.50 | 0.15 | Prefer table rows, columns, and exact values |
+
+The rankings are merged using **Weighted Reciprocal Rank Fusion**. For knowledge unit \(u\), query
+\(q\), profile \(p\), channel set \(C=\{d,s,g\}\), channel weight \(w_{p,c}\), and RRF constant
+\(k=30\):
+
+$$
+\operatorname{WRRF}(u \mid q,p)
+= \sum_{c \in C}
+\frac{w_{p,c}}{k + \operatorname{rank}_{c}(u)}.
+$$
+
+A unit absent from a channel contributes zero for that channel. Candidate identity is the tuple
+`(document_id, unit_id)`; therefore, the same evidence returned by multiple channels accumulates
+support instead of being duplicated. Ties are resolved deterministically by identity.
+
+The implemented retrieval algorithm is:
+
+1. Normalize and classify the query.
+2. Generate the dense query vector and the sparse BM25 vector.
+3. Execute dense, sparse, and graph retrieval concurrently.
+4. Treat a failed optional channel as an empty ranking and retain evidence from healthy channels.
+5. Fuse at most 40 dense, 40 sparse, and 20 graph candidates into 30 WRRF candidates.
+6. Optionally rerank fused candidates with `BAAI/bge-reranker-v2-m3`.
+7. Select five primary units while applying a soft limit of two units per document.
+8. Fill deferred candidates only when diversity-constrained selection is insufficient.
+9. Add at most three adjacent eligible prose/page units, producing at most eight context units.
+10. Generate an answer with one structured citation per supplied context unit.
+
+```mermaid
+flowchart LR
+    Q[Query q] --> R[Deterministic profile router p = r q]
+    R --> D[Dense ranking Rd]
+    R --> S[Sparse ranking Rs]
+    R --> G[Graph ranking Rg]
+
+    D --> W[Weighted RRF]
+    S --> W
+    G --> W
+
+    W --> X[Optional cross-encoder reranking]
+    X --> V[Document-diverse primary evidence]
+    V --> N[Section-aware neighbor expansion]
+    N --> C[Grounded context with provenance]
+    C --> A[LLM answer plus structured citations]
+```
+
+Primary implementation sources:
+
+- Router, channel orchestration, WRRF, diversity, and neighbor expansion:
+  [`retrieval.py`](rag-chatbot-fastapi/app/modules/retrieval/internal/retrieval.py)
+- Dense and sparse Qdrant search:
+  [`qdrant_search.py`](rag-chatbot-fastapi/app/modules/index/internal/qdrant_search.py)
+- Optional TEI reranker:
+  [`reranking.py`](rag-chatbot-fastapi/app/modules/retrieval/internal/reranking.py)
+- Default candidate counts and profile weights:
+  [`settings.py`](rag-chatbot-fastapi/app/bootstrap/settings.py)
+
+### Structure-aware knowledge representation
+
+The ingestion pipeline does not flatten every file into anonymous fixed-size strings. It constructs
+typed `KnowledgeBlock` records with provenance such as section path, heading context, page number,
+sheet name, cell range, table identity, and source offsets.
+
+For prose longer than the configured character limit \(L\), the chunker prefers a sentence or space
+boundary. With overlap \(O\), the next start position is:
+
+$$
+s_{i+1}=\max(e_i-O,\ s_i+1),
+$$
+
+where \(s_i\) and \(e_i\) are the current chunk's start and end positions. The `+1` term guarantees
+progress even for adversarial input.
+
+Structural content follows different rules:
+
+| Block type | Chunking behavior | Reason |
+|---|---|---|
+| Paragraph/page/quote | Boundary-aware window with overlap | Preserve local linguistic continuity |
+| Heading/list/code | Line-preserving split with zero character overlap | Avoid corrupting structural syntax |
+| Markdown/HTML/DOCX table | Split by row lines and repeat the table header | Keep every table fragment interpretable |
+| Spreadsheet table summary | Preserve schema, inferred types, sheet, and range | Support table discovery and calculation planning |
+| Spreadsheet row | One provenance-bearing row representation | Support exact-value and aggregation retrieval |
+
+Spreadsheet ingestion additionally identifies logical tables separated by blank row or column bands,
+normalizes duplicate column names, infers primitive column types, records formula cells without
+executing formulas, and creates deterministic table and unit identities.
+
+```mermaid
+flowchart TD
+    File[PDF DOCX Markdown HTML TXT CSV XLSX] --> Parse[Format-specific structural parser]
+    Parse --> Blocks[Typed knowledge blocks]
+    Blocks --> Prose{Prose block?}
+    Prose -->|yes| Window[Boundary-aware overlapping chunks]
+    Prose -->|no| Structure[Line and row preserving chunks]
+    Window --> Units[Deterministic knowledge units]
+    Structure --> Units
+    Units --> Provenance[Page section sheet cell range table and offsets]
+    Provenance --> Encode[Dense and sparse encoding]
+```
+
+Implementation sources:
+
+- Digital-format parsing and spreadsheet table discovery:
+  [`extraction.py`](rag-chatbot-fastapi/app/modules/ingestion/internal/extraction.py)
+- Deterministic structural chunking:
+  [`chunking.py`](rag-chatbot-fastapi/app/modules/ingestion/internal/chunking.py)
+- Ingestion coordination:
+  [`pipeline.py`](rag-chatbot-fastapi/app/modules/ingestion/internal/pipeline.py)
+
+### Evidence-grounded graph projection
+
+The graph layer stores an evidence-linked projection rather than an unconstrained graph generated
+from model memory.
+
+```mermaid
+flowchart LR
+    S[Source] -->|CONTAINS| U[KnowledgeUnit]
+    U -->|MENTIONS evidence_unit_id| E1[Entity]
+    E1 -->|RELATED_TO predicate evidence_unit_id| E2[Entity]
+    U -. citation provenance .-> P[Page section sheet or cell range]
+```
+
+Entity and relation extraction is requested from a chat model, but project-owned validation enforces:
+
+- normalized entity names;
+- strict structured JSON;
+- deduplication of repeated mentions and relations;
+- an existing `evidence_unit_id` for every accepted item;
+- relation subjects and objects that refer to accepted grounded entities;
+- deterministic, tenant-scoped graph identities;
+- idempotent replacement of one source projection.
+
+For query token set \(T(q)\), the current graph score is a lexical entity-match count:
+
+$$
+\operatorname{GraphScore}(e,q)
+= \sum_{t \in T(q)}
+\mathbf{1}\left[t \subseteq
+\operatorname{casefold}(\operatorname{name}(e) \Vert \operatorname{aliases}(e))\right].
+$$
+
+Matching entities return the knowledge units connected through `MENTIONS`. Results are ordered by
+descending match count and deterministic unit identity.
+
+#### Current GraphRAG limitation
+
+The schema persists `RELATED_TO` edges, but the current query implementation does not traverse those
+edges and does not use `GRAPH_MAX_HOPS` to perform breadth-first, beam, or path search. Consequently,
+the scientifically accurate term for the implemented channel is **entity-grounded graph-assisted
+retrieval**, not multi-hop GraphRAG. A future experiment may add one-to-three-hop path traversal,
+predicate-aware path scoring, and edge-evidence aggregation, then compare graph-off, entity-only, and
+multi-hop conditions on a relational-query subset.
+
+Implementation sources:
+
+- Grounded entity/relation extraction:
+  [`entity_extraction.py`](rag-chatbot-fastapi/app/modules/ingestion/internal/entity_extraction.py)
+- Kuzu schema, projection replacement, and current entity search:
+  [`service.py`](rag-chatbot-fastapi/app/modules/graph/internal/service.py)
+- Graph boundary types and evidence invariants:
+  [`graph/api`](rag-chatbot-fastapi/app/modules/graph/api/__init__.py)
+
+### Safety-constrained semantic answer caching
+
+The semantic answer cache is not a plain query-vector lookup. It is a two-tier, revision-aware cache
+that reuses only previously grounded answers under a canonical execution scope and a literal-sensitive
+semantic guard.
+
+```mermaid
+flowchart TD
+    Q[Eligible query] --> Scope[Build scope hash and guard hash]
+    Scope --> Exact[Redis exact-query lookup]
+    Exact -->|valid hit| ServeExact[Serve grounded exact answer]
+    Exact -->|miss| Embed[Generate query embedding]
+    Embed --> Semantic[Qdrant semantic candidate search]
+    Semantic --> Guard{Same scope guard unexpired and similarity above threshold?}
+    Guard -->|yes| Payload[Load and validate Redis answer payload]
+    Payload -->|grounded| ServeSemantic[Serve grounded semantic answer]
+    Guard -->|no| RAG[Run retrieval and generation]
+    Payload -->|invalid or missing| RAG
+    RAG --> Eligible{Answer has valid citations and no action or calculation?}
+    Eligible -->|yes| Write[Write Redis payload and Qdrant query vector]
+    Eligible -->|no| Return[Return without caching]
+    Write --> Return
+```
+
+The canonical scope hash is:
+
+$$
+H_{scope}=\operatorname{SHA256}(\operatorname{CanonicalJSON}(S)),
+$$
+
+where \(S\) includes tenant, chatbot, knowledge base, authoritative revision, channel, locale,
+visible-document set, bounded conversation history, tenant prompt, prompt-schema version, LLM
+configuration, embedding configuration, and retrieval-pipeline fingerprint.
+
+The guard hash is:
+
+$$
+H_{guard}=\operatorname{SHA256}(p, N, V, D, C, I),
+$$
+
+where \(p\) is the query profile and the remaining terms are normalized negations \(N\), numbers
+\(V\), dates \(D\), currencies \(C\), and privacy-hashed identifiers \(I\). Thus, semantically close
+queries such as `after 7 days` and `after 14 days`, or `include archived plans` and `do not include
+archived plans`, cannot share a candidate guard.
+
+For query embedding \(x\) and cached-query embedding \(y\), cosine similarity is:
+
+$$
+\cos(x,y)=\frac{x\cdot y}{\lVert x\rVert_2\lVert y\rVert_2}.
+$$
+
+With the current threshold \(\tau=0.97\), a semantic candidate is eligible only if:
+
+$$
+H_{scope}^{new}=H_{scope}^{cached}
+\land H_{guard}^{new}=H_{guard}^{cached}
+\land \cos(x,y)\ge\tau
+\land t_{expiry}>t_{now}
+\land \operatorname{GroundedPayloadValid}.
+$$
+
+`GroundedPayloadValid` requires a supported schema, matching revision and visibility scope, non-expired
+content, valid structured citations, and at least one citation marker referenced by the answer.
+Calculation queries, action requests, ticket drafts, ungrounded answers, and explicit no-information
+answers are excluded from semantic-answer reuse.
+
+In shadow mode, Cacanode compares a cache candidate with the fresh RAG response without serving the
+candidate. Citation equivalence uses Jaccard overlap:
+
+$$
+J(C_{cache},C_{fresh})
+=\frac{|C_{cache}\cap C_{fresh}|}{|C_{cache}\cup C_{fresh}|},
+$$
+
+while answer equivalence uses cosine similarity between ephemeral answer embeddings. These measurements
+support threshold selection before enabling serve mode.
+
+Implementation sources:
+
+- Scope construction, guard extraction, semantic lookup, payload validation, and shadow comparison:
+  [`semantic_answer_cache.py`](rag-chatbot-fastapi/app/modules/generation/internal/semantic_answer_cache.py)
+- Exact/semantic cache placement in the RAG execution path:
+  [`generation service.py`](rag-chatbot-fastapi/app/modules/generation/internal/service.py)
+- Retrieval-configuration fingerprinting:
+  [`retrieval cache.py`](rag-chatbot-fastapi/app/modules/retrieval/internal/cache.py)
+- Operational design and rollout gates:
+  [`docs/CACHING.md`](docs/CACHING.md)
+
+The checked-in artifacts contain operational smoke evidence, not a controlled academic experiment:
+
+| Run | Measured repeated-query p50 | Samples | Additional observation |
+|---|---:|---:|---|
+| [`RAG caches disabled`](rag-chatbot-fastapi/artifacts/rag-cache-disabled.json) | 3200.098 ms | 30 | Full embedding, retrieval, and LLM path |
+| [`Semantic-answer serve`](rag-chatbot-fastapi/artifacts/semantic-answer-serve.json) | 12.362 ms | 5 | Five exact-tier hits |
+
+The semantic-answer artifact records five avoided LLM requests, 5,440 avoided input tokens, and 1,650
+avoided output tokens. The two runs have different sample counts and only demonstrate the order-of-
+magnitude potential of exact reuse; they must not be reported as final semantic-cache effectiveness.
+Use a matched query set, identical warm-up policy, threshold sweep, and equivalence labeling for the
+paper's final results.
+
+### Constrained neuro-symbolic spreadsheet reasoning
+
+Spreadsheet questions use **constrained semantic parsing** rather than allowing generated code to run.
+
+```mermaid
+flowchart LR
+    Q[Calculation question plus table schema] --> L[LLM planner]
+    L --> J[Restricted JSON calculation command]
+    J --> V[Pydantic schema and column validation]
+    V --> P[Deterministic Polars execution]
+    P --> R[Verified numeric or tabular result]
+    R --> A[Grounded natural-language answer]
+```
+
+The planner may select only `count`, `sum`, `average`, `minimum`, `maximum`, `sort`, `top`, or
+`bottom`, plus validated filters and optional grouping. The executor rejects unknown columns and
+type-invalid filter values. It never evaluates generated Python, SQL, spreadsheet formulas, or arbitrary
+expressions. This separation makes the LLM an intent parser while deterministic code remains the source
+of computational truth.
+
+Implementation sources:
+
+- Planner coordination and restricted prompt contract:
+  [`calculation.py`](rag-chatbot-fastapi/app/modules/generation/internal/calculation.py)
+- Typed command model and deterministic execution:
+  [`spreadsheets.py`](rag-chatbot-fastapi/app/modules/generation/internal/spreadsheets.py)
+
+### Cross-service consistency and citation provenance
+
+The Java API is not the retrieval algorithm, but it supplies academically relevant correctness
+constraints for asynchronous AI execution.
+
+Let \(r_{request}\) be the knowledge-base revision captured before generation, \(r_{response}\) the
+revision echoed by FastAPI, and \(r_{current}\) the revision observed before persistence. An answer is
+accepted only when:
+
+$$
+r_{request}=r_{response}=r_{current}
+\land D_{citation}\subseteq D_{completed}
+\land (\operatorname{external}\Rightarrow D_{citation}\subseteq D_{visible}).
+$$
+
+If the knowledge base changes during inference, the Java control plane rebuilds the generation context
+and retries once. Citations are rejected if their documents do not belong to the tenant and knowledge
+base, are not completed, or are outside the customer-visible document set. The same revision and
+visibility values participate in semantic-cache isolation, preventing stale or unauthorized reuse.
+
+Implementation sources:
+
+- Revision capture, retry, and final citation validation:
+  [`ChatControlPlaneService.java`](api/src/main/java/com/cacanode/api/chat/query/ChatControlPlaneService.java)
+- gRPC generation identity and revision validation:
+  [`GrpcAiInferenceClient.java`](api/src/main/java/com/cacanode/api/ai/infrastructure/GrpcAiInferenceClient.java)
+- Authoritative document visibility and citation checks:
+  [`DocumentApiImpl.java`](api/src/main/java/com/cacanode/api/document/service/DocumentApiImpl.java)
+- Knowledge-base revision increment:
+  [`KnowledgeBaseRevisionService.java`](api/src/main/java/com/cacanode/api/tenant/service/KnowledgeBaseRevisionService.java)
+
+### Paper-ready contribution statements
+
+The report may accurately state the following implemented contributions:
+
+1. **C1 — Query-adaptive hybrid retrieval.** Cacanode routes Vietnamese and English queries into four
+   profiles and applies profile-specific weighted rank fusion over dense, sparse, and graph evidence.
+2. **C2 — Structure-aware evidence representation.** The ingestion pipeline preserves document and
+   spreadsheet structure and applies block-specific deterministic chunking instead of one universal
+   fixed-window rule.
+3. **C3 — Evidence-grounded graph projection.** Extracted entities and relations are accepted only when
+   they cite valid source units, producing an auditable graph projection.
+4. **C4 — Safety-constrained semantic caching.** Semantic answer reuse is isolated by authoritative
+   execution scope and protected against negation, number, date, currency, identifier, visibility, and
+   revision mismatches.
+5. **C5 — Constrained neuro-symbolic calculation.** The LLM plans a restricted spreadsheet operation,
+   while typed deterministic execution produces the authoritative result.
+6. **C6 — Cross-service AI consistency.** Knowledge revision and citation visibility are revalidated
+   before an answer is persisted or publicly exposed.
+
+Academic claim boundaries:
+
+| Accurate claim | Claim to avoid |
+|---|---|
+| Implemented and adapted weighted RRF for Cacanode's query profiles | Invented Reciprocal Rank Fusion |
+| Designed a safety-constrained semantic-cache policy | Proved that semantic caching can never return a false hit |
+| Implemented entity-grounded graph-assisted retrieval | Implemented multi-hop graph traversal or community-based GraphRAG |
+| Locally serves pretrained embedding and sparse models | Trained EmbeddingGemma or BM25 from scratch |
+| Integrates an optional pretrained BGE reranker | Fine-tuned the reranker in this repository |
+| Uses an LLM for entity extraction and calculation planning | Implements a generative foundation model from scratch |
+| Contains an evaluation harness and small fixture | Contains publication-grade retrieval results |
+
+### Suggested paper title and structure
+
+Suggested English title:
+
+> **Adaptive Hybrid Retrieval and Safety-Constrained Semantic Caching for a Vietnamese Multi-Tenant
+> Retrieval-Augmented Generation System**
+
+Suggested Vietnamese title:
+
+> **Truy xuất lai thích ứng và bộ nhớ đệm ngữ nghĩa có ràng buộc an toàn cho hệ thống RAG đa thuê bao
+> tiếng Việt**
+
+A teammate can map the implementation into the following paper structure:
+
+1. **Introduction:** motivation, Vietnamese enterprise question answering, multi-tenant safety, research
+   problem, objectives, and contribution summary.
+2. **Background and related work:** RAG, dense and sparse retrieval, BM25, RRF, graph-assisted RAG,
+   reranking, semantic caching, grounding, and neuro-symbolic execution.
+3. **Proposed method:** query router, weighted fusion, structural chunking, graph projection, semantic
+   cache guards, deterministic calculation, and revision/citation invariants.
+4. **System implementation:** Spring control plane, FastAPI AI service, Qdrant, Kuzu, Redis, model
+   adapters, data contracts, and source-code map.
+5. **Experimental methodology:** dataset construction, train/validation/test separation when tuning,
+   baselines, ablations, metrics, hardware, model versions, and reproducibility controls.
+6. **Results and discussion:** retrieval quality, cache safety, latency/token savings, error analysis,
+   Vietnamese-language behavior, and component trade-offs.
+7. **Threats to validity and limitations:** small current fixture, heuristic router, unlearned fusion
+   weights, provider dependence, absent multi-hop traversal, and absence of fine-tuning code.
+8. **Conclusion and future work:** learned routing or weight optimization, model/reranker fine-tuning,
+   calibrated abstention, larger evaluation data, and multi-hop graph retrieval.
+
+### Research questions
+
+A paper based on the current implementation can study:
+
+- **RQ1:** How much do sparse and graph evidence improve retrieval quality over dense retrieval alone
+  for Vietnamese customer-support queries?
+- **RQ2:** Does query-profile-specific WRRF outperform one fixed set of fusion weights?
+- **RQ3:** Does structure-aware chunking improve Recall@K and citation precision compared with naïve
+  fixed-size chunking?
+- **RQ4:** At which semantic-cache threshold does answer-equivalence precision satisfy a safety target
+  while still reducing latency and token usage?
+- **RQ5:** How much do literal, negation, visibility, and revision guards reduce unsafe semantic-cache
+  reuse?
+- **RQ6:** On relational queries, what additional benefit is obtained by future multi-hop graph traversal
+  compared with the currently implemented entity-only graph channel?
+
+### Required ablation study
+
+Use the same held-out queries and knowledge-base snapshot for every condition:
+
+| Experiment | Dense | Sparse | Graph | Router weights | Reranker | Diversity/neighbors | Purpose |
+|---|:---:|:---:|:---:|:---:|:---:|:---:|---|
+| A1 | Yes | No | No | N/A | No | No | Dense baseline |
+| A2 | No | Yes | No | N/A | No | No | Lexical baseline |
+| A3 | Yes | Yes | No | Fixed | No | No | Basic hybrid retrieval |
+| A4 | Yes | Yes | Yes | Fixed | No | No | Contribution of entity graph evidence |
+| A5 | Yes | Yes | Yes | Profile-specific | No | No | Contribution of query-adaptive fusion |
+| A6 | Yes | Yes | Yes | Profile-specific | Yes | No | Contribution of cross-encoder reranking |
+| A7 | Yes | Yes | Yes | Profile-specific | Optional | Yes | Full current pipeline |
+| A8 | Yes | Yes | Multi-hop | Profile-specific | Optional | Yes | Future graph-traversal extension |
+
+For semantic caching, compare:
+
+1. cache off;
+2. exact cache only;
+3. embedding similarity without guards;
+4. similarity plus profile and literal guards;
+5. full scope, revision, visibility, grounding, and expiry validation;
+6. threshold values such as 0.90, 0.93, 0.95, 0.97, 0.98, and 0.99.
+
+### Evaluation metrics
+
+Let \(Q^+=\{q\mid |Rel_q|>0\}\) be the answerable-query subset, \(Rel_q\) the relevant unit set,
+and \(R_q^K\) the first \(K\) retrieved units. The evaluator computes:
+
+$$
+\operatorname{Recall@K}
+=\frac{1}{|Q^+|}\sum_{q\in Q^+}
+\frac{|Rel_q\cap R_q^K|}{|Rel_q|}.
+$$
+
+For the rank of the first relevant result \(rank_q\):
+
+$$
+\operatorname{MRR}
+=\frac{1}{|Q^+|}\sum_{q\in Q^+}\frac{1}{rank_q}.
+$$
+
+With graded or binary relevance \(rel_i\):
+
+$$
+\operatorname{DCG@K}=\sum_{i=1}^{K}\frac{rel_i}{\log_2(i+1)},
+\qquad
+\operatorname{nDCG@K}=\frac{\operatorname{DCG@K}}{\operatorname{IDCG@K}}.
+$$
+
+No-answer precision measures whether abstentions are justified:
+
+$$
+\operatorname{NoAnswerPrecision}
+=\frac{\text{correct no-answer predictions}}
+{\text{all no-answer predictions}}.
+$$
+
+Semantic-cache serving must prioritize equivalence precision over hit rate:
+
+$$
+\operatorname{CacheEquivalencePrecision}
+=\frac{\text{served hits judged equivalent and citation-valid}}
+{\text{all served semantic hits}}.
+$$
+
+Also report cache hit rate, false-hit rate, citation validity, citation Jaccard overlap, answer cosine
+similarity, p50/p95 latency, avoided LLM calls, avoided input/output tokens, and Redis/Qdrant storage
+footprint. Report 95% bootstrap confidence intervals and use paired query-level comparisons when
+comparing retrieval variants.
+
+### Dataset and reproducibility requirements
+
+The checked-in Vietnamese retrieval fixture contains only five examples and is suitable for contract
+testing, not final scientific conclusions. A paper dataset should add a substantially larger,
+versioned, manually reviewed query set with at least these strata:
+
+- semantic paraphrases;
+- exact identifiers, codes, dates, currencies, and numeric literals;
+- relational entity questions;
+- spreadsheet aggregation and filtering questions;
+- Vietnamese with correct diacritics;
+- Vietnamese without diacritics and with common spelling variants;
+- Vietnamese-English code switching;
+- adversarial negation and near-duplicate literal changes;
+- unanswerable questions;
+- customer-visibility and cross-tenant negative cases.
+
+If fusion weights or cache thresholds are tuned, separate development/validation queries from the final
+test set. Do not select parameters on the same examples used for the reported result.
+
+The existing evaluator can score recorded rankings:
+
+```bash
+cd rag-chatbot-fastapi
+python -m app.maintenance.evaluate_retrieval \
+  --dataset tests/data/retrieval_vi_v1.json \
+  --results artifacts/full-pipeline.json \
+  --label full-pipeline
+```
+
+Relevant verification suites can be run with:
+
+```bash
+cd rag-chatbot-fastapi
+python -m pytest \
+  tests/test_hybrid_retrieval.py \
+  tests/test_semantic_answer_cache.py \
+  tests/test_semantic_answer_cache_integration.py \
+  tests/test_digital_formats.py \
+  tests/test_compare_retrieval_results.py
+```
+
+The real semantic-cache integration test requires `REDIS_TEST_URL` and `QDRANT_TEST_URL`. Record the
+exact Git commit, environment configuration, model identifiers, vector dimension, parser/chunker
+versions, retrieval weights, random seeds for any later learned component, and dataset version with
+every reported experiment.
+
+### Consolidated implementation-source map
+
+| Academic component | Main implementation | Focused tests or evidence |
+|---|---|---|
+| Query routing and adaptive WRRF | [`retrieval.py`](rag-chatbot-fastapi/app/modules/retrieval/internal/retrieval.py) | [`test_hybrid_retrieval.py`](rag-chatbot-fastapi/tests/test_hybrid_retrieval.py) |
+| Dense/sparse index search | [`qdrant_search.py`](rag-chatbot-fastapi/app/modules/index/internal/qdrant_search.py) | [`test_rag_chat.py`](rag-chatbot-fastapi/tests/test_rag_chat.py) |
+| Sparse-model adapter | [`sparse.py`](rag-chatbot-fastapi/app/modules/model/internal/sparse.py) | [`test_hybrid_retrieval.py`](rag-chatbot-fastapi/tests/test_hybrid_retrieval.py) |
+| Local embedding adapter and embedding cache | [`embedding.py`](rag-chatbot-fastapi/app/modules/model/internal/embedding.py) | [`test_embedding_cache.py`](rag-chatbot-fastapi/tests/test_embedding_cache.py) |
+| Structural parsing | [`extraction.py`](rag-chatbot-fastapi/app/modules/ingestion/internal/extraction.py) | [`test_digital_formats.py`](rag-chatbot-fastapi/tests/test_digital_formats.py) |
+| Structure-aware chunking | [`chunking.py`](rag-chatbot-fastapi/app/modules/ingestion/internal/chunking.py) | [`test_hybrid_retrieval.py`](rag-chatbot-fastapi/tests/test_hybrid_retrieval.py) |
+| Grounded entity/relation extraction | [`entity_extraction.py`](rag-chatbot-fastapi/app/modules/ingestion/internal/entity_extraction.py) | [`test_digital_formats.py`](rag-chatbot-fastapi/tests/test_digital_formats.py) |
+| Kuzu graph projection and search | [`graph service.py`](rag-chatbot-fastapi/app/modules/graph/internal/service.py) | [`test_digital_formats.py`](rag-chatbot-fastapi/tests/test_digital_formats.py) |
+| Semantic answer cache | [`semantic_answer_cache.py`](rag-chatbot-fastapi/app/modules/generation/internal/semantic_answer_cache.py) | [`test_semantic_answer_cache.py`](rag-chatbot-fastapi/tests/test_semantic_answer_cache.py) |
+| Real Redis/Qdrant cache path | [`semantic cache integration test`](rag-chatbot-fastapi/tests/test_semantic_answer_cache_integration.py) | Requires local integration services |
+| Constrained spreadsheet execution | [`spreadsheets.py`](rag-chatbot-fastapi/app/modules/generation/internal/spreadsheets.py) | [`test_digital_formats.py`](rag-chatbot-fastapi/tests/test_digital_formats.py) |
+| Retrieval metrics | [`evaluate_retrieval.py`](rag-chatbot-fastapi/app/maintenance/evaluate_retrieval.py) | [`retrieval_vi_v1.json`](rag-chatbot-fastapi/tests/data/retrieval_vi_v1.json) |
+| Cache regression comparison | [`compare_retrieval_results.py`](rag-chatbot-fastapi/app/maintenance/compare_retrieval_results.py) | [`test_compare_retrieval_results.py`](rag-chatbot-fastapi/tests/test_compare_retrieval_results.py) |
+| Knowledge revision and citation consistency | [`ChatControlPlaneService.java`](api/src/main/java/com/cacanode/api/chat/query/ChatControlPlaneService.java) | Java chat and document service tests |
+| Public evidence provenance | [`PublicEvidenceService.java`](api/src/main/java/com/cacanode/api/document/service/PublicEvidenceService.java) | [`PublicEvidenceServiceTest.java`](api/src/test/java/com/cacanode/api/document/service/PublicEvidenceServiceTest.java) |
 
 ---
 
@@ -1367,11 +1995,15 @@ environment variable back to v1.
 
 ## Vietnamese Model Adaptation
 
-Fine-tuning changes model behavior. Retrieval supplies current tenant facts. Tenant documents are not automatically converted into training data.
+> **Implementation status:** this section specifies proposed adaptation, data-governance, and promotion
+> policy. The current repository does not contain a model-training or fine-tuning pipeline.
 
-### Gemma 4 adaptation
+Fine-tuning would change model behavior, while retrieval supplies current tenant facts. Tenant
+documents are not automatically converted into training data.
 
-Gemma adapters are trained for:
+### Proposed Gemma 4 adaptation
+
+A future Gemma adapter may be trained for:
 
 - Natural Vietnamese customer-support language.
 - Correct diacritics and punctuation.
@@ -1383,11 +2015,12 @@ Gemma adapters are trained for:
 - Structured JSON for query routing and graph extraction.
 - Stable citation behavior.
 
-Parameter-efficient fine-tuning uses LoRA or QLoRA. Base checkpoints remain immutable. Serving references an approved base-model version and adapter version.
+The proposed parameter-efficient fine-tuning path would use LoRA or QLoRA. Base checkpoints would
+remain immutable, and serving would reference an approved base-model version and adapter version.
 
-### EmbeddingGemma adaptation
+### Proposed EmbeddingGemma adaptation
 
-Embedding fine-tuning uses Vietnamese query, positive, and hard-negative examples.
+Embedding fine-tuning would use Vietnamese query, positive, and hard-negative examples.
 
 ```json
 {
@@ -1424,9 +2057,9 @@ Evaluation includes queries with:
 - Dataset versions are immutable and auditable.
 - Training runs record data version, code version, checkpoint, hyperparameters, and metrics.
 
-### Model promotion
+### Future model-promotion policy
 
-A model or adapter is served only after passing:
+A future trained model or adapter would be served only after passing:
 
 - Vietnamese retrieval evaluation.
 - Grounded-generation evaluation.

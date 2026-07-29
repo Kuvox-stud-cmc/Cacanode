@@ -38,10 +38,18 @@ is_unconfigured() {
 embedding_model="$(env_value TEXT_EMBEDDING_MODEL_ID)"
 public_url="$(env_value ADMIN_WEB_URL)"
 reranker_enabled="$(env_value RERANKER_ENABLED)"
+public_jobs_enabled="$(env_value RECRUITMENT_PUBLIC_JOBS_ENABLED)"
+scanner_enabled="$(env_value RECRUITMENT_SCANNER_ENABLED)"
 worker_mode="$(env_value WORKER_MODE)"
 embedding_model="${embedding_model:-embeddinggemma}"
 reranker_enabled="${reranker_enabled:-true}"
+public_jobs_enabled="${public_jobs_enabled:-false}"
+scanner_enabled="${scanner_enabled:-${public_jobs_enabled}}"
 worker_mode="${worker_mode:-disabled}"
+
+if [[ "${scanner_enabled,,}" == "true" ]]; then
+  compose+=(--profile recruitment)
+fi
 
 if [[ "${worker_mode}" != "disabled" ]]; then
   echo "Production AI API must use WORKER_MODE=disabled; the dedicated worker is deployed separately" >&2
@@ -143,9 +151,12 @@ fi
 
 "${compose[@]}" config --quiet
 
-COMPOSE_PARALLEL_LIMIT=1 "${compose[@]}" pull \
-  caddy gateway ollama reranker-service postgres redis rabbitmq qdrant \
-  seaweedfs-master seaweedfs-volume seaweedfs-filer seaweedfs-s3
+pull_services=(caddy gateway ollama reranker-service postgres redis rabbitmq qdrant
+  seaweedfs-master seaweedfs-volume seaweedfs-filer seaweedfs-s3)
+if [[ "${scanner_enabled,,}" == "true" ]]; then
+  pull_services+=(clamav)
+fi
+COMPOSE_PARALLEL_LIMIT=1 "${compose[@]}" pull "${pull_services[@]}"
 
 COMPOSE_PARALLEL_LIMIT=1 "${compose[@]}" build --pull \
   admin-web business-api ai-api graph-service
