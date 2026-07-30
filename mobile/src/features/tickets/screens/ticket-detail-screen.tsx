@@ -1,5 +1,6 @@
 import { router, useLocalSearchParams, type Href } from 'expo-router';
 import { useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { FlatList, Pressable, RefreshControl, StyleSheet, View } from 'react-native';
 
 import { EmptyState } from '@/components/feedback/empty-state';
@@ -22,12 +23,8 @@ import {
   useUpdateTicketMutation,
 } from '@/features/tickets/api/tickets-api';
 import {
-  ticketCustomerIdentity,
   ticketFiltersFromRoute,
   ticketFiltersToRoute,
-  ticketSourceLabel,
-  ticketStatusLabel,
-  validateTicketNote,
 } from '@/features/tickets/model/ticket-state';
 import {
   TICKET_PRIORITIES,
@@ -40,6 +37,9 @@ import { useAppTheme } from '@/hooks/use-app-theme';
 import type { ApiError } from '@/services/api/errors';
 
 export function TicketDetailScreen() {
+  const { i18n, t } = useTranslation();
+  const isVietnamese = i18n.resolvedLanguage?.startsWith('vi') ?? false;
+  const locale = isVietnamese ? 'vi-VN' : 'en-US';
   const theme = useAppTheme();
   const params = useLocalSearchParams<Record<string, string | string[]>>();
   const ticketId = first(params.ticketId) ?? '';
@@ -57,6 +57,8 @@ export function TicketDetailScreen() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [confirmation, setConfirmation] = useState<string | null>(null);
   const ticket = query.data;
+  const statusLabel = (status: TicketStatus) => t(`tickets.statusLabels.${statusKey(status)}`);
+  const priorityLabel = (priority: typeof TICKET_PRIORITIES[number]) => t(`tickets.priorityLabels.${priority.toLowerCase() as Lowercase<typeof priority>}`);
 
   function backToList() {
     router.replace({ pathname: '/tickets', params: ticketFiltersToRoute(filters) } as unknown as Href);
@@ -75,7 +77,7 @@ export function TicketDetailScreen() {
       setConfirmation(successMessage);
       await query.refetch();
     } catch (error) {
-      setActionError(apiMessage(error, 'The ticket could not be updated.'));
+      setActionError(apiMessage(error, t('tickets.updateError'), isVietnamese));
       await query.refetch();
       if ((error as ApiError | undefined)?.status === 400) await assigneesQuery.refetch();
     }
@@ -91,12 +93,12 @@ export function TicketDetailScreen() {
       setPendingTerminalStatus(status);
       return;
     }
-    void applyUpdate({ status }, `Status changed to ${ticketStatusLabel(status)}.`);
+    void applyUpdate({ status }, t('tickets.statusChanged', { status: statusLabel(status) }));
   }
 
   async function submitNote() {
     if (!ticket || noteState.isLoading) return;
-    const validation = validateTicketNote(noteDraft);
+    const validation = validateNote(noteDraft, t('tickets.noteRequired'), t('tickets.noteTooLong'));
     if (validation) {
       setNoteError(validation);
       return;
@@ -106,10 +108,10 @@ export function TicketDetailScreen() {
     try {
       await addNote({ ticketId: ticket.id, content: noteDraft.trim() }).unwrap();
       setNoteDraft('');
-      setConfirmation('Internal note added.');
+      setConfirmation(t('tickets.noteAdded'));
       await query.refetch();
     } catch (error) {
-      setNoteError(apiMessage(error, 'The note could not be added. Your draft has been kept.'));
+      setNoteError(apiMessage(error, t('tickets.noteError'), isVietnamese));
     }
   }
 
@@ -128,7 +130,7 @@ export function TicketDetailScreen() {
     } as unknown as Href);
   }
 
-  if (query.isLoading) return <LoadingState description="Loading ticket details and notes." title="Loading ticket" />;
+  if (query.isLoading) return <LoadingState description={t('tickets.detailsLoadingDescription')} title={t('tickets.detailsLoading')} />;
   if (query.isError || !ticket) {
     const unavailable = (query.error as ApiError | undefined)?.status === 404;
     return (
@@ -136,12 +138,12 @@ export function TicketDetailScreen() {
         <View style={styles.unavailableContent}>
           <RetryPanel
             description={unavailable
-              ? 'This ticket is no longer available or belongs to another workspace.'
-              : 'Ticket details could not be loaded.'}
+              ? t('tickets.gone')
+              : t('tickets.detailError')}
             onRetry={() => void query.refetch()}
-            title="Ticket unavailable"
+            title={t('tickets.unavailable')}
           />
-          <Button onPress={backToList} variant="secondary">Back to Tickets</Button>
+          <Button onPress={backToList} variant="secondary">{t('tickets.back')}</Button>
         </View>
       </Screen>
     );
@@ -161,33 +163,33 @@ export function TicketDetailScreen() {
             <View style={styles.heading}>
               <AppText accessibilityRole="header" variant="title">{ticket.title}</AppText>
               <View style={styles.badges}>
-                <Badge>{ticketStatusLabel(ticket.status)}</Badge>
-                <Badge tone="warning">{ticket.priority.toLowerCase()}</Badge>
-                <Badge tone="primary">{ticketSourceLabel(ticket.source)}</Badge>
+                <Badge>{statusLabel(ticket.status)}</Badge>
+                <Badge tone="warning">{priorityLabel(ticket.priority)}</Badge>
+                <Badge tone="primary">{t(`tickets.sourceLabels.${ticket.source === 'CUSTOM_API' ? 'customApi' : 'widget'}`)}</Badge>
               </View>
             </View>
 
             <Card style={styles.card}>
-              <AppText style={styles.sectionTitle}>Customer</AppText>
-              <DetailRow label="Identity" value={ticketCustomerIdentity(ticket)} />
-              <DetailRow label="Name" value={available(ticket.customerName)} />
-              <DetailRow label="Email" value={available(ticket.customerEmail)} />
-              <DetailRow label="External ID" value={available(ticket.externalUserId)} />
+              <AppText style={styles.sectionTitle}>{t('tickets.customer')}</AppText>
+              <DetailRow label={t('tickets.identity')} value={customerIdentity(ticket, t('tickets.customer'))} />
+              <DetailRow label={t('tickets.name')} value={available(ticket.customerName, t('common.unavailable'))} />
+              <DetailRow label={t('tickets.email')} value={available(ticket.customerEmail, t('common.unavailable'))} />
+              <DetailRow label={t('tickets.externalId')} value={available(ticket.externalUserId, t('common.unavailable'))} />
             </Card>
 
             <Card style={styles.card}>
-              <AppText style={styles.sectionTitle}>Description</AppText>
+              <AppText style={styles.sectionTitle}>{t('tickets.ticketDescription')}</AppText>
               <AppText>{ticket.description}</AppText>
             </Card>
 
             <Card style={styles.card}>
-              <AppText style={styles.sectionTitle}>Ticket details</AppText>
-              <DetailRow label="Assignee" value={ticket.assignedToName || 'Unassigned'} />
-              <DetailRow label="Created" value={formatDate(ticket.createdAt)} />
-              <DetailRow label="Updated" value={formatDate(ticket.updatedAt)} />
-              <DetailRow label="Resolved" value={ticket.resolvedAt ? formatDate(ticket.resolvedAt) : 'Not resolved'} />
-              <DetailRow label="Conversation" value={ticket.sessionId} />
-              <Button onPress={openConversation} variant="secondary">Open conversation</Button>
+              <AppText style={styles.sectionTitle}>{t('tickets.details')}</AppText>
+              <DetailRow label={t('tickets.assignee')} value={ticket.assignedToName || t('tickets.unassigned')} />
+              <DetailRow label={t('tickets.created')} value={formatDate(ticket.createdAt, locale, t('common.unavailable'))} />
+              <DetailRow label={t('tickets.updated')} value={formatDate(ticket.updatedAt, locale, t('common.unavailable'))} />
+              <DetailRow label={t('tickets.resolved')} value={ticket.resolvedAt ? formatDate(ticket.resolvedAt, locale, t('common.unavailable')) : t('tickets.notResolved')} />
+              <DetailRow label={t('tickets.conversation')} value={ticket.sessionId} />
+              <Button onPress={openConversation} variant="secondary">{t('tickets.openConversation')}</Button>
             </Card>
 
             {confirmation ? <AppText accessibilityRole="alert" style={{ color: theme.colors.successText }}>{confirmation}</AppText> : null}
@@ -195,38 +197,38 @@ export function TicketDetailScreen() {
 
             <View style={styles.actions}>
               <Button disabled={controlsDisabled} onPress={() => setStatusSheetVisible(true)} variant="secondary">
-                Change status
+                {t('tickets.changeStatus')}
               </Button>
               <Button disabled={controlsDisabled} onPress={() => setPrioritySheetVisible(true)} variant="secondary">
-                Change priority
+                {t('tickets.changePriority')}
               </Button>
               <Button disabled={controlsDisabled} onPress={() => setAssigneeSheetVisible(true)} variant="secondary">
-                Change assignee
+                {t('tickets.changeAssignee')}
               </Button>
             </View>
 
             <Separator />
             <View style={styles.noteComposer}>
-              <AppText accessibilityRole="header" variant="heading">Internal notes</AppText>
+              <AppText accessibilityRole="header" variant="heading">{t('tickets.notes')}</AppText>
               <TextField
                 error={noteError ?? undefined}
-                label="New internal note"
+                label={t('tickets.newNote')}
                 maxLength={5000}
                 multiline
                 onChangeText={(value) => {
                   setNoteDraft(value);
                   if (noteError) setNoteError(null);
                 }}
-                placeholder="Add context for your team"
+                placeholder={t('tickets.notePlaceholder')}
                 style={styles.noteInput}
                 textAlignVertical="top"
                 value={noteDraft}
               />
-              <Button loading={noteState.isLoading} onPress={() => void submitNote()}>Add note</Button>
+              <Button loading={noteState.isLoading} onPress={() => void submitNote()}>{t('tickets.addNote')}</Button>
             </View>
           </View>
         )}
-        ListEmptyComponent={<EmptyState description="Add a note to share internal context with your team." title="No internal notes" />}
+        ListEmptyComponent={<EmptyState description={t('tickets.noNotesDescription')} title={t('tickets.noNotes')} />}
         refreshControl={(
           <RefreshControl
             onRefresh={() => {
@@ -237,41 +239,41 @@ export function TicketDetailScreen() {
             tintColor={theme.colors.primary}
           />
         )}
-        renderItem={({ item }) => <NoteCard note={item} />}
+        renderItem={({ item }) => <NoteCard locale={locale} note={item} unavailable={t('common.unavailable')} />}
         showsVerticalScrollIndicator={false}
       />
 
       <ChoiceSheet
         onDismiss={() => setStatusSheetVisible(false)}
         onSelect={(value) => selectStatus(value as TicketStatus)}
-        options={TICKET_STATUSES.map((status) => ({ label: ticketStatusLabel(status), value: status }))}
+        options={TICKET_STATUSES.map((status) => ({ label: statusLabel(status), value: status }))}
         selected={ticket.status}
-        title="Ticket status"
+        title={t('tickets.statusSheet')}
         visible={statusSheetVisible}
       />
       <ChoiceSheet
         onDismiss={() => setPrioritySheetVisible(false)}
-        onSelect={(value) => void applyUpdate({ priority: value as typeof ticket.priority }, `Priority changed to ${value.toLowerCase()}.`)}
-        options={TICKET_PRIORITIES.map((priority) => ({ label: priority.toLowerCase(), value: priority }))}
+        onSelect={(value) => void applyUpdate({ priority: value as typeof ticket.priority }, t('tickets.priorityChanged', { priority: priorityLabel(value as typeof ticket.priority) }))}
+        options={TICKET_PRIORITIES.map((priority) => ({ label: priorityLabel(priority), value: priority }))}
         selected={ticket.priority}
-        title="Ticket priority"
+        title={t('tickets.prioritySheet')}
         visible={prioritySheetVisible}
       />
-      <Sheet onDismiss={() => setAssigneeSheetVisible(false)} title="Ticket assignee" visible={assigneeSheetVisible}>
+      <Sheet onDismiss={() => setAssigneeSheetVisible(false)} title={t('tickets.assigneeSheet')} visible={assigneeSheetVisible}>
         {assigneesQuery.isError ? (
-          <RetryPanel description="Assignees could not be loaded." onRetry={() => void assigneesQuery.refetch()} title="Assignees unavailable" />
+          <RetryPanel description={t('tickets.assigneesError')} onRetry={() => void assigneesQuery.refetch()} title={t('tickets.assigneesUnavailable')} />
         ) : (
           <View style={styles.choiceColumn}>
             <ChoiceButton
-              label="Unassigned"
-              onPress={() => void applyUpdate({ clearAssignee: true }, 'Ticket is now unassigned.')}
+              label={t('tickets.unassigned')}
+              onPress={() => void applyUpdate({ clearAssignee: true }, t('tickets.nowUnassigned'))}
               selected={!ticket.assignedTo}
             />
             {(assigneesQuery.data ?? []).map((assignee) => (
               <ChoiceButton
                 key={assignee.id}
                 label={assignee.fullName || assignee.email}
-                onPress={() => void applyUpdate({ assignedTo: assignee.id }, `Assigned to ${assignee.fullName || assignee.email}.`)}
+                onPress={() => void applyUpdate({ assignedTo: assignee.id }, t('tickets.assigneeChanged', { name: assignee.fullName || assignee.email }))}
                 selected={ticket.assignedTo === assignee.id}
               />
             ))}
@@ -282,23 +284,23 @@ export function TicketDetailScreen() {
       <Dialog
         actions={(
           <>
-            <Button onPress={() => setPendingTerminalStatus(null)} variant="secondary">Cancel</Button>
+            <Button onPress={() => setPendingTerminalStatus(null)} variant="secondary">{t('common.cancel')}</Button>
             <Button
               loading={updateState.isLoading}
               onPress={() => pendingTerminalStatus && void applyUpdate(
                 { status: pendingTerminalStatus },
-                `Status changed to ${ticketStatusLabel(pendingTerminalStatus)}.`,
+                t('tickets.statusChanged', { status: statusLabel(pendingTerminalStatus) }),
               )}
               variant={pendingTerminalStatus === 'CLOSED' ? 'danger' : 'primary'}>
-              Confirm
+              {t('common.confirm')}
             </Button>
           </>
         )}
         description={pendingTerminalStatus === 'CLOSED'
-          ? 'Closing marks the ticket as complete. It can be reopened later if necessary.'
-          : 'Resolving marks the customer request as handled.'}
+          ? t('tickets.closeDescription')
+          : t('tickets.resolveDescription')}
         onDismiss={() => setPendingTerminalStatus(null)}
-        title={pendingTerminalStatus === 'CLOSED' ? 'Close ticket?' : 'Resolve ticket?'}
+        title={pendingTerminalStatus === 'CLOSED' ? t('tickets.closeTitle') : t('tickets.resolveTitle')}
         visible={Boolean(pendingTerminalStatus)}
       />
     </Screen>
@@ -337,11 +339,11 @@ function ChoiceButton({ label, onPress, selected }: { label: string; onPress: ()
   );
 }
 
-function NoteCard({ note }: { note: TicketNote }) {
+function NoteCard({ locale, note, unavailable }: { locale: string; note: TicketNote; unavailable: string }) {
   return (
     <Card style={styles.noteCard}>
       <AppText>{note.content}</AppText>
-      <AppText muted variant="caption">{note.authorName} · {formatDate(note.createdAt)}</AppText>
+      <AppText muted variant="caption">{note.authorName} · {formatDate(note.createdAt, locale, unavailable)}</AppText>
     </Card>
   );
 }
@@ -359,17 +361,36 @@ function first(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value;
 }
 
-function available(value: string | null) {
-  return value?.trim() || 'Unavailable';
+function statusKey(status: TicketStatus): 'open' | 'inProgress' | 'resolved' | 'closed' {
+  if (status === 'IN_PROGRESS') return 'inProgress';
+  return status.toLowerCase() as 'open' | 'resolved' | 'closed';
 }
 
-function formatDate(value: string) {
+function customerIdentity(ticket: { customerName: string | null; customerEmail: string | null; externalUserId: string | null }, fallback: string) {
+  return ticket.customerName?.trim()
+    || ticket.customerEmail?.trim()
+    || ticket.externalUserId?.trim()
+    || fallback;
+}
+
+function validateNote(value: string, required: string, tooLong: string) {
+  const trimmed = value.trim();
+  if (!trimmed) return required;
+  if (trimmed.length > 5000) return tooLong;
+  return null;
+}
+
+function available(value: string | null, fallback: string) {
+  return value?.trim() || fallback;
+}
+
+function formatDate(value: string, locale: string, unavailable: string) {
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? 'Unavailable' : date.toLocaleString();
+  return Number.isNaN(date.getTime()) ? unavailable : date.toLocaleString(locale);
 }
 
-function apiMessage(error: unknown, fallback: string) {
-  return typeof error === 'object' && error !== null && 'message' in error
+function apiMessage(error: unknown, fallback: string, forceFallback: boolean) {
+  return !forceFallback && typeof error === 'object' && error !== null && 'message' in error
     && typeof error.message === 'string' ? error.message : fallback;
 }
 

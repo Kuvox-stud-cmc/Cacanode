@@ -9,7 +9,7 @@ public final class RecruitmentEnums {
     public enum EmploymentType { FULL_TIME, PART_TIME, CONTRACT, TEMPORARY, INTERNSHIP }
     public enum WorkMode { ONSITE, REMOTE, HYBRID }
     public enum ExperienceLevel { ENTRY, JUNIOR, MID, SENIOR, LEAD, EXECUTIVE }
-    public enum EmailTokenPurpose { VERIFICATION, MANAGEMENT, DELETION_CONFIRMATION }
+    public enum EmailTokenPurpose { VERIFICATION, MANAGEMENT, COMPLETION, DELETION_CONFIRMATION }
     public enum RolloutStage { OFF, AUTO, INTERNAL, PILOT, GA }
     public enum PrivacyDeletionRequesterKind { CANDIDATE, TENANT_ADMIN }
     public enum PrivacyDeletionStatus {
@@ -20,7 +20,7 @@ public final class RecruitmentEnums {
     public enum CvAnalysisStatus { NOT_REQUESTED, PENDING, COMPLETED, FAILED, SKIPPED_QUOTA, CANCELLED }
     public enum CvAnalysisRecordStatus { QUEUED, PUBLISHED, COMPLETED, FAILED, SKIPPED_QUOTA, CANCELLED }
     public enum ApplicationStatus {
-        SUBMITTED_UNVERIFIED, SUBMITTED, INTERVIEW_INVITED, INTERVIEW_SCHEDULED,
+        AWAITING_CANDIDATE, SUBMITTED_UNVERIFIED, SUBMITTED, INTERVIEW_INVITED, INTERVIEW_SCHEDULED,
         INTERVIEW_COMPLETED, UNDER_REVIEW, SHORTLISTED, REJECTED, WITHDRAWN
     }
     public enum InterviewStatus {

@@ -15,6 +15,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import java.time.Clock;
 import java.time.LocalDateTime;
 import java.util.UUID;
+import com.cacanode.api.common.exception.custom.ResourceNotFoundException;
+import com.cacanode.api.common.exception.custom.ConflictException;
 
 @Service
 @RequiredArgsConstructor
@@ -45,6 +47,25 @@ public class RecruitmentInterviewCancellationService {
     }
 
     @Transactional
+    public RecruitmentInterview cancelByRecruiter(UUID tenantId,UUID interviewId){
+        RecruitmentInterview interview=interviews.findForUpdate(tenantId,interviewId)
+                .orElseThrow(()->new ResourceNotFoundException("Interview was not found"));
+        if(java.util.Set.of(InterviewStatus.COMPLETED,InterviewStatus.NO_ANSWER,InterviewStatus.DECLINED,
+                InterviewStatus.FAILED,InterviewStatus.CANCELLED,InterviewStatus.EXPIRED)
+                .contains(interview.getStatus()))throw new ConflictException("INTERVIEW_CANNOT_BE_CANCELLED");
+        LocalDateTime now=LocalDateTime.now(clock);
+        cancel(interview,now,false);
+        RecruitmentApplication application=applications.findForUpdate(tenantId,interview.getApplicationId())
+                .orElseThrow(()->new ResourceNotFoundException("Application was not found"));
+        if(application.getStatus()!=ApplicationStatus.WITHDRAWN){
+            application.setStatus(ApplicationStatus.UNDER_REVIEW);
+            application=applications.saveAndFlush(application);
+            if(projectionEvents!=null)projectionEvents.application(application,"application.under-review");
+        }
+        return interviews.findByIdAndTenantId(interviewId,tenantId).orElseThrow();
+    }
+
+    @Transactional
     public void closeJob(UUID tenantId,UUID jobId){LocalDateTime now=LocalDateTime.now(clock);for(var interview:interviews.findJobForUpdate(tenantId,jobId))cancel(interview,now,interview.getStatus()==InterviewStatus.INVITED);}
 
     @Scheduled(fixedDelayString="${app.recruitment.invitation-expiry-ms:60000}")
@@ -56,6 +77,7 @@ public class RecruitmentInterviewCancellationService {
                 InterviewStatus.FAILED,InterviewStatus.CANCELLED,InterviewStatus.EXPIRED).contains(interview.getStatus()))return;
         boolean answered=callCancellation!=null&&callCancellation.cancel(interview,expire?"INTERVIEW_EXPIRED":"INTERVIEW_CANCELLED");
         if(!answered&&interview.getQuotaReservationId()!=null){try{quota.releaseInterviewSeconds(interview.getTenantId(),interview.getQuotaReservationId());}catch(HiringQuotaApi.HiringQuotaException ignored){}}
+        if(!answered){interview.setQuotaReservationId(null);interview.setQuotaReservedSeconds(null);interview.setQuotaReservationExpiresAt(null);}
         interview.setStatus(expire?InterviewStatus.EXPIRED:InterviewStatus.CANCELLED);
         if(expire)interview.setExpiredAt(now);else interview.setCancelledAt(now);
         interview=interviews.save(interview);if(projectionEvents!=null)projectionEvents.interview(interview,expire?"interview.expired":"interview.cancelled");invitationTokens.revokeInterview(interview.getId(),now);

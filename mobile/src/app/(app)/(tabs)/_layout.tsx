@@ -6,6 +6,8 @@ import { AuthenticatedHeaderRight } from '@/features/navigation/components/authe
 import { canAccessPrimaryTab } from '@/features/navigation/role-policy';
 import { useAppTheme } from '@/hooks/use-app-theme';
 import { useAppSelector } from '@/store/hooks';
+import { useTranslation } from 'react-i18next';
+import { env } from '@/constants/env';
 
 type TabIconProps = {
   color: ColorValue;
@@ -20,6 +22,7 @@ function createTabIcon(name: SymbolViewProps['name']) {
 
 export default function AppTabsLayout() {
   const theme = useAppTheme();
+  const {t}=useTranslation();
   const role = useAppSelector((state) => state.auth.user?.role);
 
   return (
@@ -41,7 +44,7 @@ export default function AppTabsLayout() {
         name="dashboard"
         options={{
           href: canAccessPrimaryTab(role, 'dashboard') ? undefined : null,
-          title: 'Dashboard',
+          title: t('nav.dashboard'),
           tabBarIcon: createTabIcon({ ios: 'chart.bar.fill', android: 'dashboard' }),
         }}
       />
@@ -49,7 +52,7 @@ export default function AppTabsLayout() {
         name="chat"
         options={{
           href: canAccessPrimaryTab(role, 'chat') ? undefined : null,
-          title: 'Chat',
+          title: t('nav.chat'),
           tabBarIcon: createTabIcon({ ios: 'bubble.left.and.bubble.right.fill', android: 'chat' }),
         }}
       />
@@ -57,7 +60,7 @@ export default function AppTabsLayout() {
         name="documents"
         options={{
           href: canAccessPrimaryTab(role, 'documents') ? undefined : null,
-          title: 'Documents',
+          title: t('nav.documents'),
           tabBarIcon: createTabIcon({ ios: 'doc.text.fill', android: 'description' }),
         }}
       />
@@ -65,10 +68,11 @@ export default function AppTabsLayout() {
         name="tickets"
         options={{
           href: canAccessPrimaryTab(role, 'tickets') ? undefined : null,
-          title: 'Tickets',
+          title: t('nav.tickets'),
           tabBarIcon: createTabIcon({ ios: 'ticket.fill', android: 'confirmation_number' }),
         }}
       />
+      <Tabs.Screen name="recruitment" options={{href:env.recruitmentEnabled&&canAccessPrimaryTab(role,'recruitment')?undefined:null,title:t('nav.recruitment'),tabBarIcon:createTabIcon({ios:'person.3.fill',android:'groups'})}}/>
     </Tabs>
   );
 }

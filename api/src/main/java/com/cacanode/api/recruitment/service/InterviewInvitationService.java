@@ -6,6 +6,7 @@ import com.cacanode.api.recruitment.model.*;
 import com.cacanode.api.recruitment.model.RecruitmentEnums.*;
 import com.cacanode.api.recruitment.repository.*;
 import com.cacanode.api.recruitment.config.RecruitmentProperties;
+import com.cacanode.api.billing.api.HiringQuotaApi;
 import lombok.RequiredArgsConstructor;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
@@ -34,6 +35,7 @@ public class InterviewInvitationService {
     private final RecruitmentCandidateEmailDeliveryRepository deliveries;
     private final Clock clock;
     private final RecruitmentProperties properties;
+    private final HiringQuotaApi quota;
     @Autowired(required=false) private RecruitmentProjectionEventPublisher projectionEvents;
     @Autowired(required=false) private RecruitmentCapabilityService capabilities;
 
@@ -82,6 +84,35 @@ public class InterviewInvitationService {
                 throw new ConflictException("Invitation was sent less than 60 seconds ago");
         }
         enqueue(interview,CandidateEmailKind.INVITATION,key,now);
+        return interview;
+    }
+
+    @Transactional
+    public RecruitmentInterview reinvite(UUID tenantId,UUID interviewId) {
+        if(capabilities!=null)capabilities.requireMasterEnabled(tenantId);
+        RecruitmentInterview interview=interviews.findForUpdate(tenantId,interviewId)
+                .orElseThrow(()->new ResourceNotFoundException("Interview was not found"));
+        if(!Set.of(InterviewStatus.FAILED,InterviewStatus.NO_ANSWER,InterviewStatus.DECLINED,
+                InterviewStatus.CANCELLED,InterviewStatus.EXPIRED).contains(interview.getStatus()))
+            throw new ConflictException("INTERVIEW_CANNOT_BE_REINVITED");
+        RecruitmentApplication application=applications.findForUpdate(tenantId,interview.getApplicationId())
+                .orElseThrow(()->new ResourceNotFoundException("Application was not found"));
+        RecruitmentTenantSettings tenantSettings=settings.findById(tenantId).orElse(null);
+        LocalDateTime now=LocalDateTime.now(clock);int lifetime=tenantSettings==null?7:tenantSettings.getInvitationLifetimeDays();
+        if(interview.getQuotaReservationId()!=null){
+            try{quota.releaseInterviewSeconds(tenantId,interview.getQuotaReservationId());}
+            catch(HiringQuotaApi.HiringQuotaException failure){throw new ConflictException(failure.getCode());}
+        }
+        interview.setStatus(InterviewStatus.INVITED);interview.setInvitedAt(now);interview.setInvitationExpiresAt(now.plusDays(lifetime));
+        interview.setScheduledAt(null);interview.setScheduledStartAt(null);interview.setScheduledEndAt(null);interview.setSchedulingTimezone(null);
+        interview.setStartedAt(null);interview.setCompletedAt(null);interview.setCancelledAt(null);interview.setExpiredAt(null);
+        interview.setOverallScore(null);interview.setEnglishBand(null);interview.setActiveCallAttemptId(null);
+        interview.setQuotaReservationId(null);interview.setQuotaReservedSeconds(null);interview.setQuotaReservationExpiresAt(null);
+        interview.setScheduleVersion(interview.getScheduleVersion()+1);
+        interview=interviews.saveAndFlush(interview);
+        application.setStatus(ApplicationStatus.INTERVIEW_INVITED);application=applications.saveAndFlush(application);
+        if(projectionEvents!=null){projectionEvents.interview(interview,"interview.reinvited");projectionEvents.application(application,null);}
+        enqueue(interview,CandidateEmailKind.INVITATION,"invitation-reinvite-"+interview.getScheduleVersion(),now);
         return interview;
     }
 

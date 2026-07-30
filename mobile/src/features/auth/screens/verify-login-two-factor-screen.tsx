@@ -1,7 +1,7 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Redirect, useRouter } from 'expo-router';
 import { Controller, useForm } from 'react-hook-form';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { z } from 'zod';
 
@@ -19,12 +19,15 @@ import { commitSession } from '@/services/auth/session-manager';
 import { useAppDispatch, useAppSelector } from '@/store/hooks';
 import { spacing } from '@/constants/theme';
 import { useAppTheme } from '@/hooks/use-app-theme';
+import { useTranslation } from 'react-i18next';
+import { LanguageSelector } from '@/i18n/language-selector';
+import { isMobileRoleUnsupported, openPlatformAdministration, rememberUnsupportedRole } from '@/features/auth/services/mobile-role-gate';
 
-const schema = z.object({ code: z.string().regex(/^\d{6}$/, 'Enter the six-digit code.') });
-type CodeValues = z.infer<typeof schema>;
+type CodeValues = {code:string};
 
 export function VerifyLoginTwoFactorScreen() {
   const theme = useAppTheme();
+  const { t }=useTranslation();
   const dispatch = useAppDispatch();
   const router = useRouter();
   const pendingEmail = useAppSelector((state) => state.auth.pendingTwoFactorEmail);
@@ -33,6 +36,8 @@ export function VerifyLoginTwoFactorScreen() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [cooldown, setCooldown] = useState(0);
+  const [unsupportedRole,setUnsupportedRole]=useState(false);
+  const schema=useMemo(()=>z.object({code:z.string().regex(/^\d{6}$/,t('auth.invalidCodeFormat'))}),[t]);
   const { control, handleSubmit, formState: { errors } } = useForm<CodeValues>({
     resolver: zodResolver(schema),
     defaultValues: { code: '' },
@@ -57,10 +62,11 @@ export function VerifyLoginTwoFactorScreen() {
       router.replace('/dashboard');
     } catch (failure) {
       const apiError = failure as Partial<ApiError>;
+      if(isMobileRoleUnsupported(apiError)){await rememberUnsupportedRole().catch(()=>undefined);setUnsupportedRole(true);return;}
       setError(
         apiError.kind === 'network' || apiError.kind === 'timeout'
-          ? apiError.message ?? 'Unable to reach the service.'
-          : 'That code is invalid or expired. Request a new code and try again.',
+          ? apiError.message ?? t('auth.unreachable')
+          : t('auth.invalidCode'),
       );
     }
   });
@@ -75,16 +81,17 @@ export function VerifyLoginTwoFactorScreen() {
       setNotice(response.message);
     } catch (failure) {
       const apiError = failure as Partial<ApiError>;
-      setError(apiError.message ?? 'Unable to send a new code. Please try again.');
+      setError(apiError.message ?? t('auth.resendFailed'));
     }
   };
 
   return (
     <KeyboardScreen contentContainerStyle={styles.content}>
       <View style={styles.heading}>
-        <AppText accessibilityRole="header" variant="title">Check your email</AppText>
-        <AppText muted>Enter the six-digit confirmation code sent to {pendingEmail}.</AppText>
+        <View style={styles.topRow}><AppText accessibilityRole="header" variant="title">{t('auth.checkEmail')}</AppText><LanguageSelector compact /></View>
+        <AppText muted>{t('auth.codeDescription',{email:pendingEmail})}</AppText>
       </View>
+      {unsupportedRole?<Card elevated style={styles.form}><AppText accessibilityRole="header" variant="heading">{t('auth.unsupportedTitle')}</AppText><AppText muted>{t('auth.unsupportedDescription')}</AppText><Button onPress={()=>void openPlatformAdministration()} variant="secondary">{t('auth.openPlatform')}</Button></Card>:null}
       <Card elevated style={styles.form}>
             <Controller
               control={control}
@@ -95,7 +102,7 @@ export function VerifyLoginTwoFactorScreen() {
                   editable={!locked}
                   error={errors.code?.message}
                   keyboardType="number-pad"
-                  label="Confirmation code"
+                  label={t('auth.code')}
                   maxLength={6}
                   onBlur={onBlur}
                   onChangeText={(text) => onChange(text.replace(/\D/g, '').slice(0, 6))}
@@ -108,15 +115,15 @@ export function VerifyLoginTwoFactorScreen() {
             {error ? <AppText accessibilityRole="alert" style={[styles.error, { color: theme.colors.dangerText }]}>{error}</AppText> : null}
             {notice ? <AppText style={styles.notice}>{notice}</AppText> : null}
             <Button disabled={isResending} loading={isVerifying} onPress={() => void submit()}>
-              Verify and continue
+              {t('auth.verify')}
             </Button>
             <Button
-              accessibilityLabel="Resend confirmation code"
+              accessibilityLabel={t('auth.resendLabel')}
               disabled={cooldown > 0 || isVerifying}
               loading={isResending}
               onPress={() => void requestAnotherCode()}
               variant="secondary">
-              {cooldown > 0 ? `Resend in ${cooldown}s` : 'Resend code'}
+              {cooldown > 0 ? t('auth.resendIn',{seconds:cooldown}) : t('auth.resend')}
             </Button>
       </Card>
     </KeyboardScreen>
@@ -127,6 +134,7 @@ const styles = StyleSheet.create({
   content: { flexGrow: 1, justifyContent: 'center', gap: spacing.xxl, paddingVertical: spacing.xxl },
   error: { textAlign: 'center' },
   heading: { gap: spacing.sm },
+  topRow:{alignItems:'center',flexDirection:'row',justifyContent:'space-between',gap:spacing.md},
   form: { gap: spacing.lg },
   notice: { textAlign: 'center' },
 });

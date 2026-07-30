@@ -28,13 +28,19 @@ export type CandidateApplication = {
   jobPublicId: string;
   companyName: string;
   jobTitle: string;
-  status: "SUBMITTED_UNVERIFIED" | "SUBMITTED" | "INTERVIEW_INVITED" | "INTERVIEW_SCHEDULED" | "INTERVIEW_COMPLETED" | "UNDER_REVIEW" | "SHORTLISTED" | "REJECTED" | "WITHDRAWN";
-  submittedAt: string;
+  status: "AWAITING_CANDIDATE" | "SUBMITTED_UNVERIFIED" | "SUBMITTED" | "INTERVIEW_INVITED" | "INTERVIEW_SCHEDULED" | "INTERVIEW_COMPLETED" | "UNDER_REVIEW" | "SHORTLISTED" | "REJECTED" | "WITHDRAWN";
+  submittedAt: string | null;
   verifiedAt: string | null;
   withdrawnAt: string | null;
   cvPresent: boolean;
 };
 export type CandidateSession = { csrfToken: string; application: CandidateApplication };
+export type CandidateCompletionDetails = {
+  applicationId:string;companyName:string;jobTitle:string;fullName:string;email:string;phone:string|null;
+  locale:"vi-VN"|"en-US";cvPolicy:"DISABLED"|"OPTIONAL"|"REQUIRED";
+  cvAiMode:"OFF"|"SUMMARY_ONLY"|"PERSONALIZED_QUESTIONS";
+  screeningQuestions:Array<{questionId:string;prompt:string;options:Array<{optionId:string;label:string}>}>;
+};
 export type InvitationDetails = {
   interviewId: string; companyName: string; jobTitle: string; candidateName: string;
   status: "INVITED" | "SCHEDULED" | "CANCELLED" | "EXPIRED";
@@ -81,6 +87,14 @@ export async function exchangeCandidateToken(token: string): Promise<CandidateSe
 }
 export async function getCandidateApplication(): Promise<CandidateApplication> {
   return json<CandidateApplication>(await fetch(`${getApiBase()}/public/applications/me`, { credentials: "include", cache: "no-store" }));
+}
+export async function getCandidateCompletion():Promise<CandidateCompletionDetails>{
+  return json(await fetch(`${getApiBase()}/public/applications/me/completion`,{credentials:"include",cache:"no-store"}));
+}
+export async function completeCandidateApplication(csrfToken:string,application:object,cv:File|null):Promise<CandidateApplication>{
+  const form=new FormData();form.append("application",new Blob([JSON.stringify(application)],{type:"application/json"}));
+  if(cv)form.append("cv",cv);
+  return json(await fetch(`${getApiBase()}/public/applications/me/complete`,{method:"POST",credentials:"include",cache:"no-store",headers:{"X-CSRF-Token":csrfToken},body:form}));
 }
 export async function refreshCandidateSession(): Promise<CandidateSession> {
   return json<CandidateSession>(await fetch(`${getApiBase()}/public/applications/session/refresh`, { method: "POST", credentials: "include", cache: "no-store" }));

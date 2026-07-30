@@ -10,6 +10,7 @@ import { Sheet } from '@/components/ui/sheet';
 import { radii, spacing } from '@/constants/theme';
 import type { PlaygroundSession } from '@/features/chat/types';
 import { useAppTheme } from '@/hooks/use-app-theme';
+import { useTranslation } from 'react-i18next';
 
 export function ChatHistorySheet({
   activeSessionId,
@@ -37,21 +38,22 @@ export function ChatHistorySheet({
   visible: boolean;
 }) {
   const theme = useAppTheme();
+  const {t}=useTranslation();
   return (
-    <Sheet onDismiss={onDismiss} title="Conversation history" visible={visible}>
+    <Sheet onDismiss={onDismiss} title={t('chat.historyTitle')} visible={visible}>
       {loading && sessions.length === 0 ? (
-        <LoadingState description="Loading your latest employee conversations." title="Loading history" />
+        <LoadingState description={t('chat.loadingHistoryDescription')} title={t('chat.loadingHistory')} />
       ) : error && sessions.length === 0 ? (
-        <RetryPanel description={error} onRetry={onRetry} title="Unable to load history" />
+        <RetryPanel description={error} onRetry={onRetry} title={t('chat.unableHistory')} />
       ) : sessions.length === 0 ? (
         <EmptyState
-          description="Your conversations will appear here after you send a question."
-          title="No conversation history"
+          description={t('chat.noHistoryDescription')}
+          title={t('chat.noHistory')}
         />
       ) : (
         <View style={styles.list}>
           {error ? (
-            <RetryPanel description={error} onRetry={onRetry} title="History may be out of date" />
+            <RetryPanel description={error} onRetry={onRetry} title={t('chat.staleHistory')} />
           ) : null}
           {hideError ? (
             <AppText accessibilityRole="alert" style={{ color: theme.colors.dangerText }}>
@@ -90,6 +92,7 @@ function HistoryRow({
   session: PlaygroundSession;
 }) {
   const theme = useAppTheme();
+  const {t,i18n}=useTranslation();const locale=i18n.resolvedLanguage?.startsWith('vi')?'vi-VN':'en-US';
   return (
     <View style={styles.row}>
       <Pressable
@@ -104,27 +107,27 @@ function HistoryRow({
         ]}>
         <AppText numberOfLines={2} style={styles.title}>{session.title}</AppText>
         <AppText muted variant="caption">
-          {session.messageCount} messages · {formatSessionDate(session.lastActivityAt)}
+          {t('chat.messageCount',{count:session.messageCount})} · {formatSessionDate(session.lastActivityAt,locale,t('chat.recent'))}
         </AppText>
       </Pressable>
       <Pressable
-        accessibilityHint="Hides this conversation from your history"
-        accessibilityLabel={`Hide ${session.title}`}
+        accessibilityHint={t('chat.hideHint')}
+        accessibilityLabel={`${t('chat.hideAction')} ${session.title}`}
         accessibilityRole="button"
         disabled={disabled}
         hitSlop={4}
         onPress={onHide}
         style={styles.hide}>
-        <AppText style={{ color: theme.colors.dangerText }} variant="bodySmall">Hide</AppText>
+        <AppText style={{ color: theme.colors.dangerText }} variant="bodySmall">{t('chat.hideAction')}</AppText>
       </Pressable>
     </View>
   );
 }
 
-function formatSessionDate(value: string): string {
+function formatSessionDate(value:string,locale:string,recent:string): string {
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return 'Recent';
-  return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(date);
+  if (Number.isNaN(date.getTime())) return recent;
+  return new Intl.DateTimeFormat(locale, { dateStyle: 'medium' }).format(date);
 }
 
 const styles = StyleSheet.create({

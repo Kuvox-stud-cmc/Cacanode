@@ -5,6 +5,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { sessionAuthenticated } from '@/features/auth/store/auth-slice';
 import { DocumentDetailScreen } from '@/features/documents/screens/document-detail-screen';
 import { createAppStore } from '@/store';
+import i18n from '@/i18n';
 
 const mockRefetch = jest.fn();
 const mockUpdate = jest.fn();
@@ -51,11 +52,21 @@ async function renderForRole(role: string) {
 }
 
 describe('DocumentDetailScreen authorization', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
+    await i18n.changeLanguage('en');
     jest.clearAllMocks();
     mockUpdate.mockReturnValue({ unwrap: () => Promise.resolve(mockDocument) });
     mockDelete.mockReturnValue({ unwrap: () => Promise.resolve() });
     mockDownload.mockReturnValue({ unwrap: () => Promise.resolve({ uri: 'file:///cache/policy.pdf' }) });
+  });
+
+  it('renders document metadata and actions in Vietnamese', async () => {
+    await i18n.changeLanguage('vi');
+    const screen = await renderForRole('TENANT_ADMIN');
+    expect(screen.getByText('Kích thước')).toBeTruthy();
+    expect(screen.getByText('Sẵn sàng')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Tải xuống và chia sẻ' })).toBeTruthy();
+    expect(screen.queryByText('Ready')).toBeNull();
   });
 
   it('does not render customer visibility or deletion controls for regular users', async () => {

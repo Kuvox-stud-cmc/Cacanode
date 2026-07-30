@@ -9,6 +9,8 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.http.CacheControl;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
+import com.cacanode.api.recruitment.service.CandidateCompletionService;
 
 @RestController
 @RequestMapping("/api/v1/public/applications")
@@ -16,6 +18,7 @@ import org.springframework.web.bind.annotation.*;
 @ConditionalOnExpression("${app.recruitment.enabled:false} and ${app.recruitment.public-jobs-enabled:false}")
 public class CandidateAccessController {
     private final CandidateAccessService access;
+    private final CandidateCompletionService completion;
 
     @PostMapping("/access")
     public ResponseEntity<PublicRecruitmentDtos.CandidateSessionResponse> exchange(
@@ -30,6 +33,15 @@ public class CandidateAccessController {
     @GetMapping("/me")
     public ResponseEntity<PublicRecruitmentDtos.CandidateApplication> me(
             @CookieValue(name=CandidateAccessService.ACCESS_COOKIE,required=false) String token){return noStore(access.me(token));}
+    @GetMapping("/me/completion")
+    public ResponseEntity<PublicRecruitmentDtos.CandidateCompletionDetails> completion(
+            @CookieValue(name=CandidateAccessService.ACCESS_COOKIE,required=false) String token){return noStore(completion.details(token));}
+    @PostMapping(value="/me/complete",consumes="multipart/form-data")
+    public ResponseEntity<PublicRecruitmentDtos.CandidateApplication> complete(
+            @CookieValue(name=CandidateAccessService.ACCESS_COOKIE,required=false) String token,
+            @RequestHeader(name="X-CSRF-Token",required=false) String csrf,
+            @Valid @RequestPart("application") PublicRecruitmentDtos.CandidateCompletionData data,
+            @RequestPart(name="cv",required=false) MultipartFile cv){return noStore(completion.complete(token,csrf,data,cv));}
     @PostMapping("/me/withdraw")
     public ResponseEntity<PublicRecruitmentDtos.CandidateApplication> withdraw(
             @CookieValue(name=CandidateAccessService.ACCESS_COOKIE,required=false) String token,

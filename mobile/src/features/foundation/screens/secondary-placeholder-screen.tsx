@@ -1,4 +1,5 @@
 import { useLocalSearchParams } from 'expo-router';
+import { useTranslation } from 'react-i18next';
 import { StyleSheet, View } from 'react-native';
 
 import { ScrollScreen } from '@/components/layout/screen';
@@ -20,6 +21,7 @@ export function SecondaryPlaceholderScreen({
   phase: number;
   title: string;
 }) {
+  const { t } = useTranslation();
   const params = useLocalSearchParams<Record<string, string | string[]>>();
   const rawValue = parameter ? params[parameter] : undefined;
   const value = Array.isArray(rawValue) ? rawValue[0] : rawValue;
@@ -32,9 +34,9 @@ export function SecondaryPlaceholderScreen({
         <AppText muted>{description}</AppText>
       </View>
       <Card elevated style={styles.card}>
-        <Badge tone="primary">Phase {phase}</Badge>
-        {value ? <AppText muted variant="bodySmall">Reference: {value}</AppText> : null}
-        <AppText>This protected route and native navigation behavior are ready for its feature implementation.</AppText>
+        <Badge tone="primary">{t('foundation.phase', { phase })}</Badge>
+        {value ? <AppText muted variant="bodySmall">{t('foundation.reference', { value })}</AppText> : null}
+        <AppText>{t('foundation.ready')}</AppText>
       </Card>
     </ScrollScreen>
   );

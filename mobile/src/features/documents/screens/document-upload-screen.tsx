@@ -31,6 +31,7 @@ import type {
 import { useAppTheme } from '@/hooks/use-app-theme';
 import type { ApiError } from '@/services/api/errors';
 import { useAppSelector } from '@/store/hooks';
+import { useTranslation } from 'react-i18next';
 
 const PICKER_MIME_TYPES = [
   'application/pdf',
@@ -49,6 +50,8 @@ const PICKER_MIME_TYPES = [
 ];
 
 export function DocumentUploadScreen() {
+  const { i18n, t } = useTranslation();
+  const isVietnamese = i18n.resolvedLanguage?.startsWith('vi') ?? false;
   const theme = useAppTheme();
   const params = useLocalSearchParams<Record<string, string | string[]>>();
   const filters = useMemo(() => filtersFromRoute(params), [params]);
@@ -83,7 +86,7 @@ export function DocumentUploadScreen() {
       if (result.canceled) return;
       setQueue((current) => [...current, ...queuePickerAssets(result.assets, current)]);
     } catch {
-      setPickerError('The system file picker could not be opened.');
+      setPickerError(t('documents.pickerError'));
     }
   }
 
@@ -122,11 +125,11 @@ export function DocumentUploadScreen() {
     setRunning(false);
   }
 
-  if (workspaceQuery.isLoading) return <LoadingState description="Loading your knowledge base." />;
+  if (workspaceQuery.isLoading) return <LoadingState description={t('documents.loadingWorkspace')} />;
   if (workspaceQuery.isError || !knowledgeBaseId) {
     return (
       <ScrollScreen edges={['right', 'bottom', 'left']} contentContainerStyle={styles.screen}>
-        <RetryPanel description="Your upload workspace could not be loaded." onRetry={() => void workspaceQuery.refetch()} />
+        <RetryPanel description={t('documents.uploadWorkspaceUnavailable')} onRetry={() => void workspaceQuery.refetch()} />
       </ScrollScreen>
     );
   }
@@ -134,30 +137,30 @@ export function DocumentUploadScreen() {
   return (
     <ScrollScreen edges={['right', 'bottom', 'left']} contentContainerStyle={styles.screen}>
       <View style={styles.heading}>
-        <AppText accessibilityRole="header" variant="title">Upload documents</AppText>
-        <AppText muted>Select up to 10 supported files. Two files upload at a time.</AppText>
+        <AppText accessibilityRole="header" variant="title">{t('documents.uploadTitle')}</AppText>
+        <AppText muted>{t('documents.uploadDescription')}</AppText>
       </View>
 
       <Card style={styles.card}>
-        <AppText style={styles.strong}>Batch visibility</AppText>
+        <AppText style={styles.strong}>{t('documents.batchVisibility')}</AppText>
         <View style={styles.choiceRow}>
           <VisibilityChoice
-            label="Employees only"
+            label={t('documents.employeeOnly')}
             onPress={() => setVisibility('EMPLOYEE_ONLY')}
             selected={visibility === 'EMPLOYEE_ONLY'}
           />
           {isAdmin ? (
             <VisibilityChoice
-              label="Customers and employees"
+              label={t('documents.customersAndEmployees')}
               onPress={() => setVisibility('CUSTOMER_AND_EMPLOYEE')}
               selected={visibility === 'CUSTOMER_AND_EMPLOYEE'}
             />
           ) : null}
         </View>
-        {!isAdmin ? <AppText muted variant="caption">Only tenant admins can expose documents to customers.</AppText> : null}
+        {!isAdmin ? <AppText muted variant="caption">{t('documents.adminVisibility')}</AppText> : null}
       </Card>
 
-      <Button disabled={running} onPress={() => void pickFiles()} variant="secondary">Select files</Button>
+      <Button disabled={running} onPress={() => void pickFiles()} variant="secondary">{t('documents.chooseFiles')}</Button>
       {pickerError ? <AppText accessibilityRole="alert" style={{ color: theme.colors.dangerText }}>{pickerError}</AppText> : null}
 
       <View style={styles.queue}>
@@ -166,19 +169,23 @@ export function DocumentUploadScreen() {
             <View style={styles.itemHeading}>
               <View style={styles.itemCopy}>
                 <AppText numberOfLines={2} style={styles.strong}>{item.name}</AppText>
-                <AppText muted variant="bodySmall">{formatFileSize(item.size)} · {item.mimeType || 'Unknown MIME type'}</AppText>
+                <AppText muted variant="bodySmall">{formatFileSize(item.size)} · {item.mimeType || t('documents.unknownMime')}</AppText>
               </View>
               <QueueBadge status={item.status} />
             </View>
             {item.status === 'uploading' ? (
               <View style={styles.progressRow}>
                 <ActivityIndicator color={theme.colors.primary} />
-                <AppText muted variant="bodySmall">Uploading…</AppText>
+                <AppText muted variant="bodySmall">{t('documents.queueStatus.uploading')}</AppText>
               </View>
             ) : null}
             {item.errorMessage ? (
               <AppText accessibilityRole="alert" style={{ color: theme.colors.dangerText }} variant="bodySmall">
-                {item.errorMessage}
+                {item.status === 'ambiguous'
+                  ? t('documents.uploadAmbiguous')
+                  : item.status === 'failed'
+                    ? isVietnamese ? t('documents.uploadFailed') : item.errorMessage
+                    : localizedDocumentError(item.errorMessage, t)}
               </AppText>
             ) : null}
             <View style={styles.itemActions}>
@@ -187,7 +194,7 @@ export function DocumentUploadScreen() {
                   onPress={() => updateItem(item.localId, { status: 'ready', errorMessage: null })}
                   style={styles.smallButton}
                   variant="secondary">
-                  Retry
+                  {t('documents.retryFailed')}
                 </Button>
               ) : null}
               {item.status === 'succeeded' && item.response ? (
@@ -198,11 +205,11 @@ export function DocumentUploadScreen() {
                   } as unknown as Href)}
                   style={styles.smallButton}
                   variant="secondary">
-                  View document
+                  {t('documents.openDocument')}
                 </Button>
               ) : null}
               {!running && item.status !== 'uploading' && item.status !== 'succeeded' ? (
-                <Button onPress={() => removeItem(item)} style={styles.smallButton} variant="ghost">Remove</Button>
+                <Button onPress={() => removeItem(item)} style={styles.smallButton} variant="ghost">{t('documents.remove')}</Button>
               ) : null}
             </View>
           </Card>
@@ -211,7 +218,7 @@ export function DocumentUploadScreen() {
 
       {queue.length === 0 ? (
         <Card style={styles.card}>
-          <AppText muted>No files selected yet.</AppText>
+          <AppText muted>{t('documents.noFiles')}</AppText>
         </Card>
       ) : null}
 
@@ -219,18 +226,30 @@ export function DocumentUploadScreen() {
         disabled={running || !queue.some((item) => item.status === 'ready')}
         loading={running}
         onPress={() => void uploadBatch()}>
-        Upload ready files
+        {t('documents.uploadReady')}
       </Button>
 
       {hasAttempted && !running ? (
         <Button
           onPress={() => router.replace({ pathname: '/documents', params: filtersToRoute(filters) })}
           variant="secondary">
-          Finish and return to Documents
+          {t('documents.finish')}
         </Button>
       ) : null}
     </ScrollScreen>
   );
+}
+
+function localizedDocumentError(message: string, t: (key: string) => string) {
+  const key = {
+    'The selected file is empty.': 'documents.selectedEmpty',
+    'Files must be 20 MiB or smaller.': 'documents.tooLarge',
+    'Supported files are PDF, DOCX, TXT, Markdown, HTML, XLSX, and CSV.': 'documents.unsupportedType',
+    'The file extension and MIME type do not match.': 'documents.typeMismatch',
+    'This file is already in the batch.': 'documents.duplicateFile',
+    'A batch can contain at most 10 files.': 'documents.batchLimit',
+  }[message];
+  return key ? t(key) : t('documents.uploadFailed');
 }
 
 function VisibilityChoice({ label, onPress, selected }: { label: string; onPress: () => void; selected: boolean }) {
@@ -252,6 +271,7 @@ function VisibilityChoice({ label, onPress, selected }: { label: string; onPress
 }
 
 function QueueBadge({ status }: { status: DocumentUploadQueueItem['status'] }) {
+  const {t}=useTranslation();
   const tone = status === 'succeeded'
     ? 'success'
     : status === 'failed' || status === 'rejected' || status === 'ambiguous'
@@ -259,7 +279,7 @@ function QueueBadge({ status }: { status: DocumentUploadQueueItem['status'] }) {
       : status === 'uploading'
         ? 'primary'
         : 'neutral';
-  return <Badge tone={tone}>{status.charAt(0).toUpperCase() + status.slice(1)}</Badge>;
+  return <Badge tone={tone}>{t(`documents.queueStatus.${status}`)}</Badge>;
 }
 
 const styles = StyleSheet.create({

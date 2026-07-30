@@ -1,4 +1,5 @@
 import { StateView } from '@/components/feedback/state-view';
+import { useTranslation } from 'react-i18next';
 
 type ErrorStateProps = {
   description?: string;
@@ -8,17 +9,18 @@ type ErrorStateProps = {
 };
 
 export function ErrorState({
-  description = 'Something went wrong. Please try again.',
+  description,
   onRetry,
-  retryLabel = 'Try again',
-  title = 'Unable to continue',
+  retryLabel,
+  title,
 }: ErrorStateProps) {
+  const {t}=useTranslation();
   return (
     <StateView
-      actionLabel={onRetry ? retryLabel : undefined}
-      description={description}
+      actionLabel={onRetry ? retryLabel??t('common.tryAgain') : undefined}
+      description={description??t('feedback.errorDescription')}
       onAction={onRetry}
-      title={title}
+      title={title??t('feedback.errorTitle')}
     />
   );
 }

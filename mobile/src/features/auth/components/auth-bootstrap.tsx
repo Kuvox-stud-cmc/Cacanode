@@ -5,10 +5,12 @@ import { ErrorState } from '@/components/feedback/error-state';
 import { authApi } from '@/features/auth/api/auth-api';
 import { bootstrapSession } from '@/services/auth/session-manager';
 import { useAppDispatch, useAppSelector } from '@/store/hooks';
+import { useTranslation } from 'react-i18next';
 
 void SplashScreen.preventAutoHideAsync().catch(() => undefined);
 
 export function AuthBootstrap({ children }: PropsWithChildren) {
+  const {t}=useTranslation();
   const dispatch = useAppDispatch();
   const { status, bootstrapError } = useAppSelector((state) => state.auth);
   const started = useRef(false);
@@ -38,7 +40,7 @@ export function AuthBootstrap({ children }: PropsWithChildren) {
     if (bootstrapError) {
       return (
         <ErrorState
-          title="Unable to restore your session"
+          title={t('auth.restoreTitle')}
           description={bootstrapError}
           onRetry={() => void bootstrap()}
         />

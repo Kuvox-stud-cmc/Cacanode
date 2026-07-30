@@ -3,9 +3,11 @@ import { Animated, StyleSheet, type ViewStyle } from 'react-native';
 
 import { radii } from '@/constants/theme';
 import { useAppTheme } from '@/hooks/use-app-theme';
+import { useTranslation } from 'react-i18next';
 
 export function Skeleton({ height = 18, style, width = '100%' }: { height?: number; style?: ViewStyle; width?: ViewStyle['width'] }) {
   const theme = useAppTheme();
+  const {t}=useTranslation();
   const [opacity] = useState(() => new Animated.Value(0.45));
 
   useEffect(() => {
@@ -21,7 +23,7 @@ export function Skeleton({ height = 18, style, width = '100%' }: { height?: numb
 
   return (
     <Animated.View
-      accessibilityLabel="Loading content"
+      accessibilityLabel={t('accessibility.loadingContent')}
       accessibilityRole="progressbar"
       style={[styles.skeleton, { backgroundColor: theme.colors.border, height, opacity, width }, style]}
     />

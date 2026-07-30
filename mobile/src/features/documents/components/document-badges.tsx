@@ -3,6 +3,7 @@ import { View, StyleSheet } from 'react-native';
 import { Badge } from '@/components/ui/badge';
 import { spacing } from '@/constants/theme';
 import type { DocumentStatus, DocumentVisibility } from '@/features/documents/types';
+import { useTranslation } from 'react-i18next';
 
 export function DocumentBadges({
   status,
@@ -11,6 +12,7 @@ export function DocumentBadges({
   status: DocumentStatus;
   visibility: DocumentVisibility;
 }) {
+  const {t}=useTranslation();
   const tone = status === 'COMPLETED'
     ? 'success'
     : status === 'FAILED'
@@ -20,14 +22,10 @@ export function DocumentBadges({
         : 'warning';
   return (
     <View style={styles.row}>
-      <Badge tone={tone}>{status === 'COMPLETED' ? 'Ready' : titleCase(status)}</Badge>
-      <Badge>{visibility === 'EMPLOYEE_ONLY' ? 'Employees' : 'Customers + employees'}</Badge>
+      <Badge tone={tone}>{t(`dashboard.status.${status.toLowerCase()}`)}</Badge>
+      <Badge>{visibility === 'EMPLOYEE_ONLY' ? t('documents.employees') : t('documents.customersEmployees')}</Badge>
     </View>
   );
-}
-
-function titleCase(value: string) {
-  return value.charAt(0) + value.slice(1).toLowerCase();
 }
 
 const styles = StyleSheet.create({

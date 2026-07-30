@@ -2,6 +2,7 @@ package com.cacanode.api.recruitment.controller;
 
 import com.cacanode.api.common.controller.BaseController;
 import com.cacanode.api.recruitment.dto.RecruitmentDtos;
+import com.cacanode.api.recruitment.dto.PublicRecruitmentDtos;
 import com.cacanode.api.recruitment.model.RecruitmentEnums.*;
 import com.cacanode.api.recruitment.query.RecruitmentQueryService;
 import com.cacanode.api.recruitment.query.RecruitmentCvAnalysisQueryService;
@@ -9,6 +10,10 @@ import com.cacanode.api.recruitment.service.RecruitmentService;
 import com.cacanode.api.recruitment.service.InterviewInvitationService;
 import com.cacanode.api.recruitment.service.RecruitmentAvailabilityService;
 import com.cacanode.api.recruitment.service.RecruitmentCvAnalysisService;
+import com.cacanode.api.recruitment.service.RecruitmentApplicationCompletionLinkService;
+import com.cacanode.api.recruitment.service.PublicInterviewSchedulingService;
+import com.cacanode.api.recruitment.service.RecruitmentInterviewCancellationService;
+import com.cacanode.api.recruitment.api.RecruitmentApplicationCommandApi;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -23,6 +28,7 @@ import org.springframework.web.bind.annotation.*;
 import java.math.BigDecimal;
 import java.net.URI;
 import java.time.LocalDateTime;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
 
@@ -36,16 +42,23 @@ public class RecruitmentController extends BaseController {
     private final RecruitmentQueryService queries;
     private final InterviewInvitationService invitations;
     private final RecruitmentAvailabilityService availability;
+    private final RecruitmentApplicationCompletionLinkService completionLinks;
+    private final PublicInterviewSchedulingService scheduling;
+    private final RecruitmentInterviewCancellationService cancellations;
     @Autowired(required=false) private RecruitmentCvAnalysisQueryService cvAnalyses;
     @Autowired(required=false) private RecruitmentCvAnalysisService cvAnalysisCommands;
 
     @Autowired
     public RecruitmentController(RecruitmentService service,RecruitmentQueryService queries,
-            InterviewInvitationService invitations,RecruitmentAvailabilityService availability){
+            InterviewInvitationService invitations,RecruitmentAvailabilityService availability,
+            RecruitmentApplicationCompletionLinkService completionLinks,
+            PublicInterviewSchedulingService scheduling,
+            RecruitmentInterviewCancellationService cancellations){
         this.service=service;this.queries=queries;this.invitations=invitations;this.availability=availability;
+        this.completionLinks=completionLinks;this.scheduling=scheduling;this.cancellations=cancellations;
     }
 
-    RecruitmentController(RecruitmentService service,RecruitmentQueryService queries){this(service,queries,null,null);}
+    RecruitmentController(RecruitmentService service,RecruitmentQueryService queries){this(service,queries,null,null,null,null,null);}
 
     @GetMapping("/settings") public RecruitmentDtos.SettingsResponse settings(HttpServletRequest r){return service.settings(getTenantId(r));}
     @GetMapping("/overview") public RecruitmentDtos.OverviewResponse overview(HttpServletRequest r){return queries.overview(getTenantId(r));}
@@ -98,6 +111,8 @@ public class RecruitmentController extends BaseController {
     @DeleteMapping("/candidates/{id}") public ResponseEntity<Void> deleteCandidate(@PathVariable UUID id,HttpServletRequest r){service.deleteCandidate(getTenantId(r),id);return ResponseEntity.noContent().build();}
 
     @GetMapping("/applications") public ResponseEntity<List<RecruitmentDtos.ApplicationResponse>> applications(@RequestParam(defaultValue="0") int page,@RequestParam(defaultValue="20") int size,@RequestParam(required=false) ApplicationStatus status,@RequestParam(required=false) UUID jobId,@RequestParam(required=false) UUID candidateId,@RequestParam(required=false) @DateTimeFormat(iso=DateTimeFormat.ISO.DATE_TIME) LocalDateTime submittedFrom,@RequestParam(required=false) @DateTimeFormat(iso=DateTimeFormat.ISO.DATE_TIME) LocalDateTime submittedTo,@RequestParam(required=false) Boolean cvPresent,@RequestParam(required=false) CvAnalysisStatus cvAnalysisStatus,@RequestParam(required=false) InterviewStatus interviewStatus,@RequestParam(required=false) BigDecimal scoreMin,@RequestParam(required=false) BigDecimal scoreMax,@RequestParam(required=false) String englishBand,@RequestParam(required=false,name="q") String search,@RequestParam(required=false) String sort,@RequestParam(required=false) String direction,HttpServletRequest r){return listed(queries.applications(getTenantId(r),page,size,status,jobId,candidateId,submittedFrom,submittedTo,cvPresent,cvAnalysisStatus,interviewStatus,scoreMin,scoreMax,englishBand,search,sort,direction));}
+    @PostMapping("/applications") public ResponseEntity<RecruitmentDtos.ApplicationResponse> createApplication(@Valid @RequestBody RecruitmentDtos.ApplicationCreate body,HttpServletRequest r){UUID tenantId=getTenantId(r);var created=service.create(new RecruitmentApplicationCommandApi.CreateApplicationCommand(tenantId,body.jobId(),body.candidateId(),false));var response=queries.application(tenantId,created.applicationId());return created("/api/v1/recruitment/applications/"+response.id(),response);}
+    @PostMapping("/applications/{id}/completion-link") public RecruitmentDtos.CompletionLinkResponse completionLink(@PathVariable UUID id,HttpServletRequest r){return completionLinks.send(getTenantId(r),id);}
     @GetMapping("/applications/{id}") public RecruitmentDtos.ApplicationResponse application(@PathVariable UUID id,HttpServletRequest r){return queries.application(getTenantId(r),id);}
     @GetMapping("/applications/{id}/detail") public RecruitmentDtos.ApplicationDetailResponse applicationDetail(@PathVariable UUID id,HttpServletRequest r){return queries.applicationDetail(getTenantId(r),id);}
     @PostMapping("/applications/{id}/transitions") public RecruitmentDtos.ApplicationResponse transition(@PathVariable UUID id,@Valid @RequestBody RecruitmentDtos.TransitionRequest body,HttpServletRequest r){return service.transitionApplication(getTenantId(r),id,body.targetStatus());}
@@ -106,6 +121,12 @@ public class RecruitmentController extends BaseController {
     @GetMapping("/interviews") public ResponseEntity<List<RecruitmentDtos.InterviewResponse>> interviews(@RequestParam(defaultValue="0") int page,@RequestParam(defaultValue="20") int size,@RequestParam(required=false) InterviewStatus status,@RequestParam(required=false) UUID jobId,@RequestParam(required=false) UUID applicationId,@RequestParam(required=false) @DateTimeFormat(iso=DateTimeFormat.ISO.DATE_TIME) LocalDateTime dateFrom,@RequestParam(required=false) @DateTimeFormat(iso=DateTimeFormat.ISO.DATE_TIME) LocalDateTime dateTo,@RequestParam(required=false) BigDecimal scoreMin,@RequestParam(required=false) BigDecimal scoreMax,@RequestParam(required=false) String englishBand,@RequestParam(required=false,name="q") String search,@RequestParam(required=false) String sort,@RequestParam(required=false) String direction,HttpServletRequest r){return listed(queries.interviews(getTenantId(r),page,size,status,jobId,applicationId,dateFrom,dateTo,scoreMin,scoreMax,englishBand,search,sort,direction));}
     @GetMapping("/interviews/{id}") public RecruitmentDtos.InterviewResponse interview(@PathVariable UUID id,HttpServletRequest r){return queries.interview(getTenantId(r),id);}
     @GetMapping("/interviews/{id}/attempts") public List<RecruitmentDtos.CallAttemptResponse> attempts(@PathVariable UUID id,HttpServletRequest r){return queries.attempts(getTenantId(r),id);}
+    @GetMapping("/interviews/{id}/slots") public PublicRecruitmentDtos.SlotPage interviewSlots(@PathVariable UUID id,@RequestParam(required=false) @DateTimeFormat(iso=DateTimeFormat.ISO.DATE) LocalDate from,@RequestParam(defaultValue="14") int days,HttpServletRequest r){return scheduling.tenantSlots(getTenantId(r),id,from,days);}
+    @PostMapping("/interviews/{id}/schedule") public RecruitmentDtos.InterviewResponse scheduleInterview(@PathVariable UUID id,@Valid @RequestBody PublicRecruitmentDtos.ScheduleRequest body,HttpServletRequest r){UUID tenantId=getTenantId(r);scheduling.tenantSchedule(tenantId,id,body.startAt(),false);return queries.interview(tenantId,id);}
+    @PostMapping("/interviews/{id}/reschedule") public RecruitmentDtos.InterviewResponse rescheduleInterview(@PathVariable UUID id,@Valid @RequestBody PublicRecruitmentDtos.ScheduleRequest body,HttpServletRequest r){UUID tenantId=getTenantId(r);scheduling.tenantSchedule(tenantId,id,body.startAt(),true);return queries.interview(tenantId,id);}
+    @PostMapping("/interviews/{id}/cancel") public RecruitmentDtos.InterviewResponse cancelInterview(@PathVariable UUID id,HttpServletRequest r){UUID tenantId=getTenantId(r);cancellations.cancelByRecruiter(tenantId,id);return queries.interview(tenantId,id);}
+    @PostMapping("/interviews/{id}/reinvite") public RecruitmentDtos.InterviewResponse reinviteInterview(@PathVariable UUID id,HttpServletRequest r){UUID tenantId=getTenantId(r);invitations.reinvite(tenantId,id);return queries.interview(tenantId,id);}
+    @GetMapping("/interviews/{id}/delivery-history") public List<RecruitmentDtos.DeliveryHistoryResponse> deliveryHistory(@PathVariable UUID id,HttpServletRequest r){return queries.deliveryHistory(getTenantId(r),id);}
 
     private static <T> ResponseEntity<List<T>> listed(RecruitmentDtos.PageResult<T> result){return ResponseEntity.ok().header("X-Total-Count",Long.toString(result.totalCount())).body(result.items());}
     private static <T> ResponseEntity<T> created(String location,T body){return ResponseEntity.created(URI.create(location)).body(body);}

@@ -5,6 +5,7 @@ import { AppText } from '@/components/ui/app-text';
 import { Card } from '@/components/ui/card';
 import { spacing } from '@/constants/theme';
 import { useAppTheme } from '@/hooks/use-app-theme';
+import { useTranslation } from 'react-i18next';
 
 type DialogProps = PropsWithChildren<{
   actions?: ReactNode;
@@ -16,6 +17,7 @@ type DialogProps = PropsWithChildren<{
 
 export function Dialog({ actions, children, description, onDismiss, title, visible }: DialogProps) {
   const theme = useAppTheme();
+  const {t}=useTranslation();
   return (
     <Modal
       animationType="fade"
@@ -25,7 +27,7 @@ export function Dialog({ actions, children, description, onDismiss, title, visib
       visible={visible}>
       <View style={[styles.backdrop, { backgroundColor: theme.colors.overlay }]}>
         <Pressable
-          accessibilityLabel="Dismiss dialog"
+          accessibilityLabel={t('accessibility.dismissDialog')}
           accessibilityRole="button"
           onPress={onDismiss}
           style={StyleSheet.absoluteFill}

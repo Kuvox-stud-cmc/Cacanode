@@ -1,12 +1,14 @@
 import { StyleSheet, View } from 'react-native';
+import { useTranslation } from 'react-i18next';
 
 import { Card } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { spacing } from '@/constants/theme';
 
 export function DashboardSkeleton() {
+  const { t } = useTranslation();
   return (
-    <View accessibilityLabel="Loading dashboard" accessibilityRole="progressbar" style={styles.content}>
+    <View accessibilityLabel={t('accessibility.loadingDashboard')} accessibilityRole="progressbar" style={styles.content}>
       <View style={styles.heading}>
         <Skeleton height={32} width="64%" />
         <Skeleton width="46%" />

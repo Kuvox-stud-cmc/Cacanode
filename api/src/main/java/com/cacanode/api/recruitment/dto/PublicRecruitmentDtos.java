@@ -59,6 +59,16 @@ public final class PublicRecruitmentDtos {
     public record CandidateApplication(UUID applicationId, UUID jobPublicId, String companyName,
             String jobTitle, ApplicationStatus status, LocalDateTime submittedAt,
             LocalDateTime verifiedAt, LocalDateTime withdrawnAt, boolean cvPresent) {}
+    public record CandidateCompletionDetails(UUID applicationId,String companyName,String jobTitle,
+            String fullName,String email,String phone,String locale,CvPolicy cvPolicy,CvAiMode cvAiMode,
+            List<PublicScreeningQuestion> screeningQuestions) {}
+    public record CandidateCompletionData(
+            @NotBlank @Size(max=200) String fullName,
+            @NotBlank @Pattern(regexp="^\\+[1-9][0-9]{7,14}$") String phone,
+            @NotBlank @Pattern(regexp="vi-VN|en-US") String locale,
+            @AssertTrue boolean privacyConsent,
+            boolean cvUseConsent,
+            @NotNull List<@Valid ScreeningAnswer> screeningAnswers) {}
 
     public record InvitationDetails(UUID interviewId,String companyName,String jobTitle,String candidateName,
             InterviewStatus status,Instant scheduledStartAt,Instant scheduledEndAt,String schedulingTimezone,

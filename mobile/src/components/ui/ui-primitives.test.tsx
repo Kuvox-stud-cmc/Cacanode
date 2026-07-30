@@ -49,7 +49,7 @@ describe('shared UI primitives', () => {
         <Text>Sheet content</Text>
       </Sheet>,
     );
-    await fireEvent.press(sheet.getAllByRole('button', { name: 'Close account menu' })[0]);
+    await fireEvent.press(sheet.getAllByRole('button', { name: 'Close Account' })[0]);
     expect(dismissSheet).toHaveBeenCalledTimes(1);
   });
 });

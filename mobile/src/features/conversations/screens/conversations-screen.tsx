@@ -26,7 +26,6 @@ import {
 import {
   conversationFiltersFromRoute,
   conversationFiltersToRoute,
-  customerIdentity,
   mergeConversationPages,
 } from '@/features/conversations/model/conversation-state';
 import {
@@ -36,8 +35,10 @@ import {
   type ConversationListItem,
 } from '@/features/conversations/types';
 import { useAppTheme } from '@/hooks/use-app-theme';
+import { useTranslation } from 'react-i18next';
 
 export function ConversationsScreen() {
+  const {t,i18n}=useTranslation();const locale=i18n.resolvedLanguage?.startsWith('vi')?'vi-VN':'en-US';
   const theme = useAppTheme();
   const params = useLocalSearchParams<Record<string, string | string[]>>();
   const filters = useMemo(() => conversationFiltersFromRoute(params), [params]);
@@ -111,58 +112,58 @@ export function ConversationsScreen() {
           <View style={styles.header}>
             <View style={styles.headingRow}>
               <View style={styles.headingCopy}>
-                <AppText accessibilityRole="header" variant="title">Conversations</AppText>
-                <AppText muted>Review customer chats from the widget and Custom API.</AppText>
+                <AppText accessibilityRole="header" variant="title">{t('conversations.title')}</AppText>
+                <AppText muted>{t('conversations.description')}</AppText>
               </View>
               <Button onPress={() => setSheetVisible(true)} style={styles.compactButton} variant="secondary">
-                Filters
+                {t('conversations.filters')}
               </Button>
             </View>
             {filters.status || filters.channel ? (
               <View style={styles.filterSummary}>
-                {filters.status ? <Badge>{filters.status.toLowerCase()}</Badge> : null}
-                {filters.channel ? <Badge tone="primary">{channelLabel(filters.channel)}</Badge> : null}
+                {filters.status ? <Badge>{t(`tickets.statusLabels.${filters.status==='OPEN'?'open':'closed'}`)}</Badge> : null}
+                {filters.channel ? <Badge tone="primary">{channelLabel(filters.channel,t)}</Badge> : null}
                 <Button onPress={clearFilters} style={styles.compactButton} variant="ghost">
-                  Clear
+                  {t('conversations.clearFilters')}
                 </Button>
               </View>
             ) : null}
             {firstPageQuery.isError && conversations.length === 0 ? (
               <RetryPanel
-                description="Customer conversations could not be loaded."
+                description={t('conversations.loadError')}
                 onRetry={() => void firstPageQuery.refetch()}
-                title="Unable to load conversations"
+                title={t('conversations.unable')}
               />
             ) : null}
           </View>
         )}
         ListEmptyComponent={firstPageQuery.isLoading ? (
-          <View accessibilityLabel="Loading conversations" style={styles.centered}>
+          <View accessibilityLabel={t('conversations.loading')} style={styles.centered}>
             <ActivityIndicator color={theme.colors.primary} />
-            <AppText muted>Loading conversations…</AppText>
+            <AppText muted>{t('conversations.loading')}</AppText>
           </View>
         ) : firstPageQuery.isError ? null : (
           <EmptyState
-            description="No customer conversations match the selected filters."
-            title="No conversations"
+            description={t('conversations.emptyDescription')}
+            title={t('conversations.empty')}
           />
         )}
         ListFooterComponent={conversations.length ? (
           <View style={styles.footer}>
             {loadingMore ? (
-              <ActivityIndicator accessibilityLabel="Loading more conversations" color={theme.colors.primary} />
+              <ActivityIndicator accessibilityLabel={t('conversations.loadingMore')} color={theme.colors.primary} />
             ) : null}
             {loadMoreError && !loadingMore ? (
               <RetryPanel
-                description="The next page could not be loaded. Your current results are still available."
+                description={t('conversations.nextPageError')}
                 onRetry={() => void loadNextPage()}
-                title="Unable to load more"
+                title={t('conversations.unableMore')}
               />
             ) : null}
             {!loadMoreError && !loadingMore && hasMore ? (
-              <Button onPress={() => void loadNextPage()} variant="secondary">Load more</Button>
+              <Button onPress={() => void loadNextPage()} variant="secondary">{t('conversations.loadMore')}</Button>
             ) : null}
-            {!hasMore ? <AppText muted variant="caption">All conversations loaded</AppText> : null}
+            {!hasMore ? <AppText muted variant="caption">{t('conversations.allLoaded')}</AppText> : null}
           </View>
         ) : null}
         onEndReached={() => void loadNextPage()}
@@ -181,39 +182,39 @@ export function ConversationsScreen() {
         )}
         renderItem={({ item }) => (
           <Pressable
-            accessibilityLabel={`Open conversation with ${customerIdentity(item.customer)}`}
+            accessibilityLabel={t('conversations.openHint',{name:localizedCustomerIdentity(item.customer,t('conversations.anonymous'))})}
             accessibilityRole="button"
             onPress={() => openConversation(item.id)}>
             <Card style={styles.conversationCard}>
               <View style={styles.cardTopRow}>
                 <View style={styles.cardCopy}>
                   <AppText numberOfLines={2} style={styles.identity}>
-                    {customerIdentity(item.customer)}
+                    {localizedCustomerIdentity(item.customer,t('conversations.anonymous'))}
                   </AppText>
                   <AppText muted variant="bodySmall">
-                    {item.messageCount} {item.messageCount === 1 ? 'message' : 'messages'} · {formatDate(item.createdAt)}
+                    {t('conversations.messages',{count:item.messageCount})} · {formatDate(item.createdAt,locale,t('conversations.dateUnavailable'))}
                   </AppText>
                 </View>
                 <Badge tone={item.status === 'OPEN' ? 'success' : 'neutral'}>
-                  {item.status.toLowerCase()}
+                  {t(`tickets.statusLabels.${item.status==='OPEN'?'open':'closed'}`)}
                 </Badge>
               </View>
-              <Badge tone="primary">{channelLabel(item.channel)}</Badge>
+              <Badge tone="primary">{channelLabel(item.channel,t)}</Badge>
             </Card>
           </Pressable>
         )}
         showsVerticalScrollIndicator={false}
       />
 
-      <Sheet onDismiss={() => setSheetVisible(false)} title="Conversation filters" visible={sheetVisible}>
+      <Sheet onDismiss={() => setSheetVisible(false)} title={t('conversations.filterTitle')} visible={sheetVisible}>
         <FilterGroup
-          label="Status"
+          label={t('conversations.status')}
           onSelect={(status) => updateFilters({ status: status as ConversationFilters['status'] })}
           options={CONVERSATION_STATUSES}
           selected={filters.status}
         />
         <FilterGroup
-          label="Channel"
+          label={t('conversations.channel')}
           onSelect={(channel) => updateFilters({ channel: channel as ConversationFilters['channel'] })}
           options={CONVERSATION_CHANNELS}
           selected={filters.channel}
@@ -234,15 +235,16 @@ function FilterGroup({
   options: readonly string[];
   selected?: string;
 }) {
+  const {t}=useTranslation();
   return (
     <View style={styles.filterGroup}>
       <AppText style={styles.groupLabel}>{label}</AppText>
       <View style={styles.choiceRow}>
-        <FilterChoice label="Any" onPress={() => onSelect(undefined)} selected={!selected} />
+        <FilterChoice label={t('common.any')} onPress={() => onSelect(undefined)} selected={!selected} />
         {options.map((option) => (
           <FilterChoice
             key={option}
-            label={option === 'CUSTOM_API' ? 'Custom API' : option.toLowerCase()}
+            label={option==='CUSTOM_API'?t('conversations.customApi'):option==='WIDGET'?t('conversations.widget'):t(`tickets.statusLabels.${option==='OPEN'?'open':'closed'}`)}
             onPress={() => onSelect(option)}
             selected={selected === option}
           />
@@ -277,13 +279,23 @@ function FilterChoice({ label, onPress, selected }: {
   );
 }
 
-function channelLabel(channel: ConversationListItem['channel']) {
-  return channel === 'CUSTOM_API' ? 'Custom API' : 'Widget';
+function channelLabel(channel:ConversationListItem['channel'],t:(key:string)=>string) {
+  return channel === 'CUSTOM_API' ? t('conversations.customApi') : t('conversations.widget');
 }
 
-function formatDate(value: string) {
+function localizedCustomerIdentity(
+  customer: ConversationListItem['customer'],
+  fallback: string,
+) {
+  return customer.name?.trim()
+    || customer.email?.trim()
+    || customer.externalId?.trim()
+    || fallback;
+}
+
+function formatDate(value:string,locale:string,unavailable:string) {
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? 'Date unavailable' : date.toLocaleString();
+  return Number.isNaN(date.getTime()) ? unavailable : date.toLocaleString(locale);
 }
 
 const styles = StyleSheet.create({

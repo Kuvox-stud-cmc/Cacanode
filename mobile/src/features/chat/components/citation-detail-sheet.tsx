@@ -5,6 +5,7 @@ import { Separator } from '@/components/ui/separator';
 import { Sheet } from '@/components/ui/sheet';
 import { spacing } from '@/constants/theme';
 import type { ChatCitation } from '@/features/chat/types';
+import { useTranslation } from 'react-i18next';
 
 export function CitationDetailSheet({
   citation,
@@ -13,29 +14,30 @@ export function CitationDetailSheet({
   citation: ChatCitation | null;
   onDismiss: () => void;
 }) {
+  const {t}=useTranslation();
   if (!citation) return null;
 
   const metadata = [
-    ['Page', citation.pageNumber?.toString()],
-    ['Section', citation.sectionPath.length ? citation.sectionPath.join(' › ') : null],
-    ['Sheet', citation.sheetName],
-    ['Cells', citation.cellRange],
-    ['Block type', citation.blockType],
-    ['Modality', citation.modality],
-    ['Unit', citation.unitId],
-    ['Table', citation.tableId],
+    [t('chat.page'), citation.pageNumber?.toString()],
+    [t('chat.section'), citation.sectionPath.length ? citation.sectionPath.join(' › ') : null],
+    [t('chat.sheet'), citation.sheetName],
+    [t('chat.cells'), citation.cellRange],
+    [t('chat.blockType'), citation.blockType],
+    [t('chat.modality'), citation.modality],
+    [t('chat.unit'), citation.unitId],
+    [t('chat.table'), citation.tableId],
   ].filter((item): item is [string, string] => Boolean(item[1]));
 
   return (
-    <Sheet onDismiss={onDismiss} title="Citation details" visible>
+    <Sheet onDismiss={onDismiss} title={t('chat.citationDetails')} visible>
       <View style={styles.content}>
         <View style={styles.section}>
-          <AppText muted variant="bodySmall">Source</AppText>
+          <AppText muted variant="bodySmall">{t('chat.source')}</AppText>
           <AppText accessibilityRole="header" variant="heading">{citation.sourceName}</AppText>
         </View>
         <Separator />
         <View style={styles.section}>
-          <AppText muted variant="bodySmall">Snippet</AppText>
+          <AppText muted variant="bodySmall">{t('chat.snippet')}</AppText>
           <AppText>{citation.snippet}</AppText>
         </View>
         {metadata.length ? <Separator /> : null}

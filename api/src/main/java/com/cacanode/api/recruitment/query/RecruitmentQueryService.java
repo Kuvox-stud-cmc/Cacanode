@@ -162,6 +162,22 @@ public class RecruitmentQueryService {
                 rs.getObject(4,LocalDateTime.class),offsetInstant(rs,5),offsetInstant(rs,6),offsetInstant(rs,7),rs.getString(8)));
     }
 
+    public List<RecruitmentDtos.DeliveryHistoryResponse> deliveryHistory(UUID tenantId,UUID interviewId) {
+        Params params=new Params(tenantId,new Page(0,100));params.values.addValue("interviewId",interviewId);
+        if(jdbc.queryForObject("SELECT count(*) FROM recruitment_interviews WHERE tenant_id=:tenantId AND id=:interviewId",params.values,Long.class)==0)
+            throw notFound("Interview");
+        return jdbc.query("""
+                SELECT d.id,d.kind,d.state,c.email,d.sent_at,d.last_error,d.created_at
+                FROM recruitment_candidate_email_deliveries d
+                JOIN recruitment_applications a ON a.tenant_id=d.tenant_id AND a.id=d.application_id
+                JOIN recruitment_candidates c ON c.tenant_id=a.tenant_id AND c.id=a.candidate_id
+                WHERE d.tenant_id=:tenantId AND d.interview_id=:interviewId
+                ORDER BY d.created_at DESC,d.id DESC
+                """,params.values,(rs,row)->new RecruitmentDtos.DeliveryHistoryResponse(
+                rs.getObject(1,UUID.class),rs.getString(2),rs.getString(3),rs.getString(4),
+                rs.getObject(5,LocalDateTime.class),rs.getString(6),rs.getObject(7,LocalDateTime.class)));
+    }
+
     private Map<String,Long> statusCounts(String table,UUID tenantId){
         Params params=new Params(tenantId,new Page(0,1));Map<String,Long> result=new LinkedHashMap<>();
         jdbc.query("SELECT status,count(*) item_count FROM "+table+" WHERE tenant_id=:tenantId GROUP BY status ORDER BY status",

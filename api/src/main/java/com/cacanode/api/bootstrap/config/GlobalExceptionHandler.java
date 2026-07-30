@@ -10,6 +10,7 @@ import com.cacanode.api.billing.gateway.PaymentGatewayException;
 import com.cacanode.api.tenant.api.WidgetOriginNotAllowedException;
 import com.cacanode.api.recruitment.exception.PublicRecruitmentRateLimitException;
 import com.cacanode.api.recruitment.exception.PublicRecruitmentUnavailableException;
+import com.cacanode.api.auth.exception.MobileRoleUnsupportedException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
@@ -32,6 +33,19 @@ import java.util.List;
 @RestControllerAdvice
 @Slf4j
 public class GlobalExceptionHandler {
+
+    @ExceptionHandler(MobileRoleUnsupportedException.class)
+    @ResponseStatus(HttpStatus.FORBIDDEN)
+    public ErrorResponse handleMobileRoleUnsupported(
+            MobileRoleUnsupportedException e, WebRequest request) {
+        return ErrorResponse.builder()
+                .timestamp(LocalDateTime.now())
+                .status(HttpStatus.FORBIDDEN.value())
+                .path(safePath(request))
+                .error(HttpStatus.FORBIDDEN.getReasonPhrase())
+                .message(MobileRoleUnsupportedException.CODE)
+                .build();
+    }
 
     @ExceptionHandler(PublicRecruitmentRateLimitException.class)
     public ResponseEntity<ErrorResponse> handleRecruitmentRateLimit(

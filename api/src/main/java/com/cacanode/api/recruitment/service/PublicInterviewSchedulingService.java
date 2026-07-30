@@ -28,7 +28,7 @@ import java.util.*;
 
 @Service
 @RequiredArgsConstructor
-@ConditionalOnExpression("${app.recruitment.enabled:false} and ${app.recruitment.public-jobs-enabled:false}")
+@ConditionalOnExpression("${app.recruitment.enabled:false}")
 public class PublicInterviewSchedulingService {
     public static final String INVITATION_COOKIE="recruitment_interview_invitation";
     private final RecruitmentInterviewInvitationTokenRepository tokens;
@@ -89,11 +89,38 @@ public class PublicInterviewSchedulingService {
     public PublicRecruitmentDtos.InvitationDetails reschedule(String raw,Instant startAt){return book(raw,startAt,true);}
 
     @Transactional
+    public PublicRecruitmentDtos.SlotPage tenantSlots(UUID tenantId,UUID interviewId,LocalDate from,int days){
+        if(days<1||days>14)throw new BadRequestException("days must be between 1 and 14");
+        RecruitmentInterview interview=interviews.findByIdAndTenantId(interviewId,tenantId)
+                .orElseThrow(()->new com.cacanode.api.common.exception.custom.ResourceNotFoundException("Interview was not found"));
+        RecruitmentTenantSettings s=tenantSettings(tenantId);ZoneId zone=ZoneId.of(s.getSchedulingTimezone());
+        LocalDate today=Instant.now(clock).atZone(zone).toLocalDate();
+        if(!windows.existsByTenantId(tenantId)&&!exceptions.existsByTenantIdAndKindAndExceptionDateGreaterThanEqual(
+                tenantId,AvailabilityExceptionKind.EXTRA,today))throw new ConflictException("INTERVIEW_AVAILABILITY_NOT_CONFIGURED");
+        LocalDate start=from==null?today:from;if(start.isBefore(today))start=today;
+        LocalDate horizon=today.plusDays(s.getBookingHorizonDays());
+        if(start.isAfter(horizon))return new PublicRecruitmentDtos.SlotPage(List.of(),null,zone.getId());
+        LocalDate end=start.plusDays(days),limit=horizon.plusDays(1);if(end.isAfter(limit))end=limit;
+        return new PublicRecruitmentDtos.SlotPage(generate(interview,s,start,end,false),end.isBefore(limit)?end:null,zone.getId());
+    }
+
+    @Transactional
+    public RecruitmentInterview tenantSchedule(UUID tenantId,UUID interviewId,Instant startAt,boolean reschedule){
+        RecruitmentInterview interview=interviews.findForUpdate(tenantId,interviewId)
+                .orElseThrow(()->new com.cacanode.api.common.exception.custom.ResourceNotFoundException("Interview was not found"));
+        return book(interview,startAt,reschedule);
+    }
+
+    @Transactional
     public PublicRecruitmentDtos.InvitationDetails withdraw(String raw){Access access=require(raw);cancellations.withdraw(access.interview().getTenantId(),access.interview().getApplicationId());return details(interviews.findByIdAndTenantId(access.interview().getId(),access.interview().getTenantId()).orElseThrow(PublicInterviewSchedulingService::unauthorized));}
 
     private PublicRecruitmentDtos.InvitationDetails book(String raw,Instant startAt,boolean reschedule){
         Access access=require(raw);RecruitmentInterview interview=interviews.findForUpdate(access.interview().getTenantId(),access.interview().getId()).orElseThrow(PublicInterviewSchedulingService::unauthorized);
-        if(interview.getStatus()==InterviewStatus.SCHEDULED && Objects.equals(interview.getScheduledStartAt(),startAt))return details(interview);
+        return details(book(interview,startAt,reschedule));
+    }
+
+    private RecruitmentInterview book(RecruitmentInterview interview,Instant startAt,boolean reschedule){
+        if(interview.getStatus()==InterviewStatus.SCHEDULED && Objects.equals(interview.getScheduledStartAt(),startAt))return interview;
         LocalDateTime now=LocalDateTime.now(clock);RecruitmentTenantSettings s=tenantSettings(interview.getTenantId());
         if(reschedule){
             if(interview.getStatus()!=InterviewStatus.SCHEDULED)throw new ConflictException("Interview is not scheduled");
@@ -127,7 +154,7 @@ public class PublicInterviewSchedulingService {
             if(due.isAfter(now))invitationService.enqueue(interview,CandidateEmailKind.REMINDER,
                     "reminder-v"+interview.getScheduleVersion()+"-"+offset,due);
         }
-        return details(interview);
+        return interview;
     }
 
     private List<PublicRecruitmentDtos.InterviewSlot> generate(RecruitmentInterview interview,RecruitmentTenantSettings s,

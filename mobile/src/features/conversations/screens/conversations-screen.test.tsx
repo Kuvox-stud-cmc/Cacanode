@@ -3,6 +3,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { ConversationsScreen } from '@/features/conversations/screens/conversations-screen';
 import type { ConversationListItem } from '@/features/conversations/types';
+import i18n from '@/i18n';
 
 const mockPush = jest.fn();
 const mockSetParams = jest.fn();
@@ -43,13 +44,23 @@ async function renderScreen() {
 }
 
 describe('ConversationsScreen', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
+    await i18n.changeLanguage('en');
     jest.clearAllMocks();
     mockRouteParams = { status: 'OPEN', channel: 'WIDGET' };
     mockLoadPage.mockReturnValue({ unwrap: () => Promise.resolve([]) });
     mockUseList.mockReturnValue({
       data: [item], isError: false, isFetching: false, isLoading: false, refetch: mockRefetch,
     });
+  });
+
+  it('renders conversation navigation and filters in Vietnamese', async () => {
+    await i18n.changeLanguage('vi');
+    const screen = await renderScreen();
+    expect(screen.getByText('Hội thoại')).toBeTruthy();
+    expect(screen.getByText('Bộ lọc')).toBeTruthy();
+    expect(screen.getAllByText('Mở').length).toBeGreaterThan(0);
+    expect(screen.queryByText('Conversations')).toBeNull();
   });
 
   it('queries restored filters and carries them into detail navigation', async () => {

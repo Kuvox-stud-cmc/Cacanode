@@ -27,6 +27,7 @@ import io.jsonwebtoken.Claims;
 import com.cacanode.api.auth.repository.RefreshTokenRepository;
 import com.cacanode.api.auth.service.AuthService;
 import com.cacanode.api.auth.service.Login2FAAttemptService;
+import com.cacanode.api.auth.exception.MobileRoleUnsupportedException;
 import com.cacanode.api.common.exception.custom.ConflictException;
 import com.cacanode.api.common.exception.custom.UnauthorizedException;
 import com.cacanode.api.auth.service.JwtService;
@@ -169,7 +170,7 @@ public class AuthServiceImpl implements AuthService {
     @Override
     @Transactional
     public Object login(LoginRequest req, HttpServletResponse res) {
-        LoginOutcome outcome = beginLogin(req.getEmail(), req.getPassword(), Login2FAChallengeType.LINK);
+        LoginOutcome outcome = beginLogin(req.getEmail(), req.getPassword(), Login2FAChallengeType.LINK, false);
         if (outcome.challenge() != null) {
             return outcome.challenge();
         }
@@ -180,7 +181,7 @@ public class AuthServiceImpl implements AuthService {
     @Override
     @Transactional
     public Object mobileLogin(MobileLoginRequest req) {
-        LoginOutcome outcome = beginLogin(req.getEmail(), req.getPassword(), Login2FAChallengeType.CODE);
+        LoginOutcome outcome = beginLogin(req.getEmail(), req.getPassword(), Login2FAChallengeType.CODE, true);
         if (outcome.challenge() != null) {
             return outcome.challenge();
         }
@@ -188,7 +189,8 @@ public class AuthServiceImpl implements AuthService {
         return toMobileResponse(issueCredentialPair(outcome.user(), true));
     }
 
-    private LoginOutcome beginLogin(String email, String password, Login2FAChallengeType challengeType) {
+    private LoginOutcome beginLogin(
+            String email, String password, Login2FAChallengeType challengeType, boolean mobile) {
         TenantUserResult result = tenantModuleApi.authenticateUser(email, password);
 
         if (result == null) {
@@ -201,6 +203,9 @@ public class AuthServiceImpl implements AuthService {
         }
         if (!"ACTIVE".equals(result.getStatus())) {
             throw new UnauthorizedException("User account is disabled");
+        }
+        if (mobile) {
+            requireSupportedMobileRole(result.getRole());
         }
 
         Login2FAState existingState = login2FAStateRepository.findByEmail(result.getEmail())
@@ -327,6 +332,11 @@ public class AuthServiceImpl implements AuthService {
         UserAuthDto user = tenantModuleApi.findUserById(stored.getUserId());
         try {
             validateActiveUser(user, stored.getUserId(), stored.getTenantId());
+            if (genericErrors) {
+                requireSupportedMobileRole(user.getRole());
+            }
+        } catch (MobileRoleUnsupportedException exception) {
+            throw exception;
         } catch (UnauthorizedException exception) {
             throw refreshFailure(genericErrors, exception.getMessage());
         }
@@ -605,6 +615,7 @@ public class AuthServiceImpl implements AuthService {
 
         UserAuthDto user = tenantModuleApi.findUserById(state.getUserId());
         validateActiveUser(user, state.getUserId(), null);
+        requireSupportedMobileRole(user.getRole());
 
         if (login2FAStateRepository.consumeIfActive(state.getId(), now) != 1) {
             throw invalidMobileCode();
@@ -616,6 +627,12 @@ public class AuthServiceImpl implements AuthService {
 
     private UnauthorizedException invalidMobileCode() {
         return new UnauthorizedException("Invalid or expired confirmation code");
+    }
+
+    private static void requireSupportedMobileRole(String role) {
+        if (!"USER".equals(role) && !"TENANT_ADMIN".equals(role)) {
+            throw new MobileRoleUnsupportedException();
+        }
     }
 
     private void publishLogin2FAVerified(Login2FAState state, UserAuthDto user, String email) {

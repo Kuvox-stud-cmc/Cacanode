@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import {
   useCreateChatSessionMutation,
@@ -10,11 +11,9 @@ import {
 import { useGetTenantWorkspaceQuery } from '@/features/chat/api/workspace-api';
 import {
   canSendMessage,
-  chatFailureMessage,
   chatReducer,
   initialChatState,
   isSessionNotFound,
-  workspaceFailureMessage,
 } from '@/features/chat/model/chat-state';
 import type { PlaygroundSession } from '@/features/chat/types';
 import type { ApiError } from '@/services/api/errors';
@@ -27,6 +26,7 @@ function nextLocalId(prefix: string): string {
 }
 
 export function useChatController() {
+  const { t } = useTranslation();
   const [state, dispatch] = useReducer(chatReducer, initialChatState);
   const [hideError, setHideError] = useState<string | null>(null);
   const workspaceQuery = useGetTenantWorkspaceQuery();
@@ -66,12 +66,12 @@ export function useChatController() {
         requestId,
         inaccessible,
         message: inaccessible
-          ? 'This conversation is no longer available.'
-          : chatFailureMessage(error),
+          ? t('chat.conversationGone')
+          : localizedChatFailure(error, t),
       });
       if (inaccessible) void sessionsQuery.refetch();
     }
-  }, [loadHistory, sessionsQuery, state.selectedSessionId]);
+  }, [loadHistory, sessionsQuery, state.selectedSessionId, t]);
 
   const previousSessionId = useRef<string | null>(null);
   useEffect(() => {
@@ -133,7 +133,7 @@ export function useChatController() {
       dispatch({
         type: 'sendFailed',
         sendId,
-        message: chatFailureMessage(unknownError as ApiError),
+        message: localizedChatFailure(unknownError as ApiError, t),
       });
     }
   }, [
@@ -143,6 +143,7 @@ export function useChatController() {
     state.draft,
     state.selectedSessionId,
     submitMessage,
+    t,
     workspaceQuery.data,
   ]);
 
@@ -159,7 +160,7 @@ export function useChatController() {
       dispatch({ type: 'sessionHidden', sessionId: session.id, nextSessionId });
       return true;
     } catch (unknownError) {
-      setHideError(chatFailureMessage(unknownError as ApiError));
+      setHideError(localizedChatFailure(unknownError as ApiError, t));
       return false;
     }
   }, [
@@ -168,6 +169,7 @@ export function useChatController() {
     sessions,
     state.activeSendId,
     state.selectedSessionId,
+    t,
   ]);
 
   return {
@@ -176,12 +178,12 @@ export function useChatController() {
     workspace: workspaceQuery.data,
     workspaceLoading: workspaceQuery.isLoading,
     workspaceError: workspaceQuery.error
-      ? workspaceFailureMessage(workspaceQuery.error as ApiError)
+      ? localizedWorkspaceFailure(workspaceQuery.error as ApiError, t)
       : null,
     retryWorkspace: workspaceQuery.refetch,
     sessionsLoading: sessionsQuery.isLoading || sessionsQuery.isFetching,
     sessionsError: sessionsQuery.error
-      ? chatFailureMessage(sessionsQuery.error as ApiError)
+      ? localizedChatFailure(sessionsQuery.error as ApiError, t)
       : null,
     retrySessions: sessionsQuery.refetch,
     sending: Boolean(state.activeSendId),
@@ -199,4 +201,20 @@ export function useChatController() {
     send,
     hideSession,
   };
+}
+
+function localizedChatFailure(error: ApiError | undefined, t: (key: string) => string) {
+  if (error?.code === 'MESSAGE_QUOTA_EXCEEDED') return t('chat.quotaError');
+  if (error?.code === 'MODEL_TIMEOUT' || error?.kind === 'timeout') return t('chat.timeoutError');
+  if (error?.code === 'MODEL_PROVIDER_ERROR') return t('chat.providerError');
+  if (error?.code === 'CHAT_SESSION_STORE_UNAVAILABLE') return t('chat.storageError');
+  if (error?.code === 'WORKSPACE_NOT_FOUND') return t('chat.workspaceMissing');
+  if (error?.kind === 'network') return t('chat.connectionError');
+  return t('chat.messageError');
+}
+
+function localizedWorkspaceFailure(error: ApiError | undefined, t: (key: string) => string) {
+  if (error?.kind === 'network') return t('chat.connectionError');
+  if (error?.kind === 'timeout') return t('chat.timeoutError');
+  return t('chat.workspaceError');
 }

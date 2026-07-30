@@ -27,8 +27,11 @@ import type { RecentDocument } from '@/features/dashboard/types';
 import { useAppTheme } from '@/hooks/use-app-theme';
 import type { ApiError } from '@/services/api/errors';
 import { useAppSelector } from '@/store/hooks';
+import { useTranslation } from 'react-i18next';
 
 export function DashboardScreen() {
+  const {t,i18n}=useTranslation();
+  const locale=i18n.resolvedLanguage?.startsWith('vi')?'vi-VN':'en-US';
   const router = useRouter();
   const theme = useAppTheme();
   const user = useAppSelector((state) => state.auth.user);
@@ -36,7 +39,7 @@ export function DashboardScreen() {
   const refresh = useCallback(() => {
     void refetch();
   }, [refetch]);
-  const errorMessage = dashboardErrorMessage(error as ApiError | undefined);
+  const errorMessage = dashboardErrorMessage(error as ApiError | undefined,t);
 
   if (isLoading && !data) {
     return (
@@ -52,14 +55,19 @@ export function DashboardScreen() {
         <ErrorState
           description={errorMessage}
           onRetry={refresh}
-          title="Unable to load your dashboard"
+          title={t('dashboard.unableTitle')}
         />
       </ScrollScreen>
     );
   }
 
-  const metrics = buildDashboardMetrics(data);
-  const shortcuts = dashboardShortcutsForRole(user?.role);
+  const metrics = buildDashboardMetrics(data).map(metric=>({
+    ...metric,
+    title:t(`dashboard.${metric.key==='documents'?'totalDocuments':metric.key==='messages'?'messagesThisMonth':metric.key==='storage'?'storageUsed':'activeUsers'}`),
+    value:metric.key==='documents'?new Intl.NumberFormat(locale).format(data.totalDocuments):metric.key==='messages'?new Intl.NumberFormat(locale).format(data.userMessagesThisMonth):metric.key==='storage'?formatBytes(data.storedDocumentBytes):new Intl.NumberFormat(locale).format(data.activeUsers),
+    detail:metric.key==='documents'?(data.documentsAddedThisWeek?t('dashboard.documentsThisWeek',{count:new Intl.NumberFormat(locale).format(data.documentsAddedThisWeek)}):t('dashboard.noDocumentsThisWeek')):metric.key==='messages'?(data.userMessagesPreviousMonth<=0?(data.userMessagesThisMonth?t('dashboard.newActivity'):t('dashboard.noMessages')):t('dashboard.versusLastMonth',{percentage:`${Math.round(((data.userMessagesThisMonth-data.userMessagesPreviousMonth)/data.userMessagesPreviousMonth)*100)>0?'+':''}${Math.round(((data.userMessagesThisMonth-data.userMessagesPreviousMonth)/data.userMessagesPreviousMonth)*100)}`})):metric.key==='storage'?(data.storageLimitBytes?t('dashboard.ofStorage',{limit:formatBytes(data.storageLimitBytes)}):t('dashboard.noStorageLimit')):(data.activeUsersAddedThisWeek?t('dashboard.usersThisWeek',{count:new Intl.NumberFormat(locale).format(data.activeUsersAddedThisWeek)}):t('dashboard.noUsersThisWeek')),
+  }));
+  const shortcuts = dashboardShortcutsForRole(user?.role).map(shortcut=>{const key=shortcut.href==='/chat'?'Chat':String(shortcut.href).includes('documents/upload')?'Upload':String(shortcut.href).includes('conversations')?'Conversations':'Tickets';return {...shortcut,title:t(`dashboard.shortcut${key}`),description:t(`dashboard.shortcut${key}Description`)}});
   const storageProgress = storagePercentage(data.storedDocumentBytes, data.storageLimitBytes);
 
   return (
@@ -79,11 +87,11 @@ export function DashboardScreen() {
         <View style={styles.headingRow}>
           <View style={styles.headingCopy}>
             <AppText accessibilityRole="header" variant="title">
-              Welcome, {firstName(user?.fullName) ?? 'there'}
+              {t('dashboard.welcome',{name:firstName(user?.fullName)??t('dashboard.fallbackName')})}
             </AppText>
-            <AppText muted>Your tenant overview and recent activity.</AppText>
+            <AppText muted>{t('dashboard.description')}</AppText>
           </View>
-          <Badge tone="primary">{user?.plan ?? 'Current plan'}</Badge>
+          <Badge tone="primary">{user?.plan ?? t('common.currentPlan')}</Badge>
         </View>
       </View>
 
@@ -91,22 +99,22 @@ export function DashboardScreen() {
         <RetryPanel
           description={errorMessage}
           onRetry={refresh}
-          title="Dashboard may be out of date"
+          title={t('dashboard.staleTitle')}
         />
       ) : null}
 
       <Card elevated style={styles.section}>
-        <AppText accessibilityRole="header" variant="heading">Quick actions</AppText>
+        <AppText accessibilityRole="header" variant="heading">{t('dashboard.quickActions')}</AppText>
         <View>
           {shortcuts.map((shortcut, index) => (
             <Fragment key={shortcut.title}>
               {index > 0 ? <Separator /> : null}
               <ListRow
-                accessibilityHint={`Opens ${shortcut.title}`}
+                accessibilityHint={t('dashboard.openHint',{title:shortcut.title})}
                 onPress={() => router.push(shortcut.href)}
                 subtitle={shortcut.description}
                 title={shortcut.title}
-                trailing={<Badge>Open</Badge>}
+                trailing={<Badge>{t('common.open')}</Badge>}
               />
             </Fragment>
           ))}
@@ -114,8 +122,8 @@ export function DashboardScreen() {
       </Card>
 
       <View style={styles.sectionHeading}>
-        <AppText accessibilityRole="header" variant="heading">Overview</AppText>
-        <AppText muted variant="bodySmall">Usage from your current tenant.</AppText>
+        <AppText accessibilityRole="header" variant="heading">{t('dashboard.overview')}</AppText>
+        <AppText muted variant="bodySmall">{t('dashboard.overviewDescription')}</AppText>
       </View>
       <View style={styles.metrics}>
         {metrics.map((metric) => (
@@ -129,15 +137,15 @@ export function DashboardScreen() {
 
       <Card elevated style={styles.section}>
         <View style={styles.sectionHeading}>
-          <AppText accessibilityRole="header" variant="heading">Recent documents</AppText>
-          <AppText muted variant="bodySmall">The five latest uploads for this tenant.</AppText>
+          <AppText accessibilityRole="header" variant="heading">{t('dashboard.recentDocuments')}</AppText>
+          <AppText muted variant="bodySmall">{t('dashboard.recentDescription')}</AppText>
         </View>
         {data.recentDocuments.length === 0 ? (
           <EmptyState
-            actionLabel="Upload first document"
-            description="Your latest uploads will appear here."
+            actionLabel={t('dashboard.uploadFirst')}
+            description={t('dashboard.noDocumentsDescription')}
             onAction={() => router.push('/documents/upload' as Href)}
-            title="No documents uploaded yet"
+            title={t('dashboard.noDocumentsTitle')}
           />
         ) : (
           <View>
@@ -163,14 +171,15 @@ export function DashboardScreen() {
 }
 
 function RecentDocumentRow({ document, onPress }: { document: RecentDocument; onPress: () => void }) {
+  const {t,i18n}=useTranslation();const locale=i18n.resolvedLanguage?.startsWith('vi')?'vi-VN':'en-US';
   const status = documentStatusPresentation(document.status);
   return (
     <ListRow
-      accessibilityHint="Opens document details"
+      accessibilityHint={t('dashboard.documentHint')}
       onPress={onPress}
-      subtitle={`${document.fileType} · ${formatBytes(document.fileSizeBytes)} · ${formatDashboardDate(document.uploadedAt)}`}
+      subtitle={`${document.fileType} · ${formatBytes(document.fileSizeBytes)} · ${formatDashboardDate(document.uploadedAt,locale,t('dashboard.unknownDate'))}`}
       title={document.fileName}
-      trailing={<Badge tone={status.tone}>{status.label}</Badge>}
+      trailing={<Badge tone={status.tone}>{t(`dashboard.status.${document.status.toLowerCase()}`)}</Badge>}
     />
   );
 }
@@ -179,9 +188,9 @@ function firstName(fullName?: string): string | null {
   return fullName?.trim().split(/\s+/)[0] || null;
 }
 
-function dashboardErrorMessage(error?: ApiError): string {
+function dashboardErrorMessage(error:ApiError|undefined,t:(key:string)=>string): string {
   if (error?.kind === 'network' || error?.kind === 'timeout') return error.message;
-  return 'Dashboard data is temporarily unavailable. Please try again.';
+  return t('dashboard.unavailable');
 }
 
 const styles = StyleSheet.create({

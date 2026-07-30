@@ -10,6 +10,7 @@ import type { ApiError } from '@/services/api/errors';
 import { accessTokenStore } from '@/services/auth/access-token-store';
 import { tokenVault } from '@/services/auth/token-vault';
 import type { MobileAuthResponse } from '@/types/auth';
+import { clearUnsupportedRole, isMobileRoleUnsupported, rememberUnsupportedRole } from '@/features/auth/services/mobile-role-gate';
 
 type AppDispatchLike = Dispatch<UnknownAction>;
 
@@ -33,6 +34,7 @@ export async function commitSession(
   }
 
   accessTokenStore.set(credentials.accessToken);
+  await clearUnsupportedRole().catch(() => undefined);
   dispatch(sessionAuthenticated(credentials.user));
 }
 
@@ -70,6 +72,11 @@ export async function bootstrapSession(
     await commitSession(credentials, dispatch);
   } catch (error) {
     const apiError = error as Partial<ApiError>;
+    if (isMobileRoleUnsupported(apiError)) {
+      await rememberUnsupportedRole().catch(() => undefined);
+      await clearLocalSession(dispatch);
+      return;
+    }
     if (apiError.kind === 'http' && apiError.status === 401) {
       await clearLocalSession(dispatch);
       return;

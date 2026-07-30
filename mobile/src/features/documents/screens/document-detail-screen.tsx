@@ -30,8 +30,10 @@ import { useAppTheme } from '@/hooks/use-app-theme';
 import { useScreenFocus } from '@/hooks/use-screen-focus';
 import type { ApiError } from '@/services/api/errors';
 import { useAppSelector } from '@/store/hooks';
+import { useTranslation } from 'react-i18next';
 
 export function DocumentDetailScreen() {
+  const {t,i18n}=useTranslation();const isVietnamese=i18n.resolvedLanguage?.startsWith('vi')??false;const locale=isVietnamese?'vi-VN':'en-US';
   const theme = useAppTheme();
   const params = useLocalSearchParams<Record<string, string | string[]>>();
   const documentId = first(params.documentId) ?? '';
@@ -74,7 +76,7 @@ export function DocumentDetailScreen() {
       }).unwrap();
       await shareTemporaryDownload(temporary);
     } catch (error) {
-      setActionError(apiMessage(error, 'The document could not be downloaded or shared.'));
+      setActionError(apiMessage(error,t('documents.downloadError'),isVietnamese));
     }
   }
 
@@ -85,7 +87,7 @@ export function DocumentDetailScreen() {
       await updateVisibility({ documentId: document.id, visibility }).unwrap();
       setVisibilityVisible(false);
     } catch (error) {
-      setActionError(apiMessage(error, 'Visibility could not be updated.'));
+      setActionError(apiMessage(error,t('documents.visibilityError'),isVietnamese));
     }
   }
 
@@ -97,24 +99,24 @@ export function DocumentDetailScreen() {
       setDeleteVisible(false);
       router.replace({ pathname: '/documents', params: filtersToRoute(filters) });
     } catch (error) {
-      setActionError(apiMessage(error, 'The document could not be deleted.'));
+      setActionError(apiMessage(error,t('documents.deleteError'),isVietnamese));
     }
   }
 
-  if (query.isLoading) return <LoadingState description="Loading document metadata." />;
+  if (query.isLoading) return <LoadingState description={t('documents.metadataLoading')} />;
   if (query.isError || !document) {
     const unavailable = (query.error as ApiError | undefined)?.status === 404;
     return (
       <ScrollScreen edges={['right', 'bottom', 'left']} contentContainerStyle={styles.screen}>
         <RetryPanel
           description={unavailable
-            ? 'This document is no longer available or you do not have access.'
-            : 'Document details could not be loaded.'}
+            ? t('documents.gone')
+            : t('documents.detailsUnavailable')}
           onRetry={() => void query.refetch()}
-          title="Document unavailable"
+          title={t('documents.detailUnavailable')}
         />
         <Button onPress={() => router.replace({ pathname: '/documents', params: filtersToRoute(filters) })} variant="secondary">
-          Back to Documents
+          {t('documents.back')}
         </Button>
       </ScrollScreen>
     );
@@ -137,28 +139,28 @@ export function DocumentDetailScreen() {
       </View>
 
       <Card style={styles.card}>
-        <MetadataRow label="Type" value={document.fileType} />
-        <MetadataRow label="Size" value={formatFileSize(document.fileSizeBytes)} />
-        <MetadataRow label="Uploaded" value={new Date(document.uploadedAt).toLocaleString()} />
-        <MetadataRow label="Chunks" value={document.chunkCount?.toString() ?? 'Not available yet'} />
+        <MetadataRow label={t('documents.type')} value={document.fileType} />
+        <MetadataRow label={t('documents.size')} value={formatFileSize(document.fileSizeBytes)} />
+        <MetadataRow label={t('documents.uploaded')} value={new Date(document.uploadedAt).toLocaleString(locale)} />
+        <MetadataRow label={t('documents.chunks')} value={document.chunkCount?.toString() ?? t('documents.chunksPending')} />
       </Card>
 
       {isProcessingStatus(document.status) ? (
         <Card style={styles.card}>
-          <AppText style={styles.strong}>Processing</AppText>
-          <AppText muted>The original is stored. This screen refreshes while indexing continues.</AppText>
+          <AppText style={styles.strong}>{t('documents.processing')}</AppText>
+          <AppText muted>{t('documents.processingDescription')}</AppText>
         </Card>
       ) : null}
       {document.status === 'FAILED' ? (
         <Card style={styles.card}>
-          <AppText style={[styles.strong, { color: theme.colors.dangerText }]}>Processing failed</AppText>
-          <AppText>{safeProcessingFailure(document.errorMessage)}</AppText>
+          <AppText style={[styles.strong, { color: theme.colors.dangerText }]}>{t('documents.failedTitle')}</AppText>
+          <AppText>{isVietnamese ? t('documents.processingFailure') : safeProcessingFailure(document.errorMessage)}</AppText>
         </Card>
       ) : null}
       {document.status === 'COMPLETED' ? (
         <Card style={styles.card}>
-          <AppText style={[styles.strong, { color: theme.colors.successText }]}>Ready</AppText>
-          <AppText muted>The document is available to the knowledge base.</AppText>
+          <AppText style={[styles.strong, { color: theme.colors.successText }]}>{t('documents.ready')}</AppText>
+          <AppText muted>{t('documents.readyDescription')}</AppText>
         </Card>
       ) : null}
 
@@ -166,11 +168,11 @@ export function DocumentDetailScreen() {
 
       <View style={styles.actions}>
         <Button loading={downloadState.isLoading} onPress={() => void handleDownload()}>
-          Download and share
+          {t('documents.downloadShare')}
         </Button>
         {isAdmin ? (
           <Button onPress={() => setVisibilityVisible(true)} variant="secondary">
-            Change visibility
+            {t('documents.changeVisibility')}
           </Button>
         ) : null}
         {isAdmin ? (
@@ -178,24 +180,24 @@ export function DocumentDetailScreen() {
             disabled={isProcessingStatus(document.status)}
             onPress={() => setDeleteVisible(true)}
             variant="danger">
-            Delete document
+            {t('documents.delete')}
           </Button>
         ) : null}
       </View>
 
-      <Sheet onDismiss={() => setVisibilityVisible(false)} title="Document visibility" visible={visibilityVisible}>
+      <Sheet onDismiss={() => setVisibilityVisible(false)} title={t('documents.visibilityTitle')} visible={visibilityVisible}>
         <View style={styles.sheetActions}>
           <Button
             disabled={visibilityState.isLoading || document.visibility === 'EMPLOYEE_ONLY'}
             onPress={() => void handleVisibility('EMPLOYEE_ONLY')}
             variant="secondary">
-            Employees only
+            {t('documents.employeeOnly')}
           </Button>
           <Button
             disabled={visibilityState.isLoading || document.visibility === 'CUSTOMER_AND_EMPLOYEE'}
             onPress={() => void handleVisibility('CUSTOMER_AND_EMPLOYEE')}
             variant="secondary">
-            Customers and employees
+            {t('documents.customersAndEmployees')}
           </Button>
         </View>
       </Sheet>
@@ -203,15 +205,15 @@ export function DocumentDetailScreen() {
       <Dialog
         actions={(
           <>
-            <Button onPress={() => setDeleteVisible(false)} variant="secondary">Cancel</Button>
+            <Button onPress={() => setDeleteVisible(false)} variant="secondary">{t('common.cancel')}</Button>
             <Button loading={deleteState.isLoading} onPress={() => void handleDelete()} variant="danger">
-              Delete
+              {t('common.delete')}
             </Button>
           </>
         )}
-        description="This removes the stored original and indexed content. This action cannot be undone."
+        description={t('documents.deleteDescription')}
         onDismiss={() => setDeleteVisible(false)}
-        title="Delete document?"
+        title={t('documents.deleteTitle')}
         visible={deleteVisible}
       />
     </ScrollScreen>
@@ -231,8 +233,8 @@ function first(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value;
 }
 
-function apiMessage(error: unknown, fallback: string) {
-  return typeof error === 'object' && error !== null && 'message' in error
+function apiMessage(error: unknown, fallback: string, forceFallback: boolean) {
+  return !forceFallback && typeof error === 'object' && error !== null && 'message' in error
     && typeof error.message === 'string' ? error.message : fallback;
 }
 

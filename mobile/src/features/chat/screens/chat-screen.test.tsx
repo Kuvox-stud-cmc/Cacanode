@@ -2,6 +2,7 @@ import { fireEvent, render } from '@testing-library/react-native';
 import { ChatScreen } from '@/features/chat/screens/chat-screen';
 import { CHAT_MAX_LENGTH, NO_INFORMATION_RESPONSE } from '@/features/chat/model/chat-state';
 import type { ChatCitation, TranscriptMessage } from '@/features/chat/types';
+import i18n from '@/i18n';
 
 const mockController = jest.fn();
 const setDraft = jest.fn();
@@ -89,10 +90,20 @@ function controllerValue(overrides: Record<string, unknown> = {}) {
 }
 
 describe('ChatScreen', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
+    await i18n.changeLanguage('en');
     jest.clearAllMocks();
     hideSession.mockResolvedValue(true);
     mockController.mockReturnValue(controllerValue());
+  });
+
+  it('switches chat controls to Vietnamese without translating workspace content', async () => {
+    await i18n.changeLanguage('vi');
+    const screen = await render(<ChatScreen />);
+    expect(screen.getByLabelText('Tin nhắn')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Gửi tin nhắn' })).toBeTruthy();
+    expect(screen.getByText('How can I help?')).toBeTruthy();
+    expect(screen.queryByText('Send')).toBeNull();
   });
 
   it('uses a keyboard-safe transcript and validates blank composer input', async () => {
@@ -167,7 +178,7 @@ describe('ChatScreen', () => {
     const screen = await render(<ChatScreen />);
     expect(screen.getByText(NO_INFORMATION_RESPONSE)).toBeTruthy();
     expect(screen.getByText(/No matching information was found/)).toBeTruthy();
-    await fireEvent.press(screen.getByRole('button', { name: 'Open citation 1: Employee policy.xlsx' }));
+    await fireEvent.press(screen.getByRole('button', { name: 'Open source 1: Employee policy.xlsx' }));
     for (const value of [
       'Employee policy.xlsx',
       citation.snippet,
@@ -182,7 +193,7 @@ describe('ChatScreen', () => {
     ]) {
       expect(screen.getByText(value)).toBeTruthy();
     }
-    await fireEvent.press(screen.getAllByRole('button', { name: 'Close citation details' })[0]);
+    await fireEvent.press(screen.getAllByRole('button', { name: 'Close Citation details' })[0]);
     expect(screen.queryByText(citation.snippet)).toBeNull();
   });
 
@@ -196,7 +207,7 @@ describe('ChatScreen', () => {
     expect(selectSession).toHaveBeenCalledWith('session-2');
 
     await fireEvent.press(screen.getByRole('button', { name: 'Open conversation history' }));
-    await fireEvent.press(screen.getByRole('button', { name: 'Hide Latest question' }));
+    await fireEvent.press(screen.getByRole('button', { name: 'Hide conversation Latest question' }));
     expect(screen.getByText(/retained for workspace analytics/)).toBeTruthy();
     await fireEvent.press(screen.getByRole('button', { name: 'Hide conversation' }));
     expect(hideSession).toHaveBeenCalledWith(expect.objectContaining({ id: 'session-1' }));
@@ -223,13 +234,13 @@ describe('ChatScreen', () => {
     await screen.rerender(<ChatScreen />);
     await fireEvent.press(screen.getByRole('button', { name: 'Open conversation history' }));
     expect(screen.getByText('Loading history')).toBeTruthy();
-    await fireEvent.press(screen.getAllByRole('button', { name: 'Close conversation history' })[0]);
+    await fireEvent.press(screen.getAllByRole('button', { name: 'Close Conversation history' })[0]);
 
     mockController.mockReturnValue(controllerValue({ sessions: [], sessionsLoading: false }));
     await screen.rerender(<ChatScreen />);
     await fireEvent.press(screen.getByRole('button', { name: 'Open conversation history' }));
     expect(screen.getByText('No conversation history')).toBeTruthy();
-    await fireEvent.press(screen.getAllByRole('button', { name: 'Close conversation history' })[0]);
+    await fireEvent.press(screen.getAllByRole('button', { name: 'Close Conversation history' })[0]);
 
     const retrySessions = jest.fn();
     mockController.mockReturnValue(controllerValue({

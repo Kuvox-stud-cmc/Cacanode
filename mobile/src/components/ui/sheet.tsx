@@ -5,6 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AppText } from '@/components/ui/app-text';
 import { radii, spacing } from '@/constants/theme';
 import { useAppTheme } from '@/hooks/use-app-theme';
+import { useTranslation } from 'react-i18next';
 
 type SheetProps = PropsWithChildren<{
   onDismiss: () => void;
@@ -15,7 +16,8 @@ type SheetProps = PropsWithChildren<{
 export function Sheet({ children, onDismiss, title, visible }: SheetProps) {
   const insets = useSafeAreaInsets();
   const theme = useAppTheme();
-  const closeLabel = title === 'Account' ? 'Close account menu' : `Close ${title.toLowerCase()}`;
+  const {t}=useTranslation();
+  const closeLabel=t('accessibility.closeSheet',{title});
   return (
     <Modal
       animationType="slide"
@@ -45,7 +47,7 @@ export function Sheet({ children, onDismiss, title, visible }: SheetProps) {
               hitSlop={8}
               onPress={onDismiss}
               style={styles.close}>
-              <AppText style={{ color: theme.colors.primaryText }} variant="bodySmall">Close</AppText>
+              <AppText style={{ color: theme.colors.primaryText }} variant="bodySmall">{t('common.close')}</AppText>
             </Pressable>
           </View>
           <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>

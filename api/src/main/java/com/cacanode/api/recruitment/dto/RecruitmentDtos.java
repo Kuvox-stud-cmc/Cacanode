@@ -123,6 +123,8 @@ public final class RecruitmentDtos {
             long version, LocalDateTime createdAt, LocalDateTime updatedAt) {}
 
     public record TransitionRequest(@NotNull ApplicationStatus targetStatus) {}
+    public record ApplicationCreate(@NotNull UUID jobId, @NotNull UUID candidateId) {}
+    public record CompletionLinkResponse(boolean sent, String message) {}
     public record ApplicationResponse(UUID id, UUID jobId, String jobTitle, UUID candidateId,
             String candidateName, String candidateEmail, ApplicationStatus status, LocalDateTime submittedAt,
             LocalDateTime verifiedAt, LocalDateTime withdrawnAt, String locale,
@@ -155,6 +157,8 @@ public final class RecruitmentDtos {
     public record CallAttemptResponse(int attemptNumber, CallAttemptStatus status,
             LocalDateTime createdAt, LocalDateTime updatedAt, Instant answeredAt, Instant consentedAt,
             Instant terminalAt, String failureCode) {}
+    public record DeliveryHistoryResponse(UUID id, String type, String status, String recipient,
+            LocalDateTime sentAt, String failureReason, LocalDateTime createdAt) {}
     public record OverviewResponse(Map<String,Long> jobStatusCounts,
             Map<String,Long> applicationStatusCounts, Map<String,Long> interviewStatusCounts,
             List<InterviewResponse> upcomingInterviews) {

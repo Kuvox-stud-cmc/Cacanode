@@ -55,7 +55,8 @@ export function parsePublicEnv(
   return values;
 }
 
-export const env = parsePublicEnv(
+export const env = {
+  ...parsePublicEnv(
   {
     EXPO_PUBLIC_API_BASE_URL:
       process.env.EXPO_PUBLIC_API_BASE_URL ??
@@ -64,5 +65,7 @@ export const env = parsePublicEnv(
       process.env.EXPO_PUBLIC_WEB_APP_URL ??
       (process.env.NODE_ENV === 'test' ? 'http://localhost:3000' : undefined),
   },
-  { allowInsecureHttp: __DEV__ },
-);
+    { allowInsecureHttp: __DEV__ },
+  ),
+  recruitmentEnabled: process.env.EXPO_PUBLIC_RECRUITMENT_ENABLED === 'true',
+};

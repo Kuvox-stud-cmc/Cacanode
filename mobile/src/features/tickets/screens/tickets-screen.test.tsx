@@ -3,6 +3,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { TicketsScreen } from '@/features/tickets/screens/tickets-screen';
 import type { Ticket, TicketPage } from '@/features/tickets/types';
+import i18n from '@/i18n';
 
 const mockPush = jest.fn();
 const mockSetParams = jest.fn();
@@ -55,7 +56,8 @@ async function renderScreen() {
 }
 
 describe('TicketsScreen', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
+    await i18n.changeLanguage('en');
     jest.clearAllMocks();
     mockRouteParams = {
       status: 'IN_PROGRESS', priority: 'HIGH', source: 'CUSTOM_API',
@@ -69,6 +71,15 @@ describe('TicketsScreen', () => {
       isError: false, refetch: mockAssigneeRefetch,
     });
     mockLoadPage.mockReturnValue({ unwrap: () => Promise.resolve({ ...page, content: [], number: 1, last: true }) });
+  });
+
+  it('switches the complete ticket list chrome to Vietnamese', async () => {
+    await i18n.changeLanguage('vi');
+    const screen = await renderScreen();
+    expect(screen.getByText('Yêu cầu')).toBeTruthy();
+    expect(screen.getAllByText('Cao').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Đang xử lý').length).toBeGreaterThan(0);
+    expect(screen.queryByText('Tickets')).toBeNull();
   });
 
   it('queries restored full filters and preserves them in detail navigation', async () => {

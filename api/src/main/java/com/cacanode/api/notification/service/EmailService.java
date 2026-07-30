@@ -247,6 +247,27 @@ public class EmailService {
         sendWithFallback(message);
     }
 
+    public void sendRecruitmentCandidateCompletionEmail(String toEmail,String fullName,String companyName,
+            String jobTitle,String locale,String completionUrl) {
+        boolean vi=locale!=null&&locale.startsWith("vi");
+        String subject=vi?"Hoàn thiện hồ sơ ứng tuyển":"Complete your job application";
+        String intro=vi
+                ?"%s đã mời bạn hoàn thiện hồ sơ cho vị trí <strong>%s</strong>. Liên kết có hiệu lực trong 7 ngày."
+                    .formatted(escapeHtml(companyName),escapeHtml(jobTitle))
+                :"%s invited you to complete your application for <strong>%s</strong>. This link is valid for 7 days."
+                    .formatted(escapeHtml(companyName),escapeHtml(jobTitle));
+        String action=vi?"Hoàn thiện hồ sơ":"Complete application";
+        EmailMessage message=new EmailMessage(toEmail,fullName,subject,"""
+                <!doctype html><html><body style="font-family:Arial,sans-serif;background:#f8fafc;padding:32px">
+                <div style="max-width:600px;margin:auto;background:white;padding:36px;border-radius:10px">
+                <h1 style="color:#0f172a;font-size:22px">%s</h1><p style="color:#475569;line-height:1.6">%s</p>
+                <a href="%s" style="display:inline-block;background:#4f46e5;color:white;padding:12px 22px;border-radius:6px;text-decoration:none">%s</a>
+                <p style="color:#94a3b8;font-size:12px;margin-top:28px">CacaNode recruitment</p>
+                </div></body></html>
+                """.formatted(escapeHtml(fullName),intro,escapeHtml(completionUrl),action));
+        sendWithFallback(message);
+    }
+
     public void sendRecruitmentPrivacyDeletionConfirmation(String toEmail,String fullName,String companyName,
             String jobTitle,String locale,String confirmationUrl) {
         boolean vi=locale!=null&&locale.startsWith("vi");

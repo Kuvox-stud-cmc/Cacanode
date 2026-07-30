@@ -1,10 +1,10 @@
-export const PRIMARY_TABS = ['dashboard', 'chat', 'documents', 'tickets'] as const;
+export const PRIMARY_TABS = ['dashboard', 'chat', 'documents', 'tickets', 'recruitment'] as const;
 export type PrimaryTab = (typeof PRIMARY_TABS)[number];
 
 export type AdminCapability = 'changeDocumentVisibility' | 'deleteDocument';
 
-export function canAccessPrimaryTab(_role: string | undefined, tab: PrimaryTab): boolean {
-  return PRIMARY_TABS.includes(tab);
+export function canAccessPrimaryTab(role: string | undefined, tab: PrimaryTab): boolean {
+  return (role === 'USER' || role === 'TENANT_ADMIN') && PRIMARY_TABS.includes(tab);
 }
 
 export function canUseAdminCapability(

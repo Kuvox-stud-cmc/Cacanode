@@ -5,6 +5,7 @@ import { Card } from '@/components/ui/card';
 import { radii, spacing } from '@/constants/theme';
 import type { DashboardMetric } from '@/features/dashboard/model/dashboard-view-model';
 import { useAppTheme } from '@/hooks/use-app-theme';
+import { useTranslation } from 'react-i18next';
 
 export function DashboardMetricCard({
   metric,
@@ -14,6 +15,7 @@ export function DashboardMetricCard({
   progress?: number;
 }) {
   const theme = useAppTheme();
+  const {t}=useTranslation();
 
   return (
     <Card elevated style={styles.card}>
@@ -21,7 +23,7 @@ export function DashboardMetricCard({
       <AppText variant="title">{metric.value}</AppText>
       {progress !== undefined ? (
         <View
-          accessibilityLabel={`Storage usage ${progress}%`}
+          accessibilityLabel={t('accessibility.storageUsage',{percent:progress})}
           accessibilityRole="progressbar"
           accessibilityValue={{ max: 100, min: 0, now: progress }}
           style={[styles.track, { backgroundColor: theme.colors.border }]}>

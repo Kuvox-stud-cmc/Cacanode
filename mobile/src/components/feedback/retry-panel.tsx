@@ -4,26 +4,29 @@ import { AppText } from '@/components/ui/app-text';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { spacing } from '@/constants/theme';
+import { useTranslation } from 'react-i18next';
 
 export function RetryPanel({
-  description = 'Something went wrong. Try again.',
+  description,
   onRetry,
-  retryLabel = 'Try again',
-  title = 'Unable to load',
+  retryLabel,
+  title,
 }: {
   description?: string;
   onRetry: () => void;
   retryLabel?: string;
   title?: string;
 }) {
+  const {t}=useTranslation();
+  const action=retryLabel??t('common.tryAgain');
   return (
     <Card style={styles.panel}>
       <View style={styles.copy}>
-        <AppText style={styles.title}>{title}</AppText>
-        <AppText muted variant="bodySmall">{description}</AppText>
+        <AppText style={styles.title}>{title??t('feedback.retryTitle')}</AppText>
+        <AppText muted variant="bodySmall">{description??t('feedback.retryDescription')}</AppText>
       </View>
-      <Button accessibilityLabel={retryLabel} onPress={onRetry} style={styles.button} variant="secondary">
-        {retryLabel}
+      <Button accessibilityLabel={action} onPress={onRetry} style={styles.button} variant="secondary">
+        {action}
       </Button>
     </Card>
   );

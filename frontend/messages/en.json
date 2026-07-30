@@ -73,6 +73,7 @@
       "deleteData": "Delete my application data",
       "deletionRequested": "Check your email and confirm within one hour. Deletion starts only after confirmation.",
       "deletionConfirmed": "Deletion was confirmed and will continue asynchronously. Contact support if it does not complete.",
+      "completion": {"title":"Complete your application for {job}","fullName":"Full name","phone":"Phone number","language":"Application language","cvRequired":"CV (required)","cvOptional":"CV (optional)","cvConsent":"I consent to the disclosed AI-assisted CV analysis for this application.","privacy":"I consent to the collection and processing of my application data.","required":"Complete every required field, consent, screening answer, and CV requirement.","failed":"The application could not be completed.","submit":"Submit application","submitting":"Submitting…"},
       "invitation": {
         "pageTitle": "Schedule your interview",
         "pageDescription": "Choose the date and time that work best for you.",
@@ -103,7 +104,7 @@
         "availability": "The hiring team has not configured interview availability yet. Please contact them for assistance.",
         "failed": "The interview could not be updated. Please reopen the latest email and try again."
       },
-      "statuses": {"SUBMITTED_UNVERIFIED":"Awaiting verification","SUBMITTED":"Submitted","INTERVIEW_INVITED":"Interview invited","INTERVIEW_SCHEDULED":"Interview scheduled","INTERVIEW_COMPLETED":"Interview completed","UNDER_REVIEW":"Under review","SHORTLISTED":"Shortlisted","REJECTED":"Not selected","WITHDRAWN":"Withdrawn"}
+      "statuses": {"AWAITING_CANDIDATE":"Awaiting candidate completion","SUBMITTED_UNVERIFIED":"Awaiting verification","SUBMITTED":"Submitted","INTERVIEW_INVITED":"Interview invited","INTERVIEW_SCHEDULED":"Interview scheduled","INTERVIEW_COMPLETED":"Interview completed","UNDER_REVIEW":"Under review","SHORTLISTED":"Shortlisted","REJECTED":"Not selected","WITHDRAWN":"Withdrawn"}
     }
   },
   "Common": {

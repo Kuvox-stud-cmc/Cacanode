@@ -56,7 +56,10 @@ public class CandidateAccessService {
         if(!application.getJobId().equals(token.getJobId()))throw unauthorized();
         if(token.getPurpose()==EmailTokenPurpose.VERIFICATION){
             submissionTransition.verifyLocked(application);
-        }else if(application.getStatus()==ApplicationStatus.SUBMITTED_UNVERIFIED){throw unauthorized();}
+        }else if(token.getPurpose()==EmailTokenPurpose.COMPLETION){
+            if(application.getStatus()!=ApplicationStatus.AWAITING_CANDIDATE)throw unauthorized();
+        }else if(application.getStatus()==ApplicationStatus.SUBMITTED_UNVERIFIED
+                || application.getStatus()==ApplicationStatus.AWAITING_CANDIDATE){throw unauthorized();}
         token.setConsumedAt(now);emailTokens.save(token);
         return issue(application,response);
     }
@@ -87,6 +90,16 @@ public class CandidateAccessService {
         RecruitmentApplication application=applications.findByIdAndTenantId(session.getApplicationId(),session.getTenantId())
                 .orElseThrow(CandidateAccessService::unauthorized);
         return new DeletionSubject(application.getTenantId(),application.getId(),application.getCandidateId());
+    }
+
+    @Transactional(readOnly=true)
+    public CompletionSubject authorizeCompletion(String rawAccess,String rawCsrf,boolean requireCsrf) {
+        RecruitmentCandidateSession session=requireAccess(rawAccess);
+        if(requireCsrf)requireCsrf(session,rawCsrf);
+        RecruitmentApplication application=applications.findByIdAndTenantId(session.getApplicationId(),session.getTenantId())
+                .orElseThrow(CandidateAccessService::unauthorized);
+        if(application.getStatus()!=ApplicationStatus.AWAITING_CANDIDATE)throw new ConflictException("APPLICATION_COMPLETION_NOT_PENDING");
+        return new CompletionSubject(application.getTenantId(),application.getId(),application.getCandidateId(),application.getJobId());
     }
 
     @Transactional
@@ -143,4 +156,6 @@ public class CandidateAccessService {
     LocalDateTime sessionNow(){return LocalDateTime.ofInstant(clock.instant(),ZoneId.systemDefault());}
     private static UnauthorizedException unauthorized(){return new UnauthorizedException("Invalid or expired candidate access");}
     public record DeletionSubject(java.util.UUID tenantId,java.util.UUID applicationId,java.util.UUID candidateId) {}
+    public record CompletionSubject(java.util.UUID tenantId,java.util.UUID applicationId,
+            java.util.UUID candidateId,java.util.UUID jobId) {}
 }

@@ -1,7 +1,7 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useRouter } from 'expo-router';
 import { Controller, useForm } from 'react-hook-form';
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { z } from 'zod';
 
@@ -18,22 +18,24 @@ import { useAppDispatch } from '@/store/hooks';
 import { isLoginTwoFactorStep } from '@/types/auth';
 import { spacing } from '@/constants/theme';
 import { useAppTheme } from '@/hooks/use-app-theme';
+import { useTranslation } from 'react-i18next';
+import { LanguageSelector } from '@/i18n/language-selector';
+import { hasUnsupportedRole, isMobileRoleUnsupported, openPlatformAdministration, rememberUnsupportedRole } from '@/features/auth/services/mobile-role-gate';
 
-const schema = z.object({
-  email: z.email('Enter a valid email address.'),
-  password: z.string().min(8, 'Password must contain at least 8 characters.'),
-});
-
-type LoginValues = z.infer<typeof schema>;
+type LoginValues = {email:string;password:string};
 
 export function LoginScreen() {
   const theme = useAppTheme();
+  const { t } = useTranslation();
   const dispatch = useAppDispatch();
   const router = useRouter();
   const [login, { isLoading }] = useLoginMutation();
   const [showPassword, setShowPassword] = useState(false);
   const [serverError, setServerError] = useState<string | null>(null);
   const [committing, setCommitting] = useState(false);
+  const [unsupportedRole,setUnsupportedRole]=useState(false);
+  const schema=useMemo(()=>z.object({email:z.email(t('auth.invalidEmail')),password:z.string().min(8,t('auth.shortPassword'))}),[t]);
+  useEffect(()=>{void hasUnsupportedRole().then(setUnsupportedRole).catch(()=>undefined)},[]);
   const {
     control,
     handleSubmit,
@@ -58,10 +60,11 @@ export function LoginScreen() {
       router.replace('/dashboard');
     } catch (error) {
       const apiError = error as Partial<ApiError>;
+      if(isMobileRoleUnsupported(apiError)){await rememberUnsupportedRole().catch(()=>undefined);setUnsupportedRole(true);return;}
       setServerError(
         apiError.kind === 'network' || apiError.kind === 'timeout'
-          ? apiError.message ?? 'Unable to reach the service.'
-          : 'Unable to sign in with those credentials.',
+          ? apiError.message ?? t('auth.unreachable')
+          : t('auth.invalidCredentials'),
       );
     } finally {
       setCommitting(false);
@@ -73,10 +76,11 @@ export function LoginScreen() {
   return (
     <KeyboardScreen contentContainerStyle={styles.content}>
       <View style={styles.heading}>
-        <AppText variant="caption" muted>CACANODE MOBILE</AppText>
-        <AppText accessibilityRole="header" variant="display">Welcome back</AppText>
-        <AppText muted>Sign in to continue to your workspace.</AppText>
+        <View style={styles.topRow}><AppText variant="caption" muted>{t('auth.brand')}</AppText><LanguageSelector compact /></View>
+        <AppText accessibilityRole="header" variant="display">{t('auth.welcome')}</AppText>
+        <AppText muted>{t('auth.signInDescription')}</AppText>
       </View>
+      {unsupportedRole?<Card elevated style={styles.form}><AppText accessibilityRole="header" variant="heading">{t('auth.unsupportedTitle')}</AppText><AppText muted>{t('auth.unsupportedDescription')}</AppText><Button onPress={()=>void openPlatformAdministration()} variant="secondary">{t('auth.openPlatform')}</Button></Card>:null}
       <Card elevated style={styles.form}>
             <Controller
               control={control}
@@ -88,7 +92,7 @@ export function LoginScreen() {
                   editable={!locked}
                   error={errors.email?.message}
                   keyboardType="email-address"
-                  label="Email"
+                  label={t('auth.email')}
                   onBlur={onBlur}
                   onChangeText={onChange}
                   returnKeyType="next"
@@ -105,7 +109,7 @@ export function LoginScreen() {
                     autoComplete="password"
                     editable={!locked}
                     error={errors.password?.message}
-                    label="Password"
+                    label={t('auth.password')}
                     onBlur={onBlur}
                     onChangeText={onChange}
                     onSubmitEditing={() => void submit()}
@@ -114,14 +118,14 @@ export function LoginScreen() {
                     value={value}
                     rightAccessory={
                       <Pressable
-                        accessibilityLabel={showPassword ? 'Hide password' : 'Show password'}
+                        accessibilityLabel={showPassword ? t('auth.hidePassword') : t('auth.showPassword')}
                         accessibilityRole="button"
                         disabled={locked}
                         hitSlop={8}
                         onPress={() => setShowPassword((visible) => !visible)}
                         style={styles.passwordToggle}>
                         <AppText style={styles.toggleLabel} variant="bodySmall">
-                          {showPassword ? 'Hide' : 'Show'}
+                          {showPassword ? t('auth.hide') : t('auth.show')}
                         </AppText>
                       </Pressable>
                     }
@@ -133,7 +137,7 @@ export function LoginScreen() {
               <AppText accessibilityRole="alert" style={[styles.inlineError, { color: theme.colors.dangerText }]}>{serverError}</AppText>
             ) : null}
             <Button loading={locked} onPress={() => void submit()}>
-              Sign in
+              {t('auth.signIn')}
             </Button>
       </Card>
     </KeyboardScreen>
@@ -143,6 +147,7 @@ export function LoginScreen() {
 const styles = StyleSheet.create({
   content: { flexGrow: 1, justifyContent: 'center', gap: spacing.xxl, paddingVertical: spacing.xxl },
   heading: { gap: spacing.sm },
+  topRow:{alignItems:'center',flexDirection:'row',justifyContent:'space-between',gap:spacing.md},
   form: { gap: spacing.lg },
   inlineError: { textAlign: 'center' },
   passwordToggle: { alignItems: 'center', justifyContent: 'center', minHeight: 44, minWidth: 44 },

@@ -73,6 +73,7 @@
       "deleteData": "Xóa dữ liệu hồ sơ của tôi",
       "deletionRequested": "Hãy kiểm tra email và xác nhận trong vòng một giờ. Việc xóa chỉ bắt đầu sau khi xác nhận.",
       "deletionConfirmed": "Yêu cầu xóa đã được xác nhận và sẽ tiếp tục bất đồng bộ. Hãy liên hệ hỗ trợ nếu chưa hoàn tất.",
+      "completion": {"title":"Hoàn thiện hồ sơ cho vị trí {job}","fullName":"Họ và tên","phone":"Số điện thoại","language":"Ngôn ngữ hồ sơ","cvRequired":"CV (bắt buộc)","cvOptional":"CV (không bắt buộc)","cvConsent":"Tôi đồng ý với việc phân tích CV có hỗ trợ AI đã được công bố cho hồ sơ này.","privacy":"Tôi đồng ý cho thu thập và xử lý dữ liệu hồ sơ ứng tuyển.","required":"Vui lòng hoàn thành mọi trường bắt buộc, đồng ý, câu hỏi sàng lọc và yêu cầu CV.","failed":"Không thể hoàn thiện hồ sơ ứng tuyển.","submit":"Gửi hồ sơ","submitting":"Đang gửi…"},
       "invitation": {
         "pageTitle": "Đặt lịch phỏng vấn",
         "pageDescription": "Chọn ngày và giờ phù hợp nhất với bạn.",
@@ -103,7 +104,7 @@
         "availability": "Nhà tuyển dụng chưa cấu hình thời gian phỏng vấn. Vui lòng liên hệ với họ để được hỗ trợ.",
         "failed": "Không thể cập nhật lịch phỏng vấn. Vui lòng mở email mới nhất và thử lại."
       },
-      "statuses": {"SUBMITTED_UNVERIFIED":"Chờ xác minh","SUBMITTED":"Đã gửi","INTERVIEW_INVITED":"Đã mời phỏng vấn","INTERVIEW_SCHEDULED":"Đã lên lịch phỏng vấn","INTERVIEW_COMPLETED":"Đã hoàn tất phỏng vấn","UNDER_REVIEW":"Đang xem xét","SHORTLISTED":"Vào danh sách ngắn","REJECTED":"Không được chọn","WITHDRAWN":"Đã rút"}
+      "statuses": {"AWAITING_CANDIDATE":"Chờ ứng viên hoàn thiện","SUBMITTED_UNVERIFIED":"Chờ xác minh","SUBMITTED":"Đã gửi","INTERVIEW_INVITED":"Đã mời phỏng vấn","INTERVIEW_SCHEDULED":"Đã lên lịch phỏng vấn","INTERVIEW_COMPLETED":"Đã hoàn tất phỏng vấn","UNDER_REVIEW":"Đang xem xét","SHORTLISTED":"Vào danh sách ngắn","REJECTED":"Không được chọn","WITHDRAWN":"Đã rút"}
     }
   },
   "Common": {

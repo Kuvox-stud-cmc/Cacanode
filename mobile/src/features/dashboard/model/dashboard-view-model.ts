@@ -18,10 +18,8 @@ export type DashboardShortcut = {
   title: string;
 };
 
-const numberFormatter = new Intl.NumberFormat('en-US');
-
-export function formatCount(value: number): string {
-  return numberFormatter.format(Math.max(0, value));
+export function formatCount(value: number,locale='en-US'): string {
+  return new Intl.NumberFormat(locale).format(Math.max(0, value));
 }
 
 export function formatBytes(bytes: number): string {
@@ -32,11 +30,11 @@ export function formatBytes(bytes: number): string {
   return `${(safeBytes / 1024 ** 3).toFixed(1)} GB`;
 }
 
-export function formatDashboardDate(isoDate: string): string {
+export function formatDashboardDate(isoDate: string,locale='en-US',unknown='Unknown date'): string {
   const hasTimeZone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(isoDate);
   const date = new Date(hasTimeZone ? isoDate : `${isoDate}Z`);
-  if (Number.isNaN(date.getTime())) return 'Unknown date';
-  return new Intl.DateTimeFormat('en-US', {
+  if (Number.isNaN(date.getTime())) return unknown;
+  return new Intl.DateTimeFormat(locale, {
     day: 'numeric',
     month: 'short',
     timeZone: 'UTC',

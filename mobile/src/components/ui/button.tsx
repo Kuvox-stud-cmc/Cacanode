@@ -10,6 +10,7 @@ import {
 import { AppText } from '@/components/ui/app-text';
 import { radii, spacing } from '@/constants/theme';
 import { useAppTheme } from '@/hooks/use-app-theme';
+import { useTranslation } from 'react-i18next';
 
 export type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger';
 
@@ -31,6 +32,7 @@ export function Button({
   ...props
 }: ButtonProps) {
   const theme = useAppTheme();
+  const {t}=useTranslation();
   const unavailable = disabled || loading;
   const colors = {
     primary: {
@@ -76,7 +78,7 @@ export function Button({
       ]}
       {...props}>
       {loading ? (
-        <ActivityIndicator accessibilityLabel="Loading" color={colors.text} />
+        <ActivityIndicator accessibilityLabel={t('accessibility.loading')} color={colors.text} />
       ) : (
         <AppText style={[styles.label, { color: colors.text }]}>{children}</AppText>
       )}

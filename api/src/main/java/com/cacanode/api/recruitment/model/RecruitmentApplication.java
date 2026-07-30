@@ -18,13 +18,13 @@ public class RecruitmentApplication extends BaseEntity {
     @Column(name = "job_id", nullable = false) private UUID jobId;
     @Column(name = "candidate_id", nullable = false) private UUID candidateId;
     @Enumerated(EnumType.STRING) @Column(nullable = false) private RecruitmentEnums.ApplicationStatus status;
-    @Column(name = "submitted_at", nullable = false) private LocalDateTime submittedAt;
+    @Column(name = "submitted_at") private LocalDateTime submittedAt;
     @Column(name = "verified_at") private LocalDateTime verifiedAt;
     @Column(name = "withdrawn_at") private LocalDateTime withdrawnAt;
     @Column(nullable = false) private String locale;
-    @Column(name = "privacy_consent_at", nullable = false) private LocalDateTime privacyConsentAt;
+    @Column(name = "privacy_consent_at") private LocalDateTime privacyConsentAt;
     @Column(name = "cv_use_disclosed_at") private LocalDateTime cvUseDisclosedAt;
-    @Column(name = "cv_ai_consent_at", updatable = false) private LocalDateTime cvAiConsentAt;
+    @Column(name = "cv_ai_consent_at") private LocalDateTime cvAiConsentAt;
     @Column(name = "cv_present", nullable = false) private boolean cvPresent;
     @Enumerated(EnumType.STRING) @Column(name = "cv_analysis_status", nullable = false) private RecruitmentEnums.CvAnalysisStatus cvAnalysisStatus;
     @Enumerated(EnumType.STRING) @Column(name = "cv_ai_mode_snapshot", nullable = false, updatable = false)
@@ -41,7 +41,7 @@ public class RecruitmentApplication extends BaseEntity {
     @Column(name = "english_band", length = 30) private String englishBand;
     @JdbcTypeCode(SqlTypes.JSON) @Column(name = "screening_config_snapshot", nullable = false, updatable=false, columnDefinition = "jsonb")
     private String screeningConfigSnapshot = "[]";
-    @JdbcTypeCode(SqlTypes.JSON) @Column(name = "screening_answers", nullable = false, updatable=false, columnDefinition = "jsonb")
+    @JdbcTypeCode(SqlTypes.JSON) @Column(name = "screening_answers", nullable = false, columnDefinition = "jsonb")
     private String screeningAnswers = "[]";
     @Enumerated(EnumType.STRING) @Column(name = "automation_mode_snapshot", nullable = false, updatable=false)
     private RecruitmentEnums.AutomationMode automationModeSnapshot = RecruitmentEnums.AutomationMode.MANUAL;

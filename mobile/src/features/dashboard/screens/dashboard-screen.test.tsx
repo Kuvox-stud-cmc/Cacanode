@@ -6,6 +6,7 @@ import { DashboardScreen } from '@/features/dashboard/screens/dashboard-screen';
 import type { DashboardSummary } from '@/features/dashboard/types';
 import { sessionAuthenticated } from '@/features/auth/store/auth-slice';
 import { createAppStore } from '@/store';
+import i18n from '@/i18n';
 
 const mockPush = jest.fn();
 const mockRefetch = jest.fn();
@@ -89,7 +90,8 @@ async function renderDashboard(role = 'USER') {
 }
 
 describe('DashboardScreen', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
+    await i18n.changeLanguage('en');
     jest.clearAllMocks();
     mockUseDashboard.mockReturnValue({
       data: summary,
@@ -98,6 +100,15 @@ describe('DashboardScreen', () => {
       isLoading: false,
       refetch: mockRefetch,
     });
+  });
+
+  it('renders dashboard metrics and shortcuts in Vietnamese', async () => {
+    await i18n.changeLanguage('vi');
+    const screen = await renderDashboard();
+    expect(screen.getByText('Chào mừng, Ada')).toBeTruthy();
+    expect(screen.getByText('Tổng tài liệu')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Trò chuyện' })).toBeTruthy();
+    expect(screen.queryByText('Total documents')).toBeNull();
   });
 
   it('renders tenant metrics, plan, document state, and long flexible text', async () => {

@@ -1,12 +1,14 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import type { FormEvent } from "react";
 import { useTranslations } from "next-intl";
 import {
   exchangeCandidateToken, exchangeInterviewInvitation, getCandidateApplication,
+  getCandidateCompletion, completeCandidateApplication,
   getInterviewSlots, refreshCandidateSession, scheduleInterview, withdrawCandidateApplication,
   withdrawInterviewInvitation, requestCandidatePrivacyDeletion, confirmCandidatePrivacyDeletion,
-  type CandidateApplication, type CandidateSession, type InterviewSlot, type InvitationDetails,
+  type CandidateApplication, type CandidateSession, type CandidateCompletionDetails, type InterviewSlot, type InvitationDetails,
 } from "@/lib/recruitment-api";
 import { Button } from "@/components/ui/button";
 import { useRecruitmentConfirmation } from "@/components/recruitment/useRecruitmentConfirmation";
@@ -32,6 +34,7 @@ export function consumeCandidateAccessParameters() {
 export function CandidateManagement(){
   const t=useTranslations("Jobs.manage");
   const [application,setApplication]=useState<CandidateApplication|null>(null);const [csrf,setCsrf]=useState("");
+  const [completion,setCompletion]=useState<CandidateCompletionDetails|null>(null);
   const [invitation,setInvitation]=useState<InvitationDetails|null>(null);const [invitationCsrf,setInvitationCsrf]=useState("");
   const [error,setError]=useState<string|null>(null);const [loading,setLoading]=useState(true);
   const [privacyMessage,setPrivacyMessage]=useState<string|null>(null);
@@ -48,6 +51,7 @@ export function CandidateManagement(){
       .finally(()=>{if(active)setLoading(false);});
     return()=>{active=false};
   },[t]);
+  useEffect(()=>{if(application?.status!=="AWAITING_CANDIDATE"||!csrf)return;let active=true;getCandidateCompletion().then(value=>{if(active)setCompletion(value)}).catch(()=>{if(active)setError(t("failed"))});return()=>{active=false};},[application?.status,csrf,t]);
   async function withdraw(){if(!csrf){try{const session=await refreshCandidateSession();setCsrf(session.csrfToken);setApplication(await withdrawCandidateApplication(session.csrfToken));}catch{setError(t("invalid"));}return;}try{setApplication(await withdrawCandidateApplication(csrf));}catch{setError(t("failed"));}}
   async function requestDeletion(){let value=csrf;try{if(!value){const session=await refreshCandidateSession();value=session.csrfToken;setCsrf(value);}await requestCandidatePrivacyDeletion(value);setPrivacyMessage(t("deletionRequested"));}catch{setError(t("failed"));}}
   if(loading)return <p role="status" className="text-slate-600">{t("loading")}</p>;
@@ -55,7 +59,30 @@ export function CandidateManagement(){
   if(privacyMessage&&!application)return <div role="status" className="rounded-xl border border-emerald-200 bg-emerald-50 p-6 text-emerald-950">{privacyMessage}</div>;
   if(invitation&&invitationCsrf)return <InvitationScheduler csrf={invitationCsrf} initial={invitation}/>;
   if(!application)return <div role="alert" className="rounded-xl border border-amber-200 bg-amber-50 p-6 text-amber-900">{t("invalid")}</div>;
-  return <section className="rounded-xl border bg-white p-6 shadow-sm"><p className="text-sm font-medium text-indigo-600">{application.companyName}</p><h1 className="mt-1 text-2xl font-bold">{application.jobTitle}</h1>{privacyMessage&&<p role="status" className="mt-4 rounded-lg bg-emerald-50 p-3 text-sm text-emerald-950">{privacyMessage}</p>}<dl className="mt-6 grid gap-4 text-sm sm:grid-cols-2"><div><dt className="text-slate-500">{t("status")}</dt><dd className="font-medium">{t(`statuses.${application.status}`)}</dd></div><div><dt className="text-slate-500">{t("submitted")}</dt><dd>{new Intl.DateTimeFormat(undefined,{dateStyle:"medium"}).format(new Date(application.submittedAt))}</dd></div><div><dt className="text-slate-500">{t("cv")}</dt><dd>{application.cvPresent?t("cvPresent"):t("cvAbsent")}</dd></div></dl><div className="mt-8 flex flex-wrap gap-3">{application.status!=="WITHDRAWN"&&<Button variant="destructive" onClick={withdraw}>{t("withdraw")}</Button>}<Button variant="destructive" onClick={requestDeletion}>{t("deleteData")}</Button></div></section>;
+  if(application.status==="AWAITING_CANDIDATE")return completion?<CandidateCompletionForm csrf={csrf} details={completion} onCompleted={value=>{setApplication(value);setCompletion(null)}}/>:<p role="status" className="text-slate-600">{t("loading")}</p>;
+  return <section className="rounded-xl border bg-white p-6 shadow-sm"><p className="text-sm font-medium text-indigo-600">{application.companyName}</p><h1 className="mt-1 text-2xl font-bold">{application.jobTitle}</h1>{privacyMessage&&<p role="status" className="mt-4 rounded-lg bg-emerald-50 p-3 text-sm text-emerald-950">{privacyMessage}</p>}<dl className="mt-6 grid gap-4 text-sm sm:grid-cols-2"><div><dt className="text-slate-500">{t("status")}</dt><dd className="font-medium">{t(`statuses.${application.status}`)}</dd></div><div><dt className="text-slate-500">{t("submitted")}</dt><dd>{application.submittedAt?new Intl.DateTimeFormat(undefined,{dateStyle:"medium"}).format(new Date(application.submittedAt)):"—"}</dd></div><div><dt className="text-slate-500">{t("cv")}</dt><dd>{application.cvPresent?t("cvPresent"):t("cvAbsent")}</dd></div></dl><div className="mt-8 flex flex-wrap gap-3">{application.status!=="WITHDRAWN"&&<Button variant="destructive" onClick={withdraw}>{t("withdraw")}</Button>}<Button variant="destructive" onClick={requestDeletion}>{t("deleteData")}</Button></div></section>;
+}
+
+function CandidateCompletionForm({csrf,details,onCompleted}:{csrf:string;details:CandidateCompletionDetails;onCompleted:(value:CandidateApplication)=>void}){
+  const t=useTranslations("Jobs.manage.completion");
+  const [fullName,setFullName]=useState(details.fullName);const [phone,setPhone]=useState(details.phone??"");
+  const [locale,setLocale]=useState<"vi-VN"|"en-US">(details.locale);const [privacy,setPrivacy]=useState(false);
+  const [cvConsent,setCvConsent]=useState(false);const [answers,setAnswers]=useState<Record<string,string>>({});
+  const [cv,setCv]=useState<File|null>(null);const [busy,setBusy]=useState(false);const [error,setError]=useState("");
+  async function submit(event:FormEvent){event.preventDefault();setError("");
+    if(!privacy||details.screeningQuestions.some(q=>!answers[q.questionId])||(details.cvPolicy==="REQUIRED"&&!cv)){setError(t("required"));return;}
+    setBusy(true);try{onCompleted(await completeCandidateApplication(csrf,{fullName,phone,locale,privacyConsent:privacy,cvUseConsent:cvConsent,screeningAnswers:details.screeningQuestions.map(q=>({questionId:q.questionId,optionId:answers[q.questionId]}))},cv));}catch(cause){setError(cause instanceof Error?cause.message:t("failed"));}finally{setBusy(false);}
+  }
+  return <form onSubmit={submit} className="rounded-xl border bg-white p-6 shadow-sm space-y-6"><div><p className="text-sm font-medium text-indigo-600">{details.companyName}</p><h2 className="text-2xl font-bold">{t("title",{job:details.jobTitle})}</h2><p className="mt-1 text-sm text-slate-600">{details.email}</p></div>
+    <label className="block text-sm font-medium">{t("fullName")}<input className="mt-1 w-full rounded-md border px-3 py-2" value={fullName} onChange={e=>setFullName(e.target.value)} required maxLength={200}/></label>
+    <label className="block text-sm font-medium">{t("phone")}<input className="mt-1 w-full rounded-md border px-3 py-2" value={phone} onChange={e=>setPhone(e.target.value)} required placeholder="+84901234567"/></label>
+    <label className="block text-sm font-medium">{t("language")}<select className="mt-1 w-full rounded-md border px-3 py-2" value={locale} onChange={e=>setLocale(e.target.value as "vi-VN"|"en-US")}><option value="en-US">English</option><option value="vi-VN">Tiếng Việt</option></select></label>
+    {details.screeningQuestions.map(question=><fieldset key={question.questionId} className="space-y-2"><legend className="font-medium">{question.prompt}</legend>{question.options.map(option=><label key={option.optionId} className="flex gap-2"><input type="radio" name={question.questionId} value={option.optionId} checked={answers[question.questionId]===option.optionId} onChange={()=>setAnswers(current=>({...current,[question.questionId]:option.optionId}))}/><span>{option.label}</span></label>)}</fieldset>)}
+    {details.cvPolicy!=="DISABLED"&&<label className="block text-sm font-medium">{t(details.cvPolicy==="REQUIRED"?"cvRequired":"cvOptional")}<input className="mt-1 block w-full" type="file" accept=".pdf,.doc,.docx" onChange={e=>setCv(e.target.files?.[0]??null)}/></label>}
+    {details.cvAiMode!=="OFF"&&<label className="flex gap-2"><input type="checkbox" checked={cvConsent} onChange={e=>setCvConsent(e.target.checked)}/><span>{t("cvConsent")}</span></label>}
+    <label className="flex gap-2"><input type="checkbox" checked={privacy} onChange={e=>setPrivacy(e.target.checked)} required/><span>{t("privacy")}</span></label>
+    {error&&<p role="alert" className="rounded-md bg-red-50 p-3 text-red-700">{error}</p>}<Button type="submit" disabled={busy}>{busy?t("submitting"):t("submit")}</Button>
+  </form>;
 }
 
 export function InvitationScheduler({csrf,initial}:{csrf:string;initial:InvitationDetails}){

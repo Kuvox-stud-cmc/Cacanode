@@ -17,6 +17,7 @@ import { displayRole } from '@/features/navigation/role-policy';
 import { clearLocalSession } from '@/services/auth/session-manager';
 import { tokenVault } from '@/services/auth/token-vault';
 import { useAppDispatch, useAppSelector } from '@/store/hooks';
+import { useTranslation } from 'react-i18next';
 
 type AccountMenuContextValue = { close: () => void; open: () => void };
 const AccountMenuContext = createContext<AccountMenuContextValue | null>(null);
@@ -69,6 +70,7 @@ function AccountMenuSheet({
   onDismiss: () => void;
   visible: boolean;
 }) {
+  const {t}=useTranslation();
   const dispatch = useAppDispatch();
   const router = useRouter();
   const user = useAppSelector((state) => state.auth.user);
@@ -84,7 +86,7 @@ function AccountMenuSheet({
       await openBillingManagement();
       onDismiss();
     } catch {
-      Alert.alert('Unable to open billing', 'Open the CacaNode web app and go to Settings → Quota Management.');
+      Alert.alert(t('account.billingErrorTitle'),t('account.billingErrorDescription'));
     }
   };
 
@@ -97,39 +99,39 @@ function AccountMenuSheet({
   };
 
   return (
-    <Sheet onDismiss={onDismiss} title="Account" visible={visible}>
+    <Sheet onDismiss={onDismiss} title={t('account.menuTitle')} visible={visible}>
       <View style={styles.content}>
         <ListRow
           subtitle={user?.email}
-          title={user?.fullName || user?.email || 'Signed-in user'}
-          trailing={<Badge tone="primary">{displayRole(user?.role)}</Badge>}
+          title={user?.fullName || user?.email || t('account.signedInUser')}
+          trailing={<Badge tone="primary">{user?.role==='TENANT_ADMIN'?t('account.tenantAdmin'):user?.role==='USER'?t('account.user'):displayRole(user?.role)}</Badge>}
         />
         <View style={styles.planRow}>
           <PlanStatusBadge account={billingAccount} fallbackPlan={user?.plan} />
         </View>
         <Separator />
         <ListRow
-          accessibilityHint="Opens account settings"
+          accessibilityHint={t('dashboard.openHint',{title:t('account.title')})}
           onPress={openSettings}
-          subtitle="Identity, role, plan, and session"
-          title="Account settings"
-          trailing={<Badge tone="neutral">Open</Badge>}
+          subtitle={t('account.menuDescription')}
+          title={t('account.title')}
+          trailing={<Badge tone="neutral">{t('common.open')}</Badge>}
         />
         {user?.role === 'TENANT_ADMIN' ? (
           <ListRow
-            accessibilityHint="Opens billing settings in your web browser"
+            accessibilityHint={t('account.billingDescription')}
             onPress={() => void openBilling()}
-            subtitle="Plans, payments, renewal, and quota"
-            title="Manage billing on web"
-            trailing={<Badge tone="primary">Web</Badge>}
+            subtitle={t('account.billingDescription')}
+            title={t('account.manageBilling')}
+            trailing={<Badge tone="primary">{t('common.web')}</Badge>}
           />
         ) : null}
         <Button
-          accessibilityLabel="Sign out"
+          accessibilityLabel={t('account.signOut')}
           loading={isLoading}
           onPress={() => void signOut()}
           variant="danger">
-          Sign out
+          {t('account.signOut')}
         </Button>
       </View>
     </Sheet>

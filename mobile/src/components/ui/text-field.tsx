@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { useTranslation } from 'react-i18next';
 import { StyleSheet, TextInput, View, type TextInputProps } from 'react-native';
 
 import { AppText } from '@/components/ui/app-text';
@@ -12,6 +13,7 @@ type TextFieldProps = TextInputProps & {
 };
 
 export function TextField({ error, label, rightAccessory, style, ...props }: TextFieldProps) {
+  const { t } = useTranslation();
   const theme = useAppTheme();
   const errorId = `${label.toLowerCase().replace(/\s+/g, '-')}-error`;
 
@@ -24,7 +26,7 @@ export function TextField({ error, label, rightAccessory, style, ...props }: Tex
         <TextInput
           accessibilityLabel={label}
           accessibilityState={{ disabled: props.editable === false }}
-          accessibilityValue={error ? { text: `Error: ${error}` } : undefined}
+          accessibilityValue={error ? { text: t('accessibility.fieldError', { error }) } : undefined}
           placeholderTextColor={theme.colors.textMuted}
           style={[
             styles.input,

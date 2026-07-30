@@ -4,6 +4,7 @@ import { AppText } from '@/components/ui/app-text';
 import { radii, spacing } from '@/constants/theme';
 import type { ChatCitation, TranscriptMessage } from '@/features/chat/types';
 import { useAppTheme } from '@/hooks/use-app-theme';
+import { useTranslation } from 'react-i18next';
 
 export function ChatMessageBubble({
   message,
@@ -17,11 +18,12 @@ export function ChatMessageBubble({
   reloadDisabled: boolean;
 }) {
   const theme = useAppTheme();
+  const {t}=useTranslation();
   const isUser = message.role === 'user';
 
   return (
     <View
-      accessibilityLabel={`${isUser ? 'You' : 'Assistant'}: ${message.content}`}
+      accessibilityLabel={`${isUser ? t('chat.you') : t('chat.assistant')}: ${message.content}`}
       style={[styles.row, isUser ? styles.userRow : styles.assistantRow]}>
       <View
         style={[
@@ -34,15 +36,17 @@ export function ChatMessageBubble({
         {message.status === 'pending' ? (
           <View accessibilityLiveRegion="polite" accessibilityRole="progressbar" style={styles.pending}>
             <ActivityIndicator color={theme.colors.primaryText} />
-            <AppText muted>Thinking…</AppText>
+            <AppText muted>{t('chat.thinking')}</AppText>
           </View>
         ) : (
-          <AppText style={isUser ? styles.userText : undefined}>{message.content}</AppText>
+          <AppText style={isUser ? styles.userText : undefined}>
+            {message.status === 'failed' ? t('chat.failed') : message.content || t('chat.noAnswer')}
+          </AppText>
         )}
 
         {message.noInformation ? (
           <AppText muted style={styles.explanation} variant="bodySmall">
-            No matching information was found in the workspace documents. Try asking with different details.
+            {t('chat.noInformation')}
           </AppText>
         ) : null}
 
@@ -52,24 +56,24 @@ export function ChatMessageBubble({
               {message.failureMessage}
             </AppText>
             <Pressable
-              accessibilityLabel="Reload conversation"
+              accessibilityLabel={t('chat.reload')}
               accessibilityRole="button"
               accessibilityState={{ disabled: reloadDisabled }}
               disabled={reloadDisabled}
               onPress={onReload}
               style={styles.reload}>
               <AppText style={{ color: theme.colors.primaryText }} variant="bodySmall">
-                Reload conversation
+                {t('chat.reload')}
               </AppText>
             </Pressable>
           </View>
         ) : null}
 
         {message.role === 'assistant' && message.citations.length ? (
-          <View accessibilityLabel="Citations" style={styles.citations}>
+          <View accessibilityLabel={t('chat.sources')} style={styles.citations}>
             {message.citations.map((citation, index) => (
               <Pressable
-                accessibilityLabel={`Open citation ${index + 1}: ${citation.sourceName}`}
+                accessibilityLabel={t('chat.openCitation',{number:index+1,name:citation.sourceName})}
                 accessibilityRole="button"
                 key={`${message.id}-${citation.id}`}
                 onPress={() => onOpenCitation(citation)}

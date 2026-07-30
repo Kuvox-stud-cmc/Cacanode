@@ -33,9 +33,9 @@ export function getBillingPresentation(
   }
 }
 
-export function formatBillingDate(value: string | null | undefined): string {
+export function formatBillingDate(value: string | null | undefined,locale?:string): string {
   if (!value) return '—';
-  return new Date(value).toLocaleDateString(undefined, {
+  return new Date(value).toLocaleDateString(locale, {
     day: 'numeric',
     month: 'short',
     year: 'numeric',

@@ -25,8 +25,10 @@ import { CHAT_MAX_LENGTH } from '@/features/chat/model/chat-state';
 import { useChatController } from '@/features/chat/model/use-chat-controller';
 import type { ChatCitation, PlaygroundSession, TranscriptMessage } from '@/features/chat/types';
 import { useAppTheme } from '@/hooks/use-app-theme';
+import { useTranslation } from 'react-i18next';
 
 export function ChatScreen() {
+  const {t}=useTranslation();
   const theme = useAppTheme();
   const controller = useChatController();
   const listRef = useRef<FlatList<TranscriptMessage>>(null);
@@ -38,8 +40,8 @@ export function ChatScreen() {
     return (
       <Screen edges={['right', 'bottom', 'left']} style={styles.centered}>
         <LoadingState
-          description="Preparing your tenant chat workspace."
-          title="Loading employee chat"
+          description={t('chat.loadingWorkspaceDescription')}
+          title={t('chat.loadingWorkspace')}
         />
       </Screen>
     );
@@ -51,7 +53,7 @@ export function ChatScreen() {
         <ErrorState
           description={controller.workspaceError ?? undefined}
           onRetry={() => void controller.retryWorkspace()}
-          title="Unable to open employee chat"
+          title={t('chat.unableWorkspace')}
         />
       </Screen>
     );
@@ -83,20 +85,20 @@ export function ChatScreen() {
         testID="chat-keyboard-layout">
         <View style={[styles.actions, { borderBottomColor: theme.colors.border }]}>
           <Button
-            accessibilityLabel="Open conversation history"
+            accessibilityLabel={t('chat.openHistory')}
             disabled={controller.sending}
             onPress={() => setHistoryVisible(true)}
             style={styles.actionButton}
             variant="secondary">
-            History
+            {t('chat.history')}
           </Button>
           <Button
-            accessibilityLabel="Start new chat"
+            accessibilityLabel={t('chat.startNew')}
             disabled={controller.sending}
             onPress={controller.startNewChat}
             style={styles.actionButton}
             variant="secondary">
-            New Chat
+            {t('chat.newChat')}
           </Button>
         </View>
 
@@ -133,13 +135,13 @@ export function ChatScreen() {
 
         <View style={[styles.composer, { backgroundColor: theme.colors.surface, borderTopColor: theme.colors.border }]}>
           <TextInput
-            accessibilityLabel="Message"
+            accessibilityLabel={t('chat.message')}
             accessibilityState={{ disabled: controller.workspaceLoading || controller.sending }}
             editable={!controller.workspaceLoading && !controller.sending}
             maxLength={CHAT_MAX_LENGTH}
             multiline
             onChangeText={controller.setDraft}
-            placeholder="Ask about your workspace documents"
+            placeholder={t('chat.placeholder')}
             placeholderTextColor={theme.colors.textMuted}
             scrollEnabled
             style={[
@@ -158,12 +160,12 @@ export function ChatScreen() {
               {controller.state.draft.length.toLocaleString()} / {CHAT_MAX_LENGTH.toLocaleString()}
             </AppText>
             <Button
-              accessibilityLabel="Send message"
+              accessibilityLabel={t('chat.sendMessage')}
               disabled={!controller.canSend}
               loading={controller.sending}
               onPress={submit}
               style={styles.sendButton}>
-              Send
+              {t('chat.send')}
             </Button>
           </View>
         </View>
@@ -192,16 +194,16 @@ export function ChatScreen() {
               disabled={controller.hiding}
               onPress={() => setHideTarget(null)}
               variant="secondary">
-              Cancel
+              {t('common.cancel')}
             </Button>
             <Button loading={controller.hiding} onPress={() => void confirmHide()} variant="danger">
-              Hide conversation
+              {t('chat.hideAction')}
             </Button>
           </>
         }
-        description="This removes the conversation from your history. Its messages may still be retained for workspace analytics."
+        description={t('chat.hideDescription')}
         onDismiss={() => setHideTarget(null)}
-        title={`Hide “${hideTarget?.title ?? 'conversation'}”?`}
+        title={t('chat.hideTitle',{title:hideTarget?.title??t('chat.hideFallback')})}
         visible={Boolean(hideTarget)}
       />
     </Screen>
@@ -219,16 +221,17 @@ function TranscriptEmptyState({
   onReload: () => void;
   welcomeMessage: string;
 }) {
+  const {t}=useTranslation();
   if (historyLoading) {
-    return <LoadingState description="Retrieving the complete transcript." title="Loading conversation" />;
+    return <LoadingState description={t('chat.loadingTranscript')} title={t('chat.loadingConversation')} />;
   }
   if (historyError) {
-    return <RetryPanel description={historyError} onRetry={onReload} title="Unable to load conversation" />;
+    return <RetryPanel description={historyError} onRetry={onReload} title={t('chat.unableConversation')} />;
   }
   return (
     <EmptyState
-      description={welcomeMessage || 'Ask a question about the documents in your employee workspace.'}
-      title="Start a conversation"
+      description={welcomeMessage || t('chat.startDescription')}
+      title={t('chat.startConversation')}
     />
   );
 }

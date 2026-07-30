@@ -1,5 +1,6 @@
 import { router, useLocalSearchParams, type Href } from 'expo-router';
 import { useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   ActivityIndicator,
   FlatList,
@@ -26,11 +27,8 @@ import {
 } from '@/features/tickets/api/tickets-api';
 import {
   mergeTicketPages,
-  ticketCustomerIdentity,
   ticketFiltersFromRoute,
   ticketFiltersToRoute,
-  ticketSourceLabel,
-  ticketStatusLabel,
 } from '@/features/tickets/model/ticket-state';
 import {
   TICKET_PRIORITIES,
@@ -43,6 +41,8 @@ import {
 import { useAppTheme } from '@/hooks/use-app-theme';
 
 export function TicketsScreen() {
+  const { i18n, t } = useTranslation();
+  const locale = i18n.resolvedLanguage?.startsWith('vi') ? 'vi-VN' : 'en-US';
   const theme = useAppTheme();
   const params = useLocalSearchParams<Record<string, string | string[]>>();
   const filters = useMemo(() => ticketFiltersFromRoute(params), [params]);
@@ -99,8 +99,11 @@ export function TicketsScreen() {
   }
 
   const selectedAssignee = filters.assignee === 'unassigned'
-    ? 'Unassigned'
+    ? t('tickets.unassigned')
     : assigneesQuery.data?.find((item) => item.id === filters.assignee)?.fullName;
+  const statusLabel = (status: Ticket['status']) => t(`tickets.statusLabels.${statusKey(status)}`);
+  const priorityLabel = (priority: Ticket['priority']) => t(`tickets.priorityLabels.${priority.toLowerCase() as Lowercase<Ticket['priority']>}`);
+  const sourceLabel = (source: Ticket['source']) => t(`tickets.sourceLabels.${source === 'CUSTOM_API' ? 'customApi' : 'widget'}`);
 
   return (
     <Screen edges={['right', 'bottom', 'left']} style={styles.screen}>
@@ -113,53 +116,53 @@ export function TicketsScreen() {
           <View style={styles.header}>
             <View style={styles.headingRow}>
               <View style={styles.headingCopy}>
-                <AppText accessibilityRole="header" variant="title">Tickets</AppText>
-                <AppText muted>Review and update customer support requests.</AppText>
+                <AppText accessibilityRole="header" variant="title">{t('tickets.title')}</AppText>
+                <AppText muted>{t('tickets.description')}</AppText>
               </View>
               <Button onPress={() => setSheetVisible(true)} style={styles.compactButton} variant="secondary">
-                Filters
+                {t('tickets.filters')}
               </Button>
             </View>
             {filters.status || filters.priority || filters.source || filters.assignee ? (
               <View style={styles.filterSummary}>
-                {filters.status ? <Badge>{ticketStatusLabel(filters.status)}</Badge> : null}
-                {filters.priority ? <Badge tone="warning">{filters.priority.toLowerCase()}</Badge> : null}
-                {filters.source ? <Badge tone="primary">{ticketSourceLabel(filters.source)}</Badge> : null}
-                {filters.assignee ? <Badge>{selectedAssignee ?? 'Assigned user'}</Badge> : null}
-                <Button onPress={clearFilters} style={styles.compactButton} variant="ghost">Clear</Button>
+                {filters.status ? <Badge>{statusLabel(filters.status)}</Badge> : null}
+                {filters.priority ? <Badge tone="warning">{priorityLabel(filters.priority)}</Badge> : null}
+                {filters.source ? <Badge tone="primary">{sourceLabel(filters.source)}</Badge> : null}
+                {filters.assignee ? <Badge>{selectedAssignee ?? t('tickets.assignedUser')}</Badge> : null}
+                <Button onPress={clearFilters} style={styles.compactButton} variant="ghost">{t('tickets.clear')}</Button>
               </View>
             ) : null}
             {firstPageQuery.isError && tickets.length === 0 ? (
               <RetryPanel
-                description="Support tickets could not be loaded."
+                description={t('tickets.loadError')}
                 onRetry={() => void firstPageQuery.refetch()}
-                title="Unable to load tickets"
+                title={t('tickets.unable')}
               />
             ) : null}
           </View>
         )}
         ListEmptyComponent={firstPageQuery.isLoading ? (
-          <View accessibilityLabel="Loading tickets" style={styles.centered}>
+          <View accessibilityLabel={t('tickets.loading')} style={styles.centered}>
             <ActivityIndicator color={theme.colors.primary} />
-            <AppText muted>Loading tickets…</AppText>
+            <AppText muted>{t('tickets.loading')}</AppText>
           </View>
         ) : firstPageQuery.isError ? null : (
-          <EmptyState description="No tickets match the selected filters." title="No tickets" />
+          <EmptyState description={t('tickets.emptyDescription')} title={t('tickets.empty')} />
         )}
         ListFooterComponent={tickets.length ? (
           <View style={styles.footer}>
-            {loadingMore ? <ActivityIndicator accessibilityLabel="Loading more tickets" color={theme.colors.primary} /> : null}
+            {loadingMore ? <ActivityIndicator accessibilityLabel={t('tickets.loadingMore')} color={theme.colors.primary} /> : null}
             {loadMoreError && !loadingMore ? (
               <RetryPanel
-                description="The next page could not be loaded. Your current tickets remain available."
+                description={t('tickets.nextPageError')}
                 onRetry={() => void loadNextPage()}
-                title="Unable to load more"
+                title={t('tickets.unableMore')}
               />
             ) : null}
             {!loadMoreError && !loadingMore && hasMore ? (
-              <Button onPress={() => void loadNextPage()} variant="secondary">Load more</Button>
+              <Button onPress={() => void loadNextPage()} variant="secondary">{t('tickets.loadMore')}</Button>
             ) : null}
-            {!hasMore ? <AppText muted variant="caption">All tickets loaded</AppText> : null}
+            {!hasMore ? <AppText muted variant="caption">{t('tickets.allLoaded')}</AppText> : null}
           </View>
         ) : null}
         onEndReached={() => void loadNextPage()}
@@ -178,22 +181,22 @@ export function TicketsScreen() {
         )}
         renderItem={({ item }) => (
           <Pressable
-            accessibilityLabel={`Open ticket ${item.title}`}
+            accessibilityLabel={t('tickets.openTicket', { title: item.title })}
             accessibilityRole="button"
             onPress={() => openTicket(item.id)}>
             <Card style={styles.ticketCard}>
               <View style={styles.cardTopRow}>
                 <View style={styles.cardCopy}>
                   <AppText numberOfLines={3} style={styles.title}>{item.title}</AppText>
-                  <AppText muted variant="bodySmall">{ticketCustomerIdentity(item)}</AppText>
-                  <AppText muted variant="caption">{formatDate(item.createdAt)}</AppText>
+                  <AppText muted variant="bodySmall">{customerIdentity(item, t('tickets.customer'))}</AppText>
+                  <AppText muted variant="caption">{formatDate(item.createdAt, locale, t('common.dateUnavailable'))}</AppText>
                 </View>
-                <Badge tone={statusTone(item.status)}>{ticketStatusLabel(item.status)}</Badge>
+                <Badge tone={statusTone(item.status)}>{statusLabel(item.status)}</Badge>
               </View>
               <View style={styles.badges}>
-                <Badge tone={priorityTone(item.priority)}>{item.priority.toLowerCase()}</Badge>
-                <Badge tone="primary">{ticketSourceLabel(item.source)}</Badge>
-                <Badge>{item.assignedToName || 'Unassigned'}</Badge>
+                <Badge tone={priorityTone(item.priority)}>{priorityLabel(item.priority)}</Badge>
+                <Badge tone="primary">{sourceLabel(item.source)}</Badge>
+                <Badge>{item.assignedToName || t('tickets.unassigned')}</Badge>
               </View>
             </Card>
           </Pressable>
@@ -201,37 +204,40 @@ export function TicketsScreen() {
         showsVerticalScrollIndicator={false}
       />
 
-      <Sheet onDismiss={() => setSheetVisible(false)} title="Ticket filters" visible={sheetVisible}>
+      <Sheet onDismiss={() => setSheetVisible(false)} title={t('tickets.filterTitle')} visible={sheetVisible}>
         <FilterGroup
-          label="Status"
+          anyLabel={t('tickets.any')}
+          label={t('tickets.status')}
           onSelect={(status) => updateFilters({ status: status as TicketFilters['status'] })}
-          options={TICKET_STATUSES.map((value) => ({ label: ticketStatusLabel(value), value }))}
+          options={TICKET_STATUSES.map((value) => ({ label: statusLabel(value), value }))}
           selected={filters.status}
         />
         <FilterGroup
-          label="Priority"
+          anyLabel={t('tickets.any')}
+          label={t('tickets.priority')}
           onSelect={(priority) => updateFilters({ priority: priority as TicketFilters['priority'] })}
-          options={TICKET_PRIORITIES.map((value) => ({ label: value.toLowerCase(), value }))}
+          options={TICKET_PRIORITIES.map((value) => ({ label: priorityLabel(value), value }))}
           selected={filters.priority}
         />
         <FilterGroup
-          label="Source"
+          anyLabel={t('tickets.any')}
+          label={t('tickets.source')}
           onSelect={(source) => updateFilters({ source: source as TicketFilters['source'] })}
-          options={TICKET_SOURCES.map((value) => ({ label: ticketSourceLabel(value), value }))}
+          options={TICKET_SOURCES.map((value) => ({ label: sourceLabel(value), value }))}
           selected={filters.source}
         />
         <View style={styles.filterGroup}>
-          <AppText style={styles.groupLabel}>Assignee</AppText>
+          <AppText style={styles.groupLabel}>{t('tickets.assignee')}</AppText>
           {assigneesQuery.isError ? (
             <RetryPanel
-              description="Assignee choices could not be loaded."
+              description={t('tickets.assigneeChoicesError')}
               onRetry={() => void assigneesQuery.refetch()}
-              title="Assignees unavailable"
+              title={t('tickets.assigneesUnavailable')}
             />
           ) : (
             <View style={styles.choiceRow}>
-              <FilterChoice label="Any" onPress={() => updateFilters({ assignee: undefined })} selected={!filters.assignee} />
-              <FilterChoice label="Unassigned" onPress={() => updateFilters({ assignee: 'unassigned' })} selected={filters.assignee === 'unassigned'} />
+              <FilterChoice label={t('tickets.any')} onPress={() => updateFilters({ assignee: undefined })} selected={!filters.assignee} />
+              <FilterChoice label={t('tickets.unassigned')} onPress={() => updateFilters({ assignee: 'unassigned' })} selected={filters.assignee === 'unassigned'} />
               {(assigneesQuery.data ?? []).map((assignee) => (
                 <FilterChoice
                   key={assignee.id}
@@ -248,7 +254,8 @@ export function TicketsScreen() {
   );
 }
 
-function FilterGroup({ label, onSelect, options, selected }: {
+function FilterGroup({ anyLabel, label, onSelect, options, selected }: {
+  anyLabel: string;
   label: string;
   onSelect: (value: string | undefined) => void;
   options: { label: string; value: string }[];
@@ -258,7 +265,7 @@ function FilterGroup({ label, onSelect, options, selected }: {
     <View style={styles.filterGroup}>
       <AppText style={styles.groupLabel}>{label}</AppText>
       <View style={styles.choiceRow}>
-        <FilterChoice label="Any" onPress={() => onSelect(undefined)} selected={!selected} />
+        <FilterChoice label={anyLabel} onPress={() => onSelect(undefined)} selected={!selected} />
         {options.map((option) => (
           <FilterChoice key={option.value} label={option.label} onPress={() => onSelect(option.value)} selected={selected === option.value} />
         ))}
@@ -298,9 +305,21 @@ function priorityTone(priority: Ticket['priority']): 'neutral' | 'warning' | 'da
   return 'neutral';
 }
 
-function formatDate(value: string) {
+function statusKey(status: Ticket['status']): 'open' | 'inProgress' | 'resolved' | 'closed' {
+  if (status === 'IN_PROGRESS') return 'inProgress';
+  return status.toLowerCase() as 'open' | 'resolved' | 'closed';
+}
+
+function customerIdentity(ticket: Ticket, fallback: string) {
+  return ticket.customerName?.trim()
+    || ticket.customerEmail?.trim()
+    || ticket.externalUserId?.trim()
+    || fallback;
+}
+
+function formatDate(value: string, locale: string, unavailable: string) {
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? 'Date unavailable' : date.toLocaleString();
+  return Number.isNaN(date.getTime()) ? unavailable : date.toLocaleString(locale);
 }
 
 const styles = StyleSheet.create({

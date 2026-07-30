@@ -11,7 +11,7 @@ import java.util.Base64;
 import java.util.HexFormat;
 
 @Component
-@ConditionalOnExpression("${app.recruitment.enabled:false} and ${app.recruitment.public-jobs-enabled:false}")
+@ConditionalOnExpression("${app.recruitment.enabled:false}")
 public class RecruitmentTokenSupport {
     private final PublicRecruitmentProperties properties;
     private final SecureRandom random=new SecureRandom();

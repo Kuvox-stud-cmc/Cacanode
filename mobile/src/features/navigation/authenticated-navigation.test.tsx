@@ -18,6 +18,7 @@ jest.mock('expo-router', () => {
 });
 
 jest.mock('expo-symbols', () => ({ SymbolView: () => null }));
+jest.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
 jest.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ bottom: 0, left: 0, right: 0, top: 0 }),
 }));
@@ -58,7 +59,8 @@ describe('authenticated navigation', () => {
       name: string;
       options: { href?: unknown };
     }[];
-    expect(screens.map((props) => props.name)).toEqual(['dashboard', 'chat', 'documents', 'tickets']);
-    expect(screens.every((props) => props.options.href !== null)).toBe(true);
+    expect(screens.map((props) => props.name)).toEqual(['dashboard', 'chat', 'documents', 'tickets', 'recruitment']);
+    expect(screens.filter((props) => props.name !== 'recruitment').every((props) => props.options.href !== null)).toBe(true);
+    expect(screens.find((props) => props.name === 'recruitment')?.options.href).toBeNull();
   });
 });

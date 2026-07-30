@@ -39,7 +39,7 @@ public class RecruitmentAnalyticsExportApiImpl implements RecruitmentAnalyticsEx
     public SnapshotPage<ApplicationStatusSnapshot> exportApplications(UUID tenantId, String cursor, int limit) {
         Cursor after = cursor(cursor); int size = size(limit);
         String sql = "SELECT id,job_id,status,created_at,updated_at,submitted_at,verified_at,withdrawn_at "
-                + "FROM recruitment_applications WHERE tenant_id=? " + after.where()
+                + "FROM recruitment_applications WHERE tenant_id=? AND submitted_at IS NOT NULL " + after.where()
                 + " ORDER BY created_at,id LIMIT ?";
         List<Object> args = after.args(tenantId, size + 1);
         List<ApplicationStatusSnapshot> rows = jdbc.query(sql, (rs, row) -> new ApplicationStatusSnapshot(

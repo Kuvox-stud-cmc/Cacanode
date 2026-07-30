@@ -3,6 +3,7 @@ import { Pressable, StyleSheet } from 'react-native';
 import { AppText } from '@/components/ui/app-text';
 import { radii } from '@/constants/theme';
 import { useAppTheme } from '@/hooks/use-app-theme';
+import { useTranslation } from 'react-i18next';
 
 export function getAvatarInitials(fullName?: string, email?: string): string {
   const names = fullName?.trim().split(/\s+/).filter(Boolean) ?? [];
@@ -21,10 +22,11 @@ export function HeaderAvatarButton({
   onPress: () => void;
 }) {
   const theme = useAppTheme();
+  const {t}=useTranslation();
   return (
     <Pressable
-      accessibilityHint="Opens account settings and sign out actions"
-      accessibilityLabel="Open account menu"
+      accessibilityHint={t('accessibility.accountMenuHint')}
+      accessibilityLabel={t('accessibility.openAccountMenu')}
       accessibilityRole="button"
       hitSlop={8}
       onPress={onPress}

@@ -42,8 +42,10 @@ import {
 } from '@/features/documents/types';
 import { useAppTheme } from '@/hooks/use-app-theme';
 import { useScreenFocus } from '@/hooks/use-screen-focus';
+import { useTranslation } from 'react-i18next';
 
 export function DocumentsScreen() {
+  const {t,i18n}=useTranslation();const locale=i18n.resolvedLanguage?.startsWith('vi')?'vi-VN':'en-US';
   const theme = useAppTheme();
   const params = useLocalSearchParams<Record<string, string | string[]>>();
   const filters = useMemo(() => filtersFromRoute(params), [params]);
@@ -140,12 +142,12 @@ export function DocumentsScreen() {
     } as unknown as Href);
   }
 
-  if (workspaceQuery.isLoading) return <LoadingState description="Loading your knowledge base." />;
+  if (workspaceQuery.isLoading) return <LoadingState description={t('documents.loadingWorkspace')} />;
   if (workspaceQuery.isError || !knowledgeBaseId) {
     return (
       <Screen edges={['right', 'bottom', 'left']}>
         <View style={styles.centered}>
-          <RetryPanel description="Your document workspace could not be loaded." onRetry={() => void workspaceQuery.refetch()} />
+          <RetryPanel description={t('documents.workspaceUnavailable')} onRetry={() => void workspaceQuery.refetch()} />
         </View>
       </Screen>
     );
@@ -162,58 +164,58 @@ export function DocumentsScreen() {
           <View style={styles.header}>
             <View style={styles.headingRow}>
               <View style={styles.headingCopy}>
-                <AppText accessibilityRole="header" variant="title">Documents</AppText>
-                <AppText muted>Browse and manage knowledge-base originals.</AppText>
+                <AppText accessibilityRole="header" variant="title">{t('documents.title')}</AppText>
+                <AppText muted>{t('documents.description')}</AppText>
               </View>
               <Button
                 onPress={() => router.push({ pathname: '/documents/upload', params: filtersToRoute(filters) } as unknown as Href)}
                 style={styles.compactButton}>
-                Upload
+                {t('documents.upload')}
               </Button>
             </View>
             <TextField
-              label="Search by name"
+              label={t('documents.search')}
               maxLength={200}
               onChangeText={setSearch}
-              placeholder="Policy, handbook, FAQ…"
+              placeholder={t('documents.searchPlaceholder')}
               returnKeyType="search"
               value={search}
             />
             <View style={styles.filterRow}>
               <Button onPress={() => setSheetVisible(true)} style={styles.compactButton} variant="secondary">
-                Filters
+                {t('documents.filters')}
               </Button>
               {filters.status || filters.type || filters.visibility ? (
                 <Button
                   onPress={clearFilters}
                   style={styles.compactButton}
                   variant="ghost">
-                  Clear filters
+                  {t('documents.clearFilters')}
                 </Button>
               ) : null}
             </View>
             {firstPageQuery.isError && documents.length === 0 ? (
-              <RetryPanel onRetry={() => void firstPageQuery.refetch()} title="Unable to load documents" />
+              <RetryPanel onRetry={() => void firstPageQuery.refetch()} title={t('documents.unable')} />
             ) : null}
           </View>
         )}
         ListEmptyComponent={firstPageQuery.isLoading ? (
-          <LoadingState description="Loading documents." />
+          <LoadingState description={t('documents.loading')} />
         ) : firstPageQuery.isError ? null : (
           <EmptyState
-            actionLabel="Upload document"
-            description="No documents match the current filters."
+            actionLabel={t('documents.upload')}
+            description={t('documents.emptyDescription')}
             onAction={() => router.push('/documents/upload' as Href)}
-            title="No documents"
+            title={t('documents.empty')}
           />
         )}
         ListFooterComponent={documents.length ? (
           <View style={styles.footer}>
-            {loadingMore ? <ActivityIndicator accessibilityLabel="Loading more documents" color={theme.colors.primary} /> : null}
+            {loadingMore ? <ActivityIndicator accessibilityLabel={t('documents.loadingMore')} color={theme.colors.primary} /> : null}
             {!loadingMore && hasMore ? (
-              <Button onPress={() => void loadNextPage()} variant="secondary">Load more</Button>
+              <Button onPress={() => void loadNextPage()} variant="secondary">{t('documents.loadMore')}</Button>
             ) : null}
-            {!hasMore ? <AppText muted variant="caption">All documents loaded</AppText> : null}
+            {!hasMore ? <AppText muted variant="caption">{t('documents.allLoaded')}</AppText> : null}
           </View>
         ) : null}
         onEndReached={() => void loadNextPage()}
@@ -235,7 +237,7 @@ export function DocumentsScreen() {
               <View style={styles.documentCopy}>
                 <AppText numberOfLines={2} style={styles.fileName}>{item.fileName}</AppText>
                 <AppText muted variant="bodySmall">
-                  {item.fileType} · {formatFileSize(item.fileSizeBytes)} · {new Date(item.uploadedAt).toLocaleDateString()}
+                  {item.fileType} · {formatFileSize(item.fileSizeBytes)} · {new Date(item.uploadedAt).toLocaleDateString(locale)}
                 </AppText>
               </View>
               <DocumentBadges status={item.status} visibility={item.visibility} />
@@ -244,21 +246,21 @@ export function DocumentsScreen() {
         )}
         showsVerticalScrollIndicator={false}
       />
-      <Sheet onDismiss={() => setSheetVisible(false)} title="Document filters" visible={sheetVisible}>
+      <Sheet onDismiss={() => setSheetVisible(false)} title={t('documents.filterTitle')} visible={sheetVisible}>
         <FilterGroup
-          label="Status"
+          label={t('documents.status')}
           onSelect={(status) => updateFilters({ status: status as DocumentFilters['status'] })}
           options={DOCUMENT_STATUSES}
           selected={filters.status}
         />
         <FilterGroup
-          label="File type"
+          label={t('documents.fileType')}
           onSelect={(type) => updateFilters({ type: type as DocumentFilters['type'] })}
           options={DOCUMENT_TYPES}
           selected={filters.type}
         />
         <FilterGroup
-          label="Visibility"
+          label={t('documents.visibility')}
           onSelect={(visibility) => updateFilters({ visibility: visibility as DocumentFilters['visibility'] })}
           options={DOCUMENT_VISIBILITIES}
           selected={filters.visibility}
@@ -280,15 +282,16 @@ function FilterGroup({
   selected?: string;
 }) {
   const theme = useAppTheme();
+  const {t}=useTranslation();
   return (
     <View style={styles.filterGroup}>
       <AppText style={styles.groupLabel}>{label}</AppText>
       <View style={styles.choiceRow}>
-        <FilterChoice label="Any" onPress={() => onSelect(undefined)} selected={!selected} />
+        <FilterChoice label={t('common.any')} onPress={() => onSelect(undefined)} selected={!selected} />
         {options.map((option) => (
           <FilterChoice
             key={option}
-            label={option.replaceAll('_', ' ').toLowerCase()}
+            label={option==='EMPLOYEE_ONLY'?t('documents.employeeOnly'):option==='CUSTOMER_AND_EMPLOYEE'?t('documents.customersAndEmployees'):option==='PENDING'||option==='PROCESSING'||option==='COMPLETED'||option==='FAILED'?t(`dashboard.status.${option.toLowerCase()}`):option}
             onPress={() => onSelect(option)}
             selected={selected === option}
           />

@@ -30,10 +30,11 @@ class InterviewInvitationServiceTest {
         RecruitmentCandidateEmailDeliveryRepository deliveries=mock(RecruitmentCandidateEmailDeliveryRepository.class);
         Clock clock=Clock.fixed(Instant.parse("2026-07-26T03:00:00Z"),ZoneOffset.UTC);
         RecruitmentProperties properties=new RecruitmentProperties(true,false,false,true,false,false,false,false);
+        com.cacanode.api.billing.api.HiringQuotaApi quota=mock(com.cacanode.api.billing.api.HiringQuotaApi.class);
         when(settings.findById(tenantId)).thenReturn(Optional.empty());
 
         var service=new InterviewInvitationService(
-                applications,interviews,jobs,settings,windows,exceptions,deliveries,clock,properties);
+                applications,interviews,jobs,settings,windows,exceptions,deliveries,clock,properties,quota);
 
         ConflictException error=assertThrows(ConflictException.class,()->service.invite(tenantId,applicationId,true));
 

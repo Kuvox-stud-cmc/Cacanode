@@ -7,7 +7,7 @@ import java.util.Set;
 
 public final class ApplicationLifecycle {
     private static final Set<ApplicationStatus> WITHDRAWABLE = Set.of(
-            ApplicationStatus.SUBMITTED_UNVERIFIED, ApplicationStatus.SUBMITTED,
+            ApplicationStatus.AWAITING_CANDIDATE, ApplicationStatus.SUBMITTED_UNVERIFIED, ApplicationStatus.SUBMITTED,
             ApplicationStatus.INTERVIEW_INVITED, ApplicationStatus.INTERVIEW_SCHEDULED,
             ApplicationStatus.INTERVIEW_COMPLETED, ApplicationStatus.UNDER_REVIEW);
 
@@ -17,6 +17,7 @@ public final class ApplicationLifecycle {
         if (current == target) return current;
         if (target == ApplicationStatus.WITHDRAWN && WITHDRAWABLE.contains(current)) return target;
         ApplicationStatus expected = switch (current) {
+            case AWAITING_CANDIDATE -> null;
             case SUBMITTED_UNVERIFIED -> ApplicationStatus.SUBMITTED;
             case SUBMITTED -> ApplicationStatus.INTERVIEW_INVITED;
             case INTERVIEW_INVITED -> ApplicationStatus.INTERVIEW_SCHEDULED;

@@ -4,6 +4,7 @@ import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 import { AppText } from '@/components/ui/app-text';
 import { radii, spacing } from '@/constants/theme';
 import { useAppTheme } from '@/hooks/use-app-theme';
+import { useTranslation } from 'react-i18next';
 
 type StateViewProps = {
   actionLabel?: string;
@@ -23,11 +24,12 @@ export function StateView({
   title,
 }: StateViewProps) {
   const theme = useAppTheme();
+  const {t}=useTranslation();
 
   return (
     <View accessibilityLiveRegion="polite" style={styles.container}>
       {loading ? (
-        <ActivityIndicator accessibilityLabel="Loading" color={theme.colors.primary} size="large" />
+        <ActivityIndicator accessibilityLabel={t('accessibility.loading')} color={theme.colors.primary} size="large" />
       ) : (
         icon
       )}
