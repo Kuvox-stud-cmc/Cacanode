@@ -104,7 +104,7 @@ public class RecruitmentService implements RecruitmentApplicationCommandApi, Rec
         capabilities.requireMasterEnabled(tenantId);
         validateJobWrite(tenantId, request, false);
         RecruitmentJob job = new RecruitmentJob(); job.setTenantId(tenantId); job.setPublicId(UUID.randomUUID());
-        job.setStatus(JobStatus.DRAFT); apply(job, request); job=jobRepository.save(job); emit(job,null); return jobResponse(job);
+        job.setStatus(JobStatus.DRAFT); apply(job, request); job=jobRepository.saveAndFlush(job); emit(job,null); return jobResponse(job);
     }
 
     @Transactional(readOnly = true)

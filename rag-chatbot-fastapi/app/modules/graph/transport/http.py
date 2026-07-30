@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import asdict
-from typing import Any
+from typing import Annotated, Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
@@ -57,6 +57,8 @@ class GraphSearchPayload(BaseModel):
     knowledge_base_id: str
     query: str = Field(min_length=1, max_length=2000)
     limit: int = Field(default=10, ge=1, le=100)
+    max_hops: int = Field(default=0, ge=0, le=3)
+    document_ids: tuple[Annotated[str, Field(min_length=1)], ...] | None = None
 
 
 class DeleteSourceRequest(BaseModel):
@@ -102,6 +104,8 @@ def create_graph_app(
                 knowledge_base_id=payload.knowledge_base_id,
                 query=payload.query,
                 limit=payload.limit,
+                max_hops=payload.max_hops,
+                document_ids=payload.document_ids,
             ),
         )
         return {"results": [_search_payload(asdict(row)) for row in rows]}
@@ -151,4 +155,3 @@ def _search_payload(row: dict[str, Any]) -> dict[str, Any]:
             "score",
         )
     }
-

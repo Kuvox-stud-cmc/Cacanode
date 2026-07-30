@@ -11,6 +11,8 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
+import java.time.LocalDateTime;
+
 @Component
 @RequiredArgsConstructor
 @ConditionalOnProperty(prefix = "app.recruitment", name = "enabled", havingValue = "true")
@@ -18,6 +20,7 @@ public class RecruitmentProjectionEventPublisher {
     private final DurableEventPublisher events;
 
     public void job(RecruitmentJob job, String businessEvent) {
+        requireAuditTimestamps("Recruitment job", job.getCreatedAt(), job.getUpdatedAt());
         events.publish("recruitment.job.projection.v1", 1, new RecruitmentJobProjectionChangedEvent(
                 job.getTenantId(), job.getId(), job.getStatus().name(), businessEvent,
                 job.getCreatedAt(), job.getUpdatedAt(), job.getPublishedAt(), job.getPausedAt(),
@@ -43,5 +46,12 @@ public class RecruitmentProjectionEventPublisher {
                         interview.getSchedulingTimezone(), interview.getRescheduleCount(),
                         interview.getStartedAt(), interview.getCompletedAt(), interview.getCancelledAt(),
                         interview.getExpiredAt()));
+    }
+
+    private static void requireAuditTimestamps(
+            String aggregateName, LocalDateTime createdAt, LocalDateTime updatedAt) {
+        if (createdAt == null || updatedAt == null) {
+            throw new IllegalStateException(aggregateName + " audit timestamps are not initialized");
+        }
     }
 }

@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import json
-import re
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
 from dataclasses import asdict
 from pathlib import Path
 from threading import RLock
@@ -19,6 +20,13 @@ from app.modules.graph.api import (
     GraphUnavailableError,
 )
 from app.modules.graph.internal.config import GraphConfig
+from app.modules.graph.internal.search import (
+    DeterministicGraphSearch,
+    GraphEdgeRecord,
+    GraphEntityRecord,
+    GraphEvidenceUnit,
+    GraphMentionRecord,
+)
 
 
 class KuzuGraphRepository:
@@ -53,98 +61,146 @@ class KuzuGraphRepository:
                 self._connection.execute(statement)
 
     def replace_source(self, batch: GraphBatch) -> None:
-        with self._lock:
-            self._connection.execute("BEGIN TRANSACTION")
-            try:
-                self._delete_source(batch.tenant_id, batch.source_id)
+        with self._lock, self._transaction():
+            self._delete_source(batch.tenant_id, batch.source_id)
+            self._connection.execute(
+                "CREATE (:Source {id: $id, tenant_id: $tenant, "
+                "knowledge_base_id: $kb, name: $name})",
+                {
+                    "id": batch.source_id,
+                    "tenant": batch.tenant_id,
+                    "kb": batch.knowledge_base_id,
+                    "name": batch.source_name,
+                },
+            )
+            entity_metadata: dict[str, tuple[str, str, set[str]]] = {}
+            mentions: set[tuple[str, str]] = set()
+            for entity in sorted(
+                batch.entities,
+                key=lambda item: (
+                    item.normalized_name,
+                    item.name.casefold(),
+                    item.name,
+                    item.entity_type,
+                    item.evidence_unit_id,
+                    item.aliases,
+                ),
+            ):
+                metadata = entity_metadata.get(entity.normalized_name)
+                if metadata is None:
+                    entity_metadata[entity.normalized_name] = (
+                        entity.name,
+                        entity.entity_type,
+                        set(entity.aliases),
+                    )
+                else:
+                    metadata[2].update(entity.aliases)
+                mentions.add((entity.normalized_name, entity.evidence_unit_id))
+
+            entities: dict[str, str] = {}
+            for normalized_name in sorted(entity_metadata):
+                name, entity_type, aliases = entity_metadata[normalized_name]
+                entity_id = _entity_id(
+                    batch.tenant_id, batch.knowledge_base_id, normalized_name
+                )
+                entities[normalized_name] = entity_id
                 self._connection.execute(
-                    "CREATE (:Source {id: $id, tenant_id: $tenant, "
-                    "knowledge_base_id: $kb, name: $name})",
+                    "MERGE (e:Entity {id: $id}) SET e.tenant_id=$tenant, "
+                    "e.knowledge_base_id=$kb, e.normalized_name=$normalized, e.name=$name, "
+                    "e.entity_type=$type, e.aliases=$aliases",
                     {
-                        "id": batch.source_id,
+                        "id": entity_id,
                         "tenant": batch.tenant_id,
                         "kb": batch.knowledge_base_id,
-                        "name": batch.source_name,
+                        "normalized": normalized_name,
+                        "name": name,
+                        "type": entity_type,
+                        "aliases": json.dumps(tuple(sorted(aliases)), ensure_ascii=False),
                     },
                 )
-                entities: dict[str, str] = {}
-                for entity in batch.entities:
-                    entity_id = _entity_id(
-                        batch.tenant_id, batch.knowledge_base_id, entity.normalized_name
-                    )
-                    entities[entity.normalized_name] = entity_id
-                    self._connection.execute(
-                        "MERGE (e:Entity {id: $id}) SET e.tenant_id=$tenant, "
-                        "e.knowledge_base_id=$kb, e.normalized_name=$normalized, e.name=$name, "
-                        "e.entity_type=$type, e.aliases=$aliases",
-                        {
-                            "id": entity_id,
-                            "tenant": batch.tenant_id,
-                            "kb": batch.knowledge_base_id,
-                            "normalized": entity.normalized_name,
-                            "name": entity.name,
-                            "type": entity.entity_type,
-                            "aliases": json.dumps(entity.aliases),
-                        },
-                    )
-                for unit in batch.units:
-                    self._connection.execute(
-                        "MATCH (s:Source {id: $source}) CREATE (u:KnowledgeUnit {id: $id, "
-                        "source_id: $source, text: $text, page_number: $page, "
-                        "section_path: $section, "
-                        "sheet_name: $sheet, cell_range: $range}) CREATE (s)-[:CONTAINS]->(u)",
-                        {
-                            "source": batch.source_id,
-                            "id": _unit_node_id(batch.source_id, unit.unit_id),
-                            "text": unit.text,
-                            "page": unit.page_number,
-                            "section": json.dumps(unit.section_path),
-                            "sheet": unit.sheet_name,
-                            "range": unit.cell_range,
-                        },
-                    )
-                for entity in batch.entities:
-                    self._connection.execute(
-                        "MATCH (u:KnowledgeUnit {id: $unit}), (e:Entity {id: $entity}) "
-                        "CREATE (u)-[:MENTIONS {evidence_unit_id: $evidence_unit}]->(e)",
-                        {
-                            "unit": _unit_node_id(
-                                batch.source_id, entity.evidence_unit_id
-                            ),
-                            "evidence_unit": entity.evidence_unit_id,
-                            "entity": entities[entity.normalized_name],
-                        },
-                    )
-                for relation in batch.relations:
-                    self._connection.execute(
-                        "MATCH (a:Entity {id: $subject}), (b:Entity {id: $object}) "
-                        "CREATE (a)-[:RELATED_TO {predicate: $predicate, evidence_unit_id: $unit, "
-                        "source_id: $source}]->(b)",
-                        {
-                            "subject": entities[relation.subject_normalized_name],
-                            "object": entities[relation.object_normalized_name],
-                            "predicate": relation.predicate,
-                            "unit": relation.evidence_unit_id,
-                            "source": batch.source_id,
-                        },
-                    )
-                self._connection.execute("COMMIT")
-            except Exception as exc:
-                try:
-                    self._connection.execute("ROLLBACK")
-                except Exception as rollback_exc:
-                    # Kuzu can automatically end a failed transaction after a constraint error.
-                    # Preserve the original persistence failure instead of replacing it with
-                    # "No active transaction for ROLLBACK".
-                    exc.add_note(f"Graph rollback also failed: {rollback_exc}")
-                raise
+            for unit in batch.units:
+                self._connection.execute(
+                    "MATCH (s:Source {id: $source}) CREATE (u:KnowledgeUnit {id: $id, "
+                    "source_id: $source, text: $text, page_number: $page, "
+                    "section_path: $section, "
+                    "sheet_name: $sheet, cell_range: $range}) CREATE (s)-[:CONTAINS]->(u)",
+                    {
+                        "source": batch.source_id,
+                        "id": _unit_node_id(batch.source_id, unit.unit_id),
+                        "text": unit.text,
+                        "page": unit.page_number,
+                        "section": json.dumps(unit.section_path),
+                        "sheet": unit.sheet_name,
+                        "range": unit.cell_range,
+                    },
+                )
+            for normalized_name, evidence_unit_id in sorted(mentions):
+                self._connection.execute(
+                    "MATCH (u:KnowledgeUnit {id: $unit}), (e:Entity {id: $entity}) "
+                    "CREATE (u)-[:MENTIONS {evidence_unit_id: $evidence_unit}]->(e)",
+                    {
+                        "unit": _unit_node_id(batch.source_id, evidence_unit_id),
+                        "evidence_unit": evidence_unit_id,
+                        "entity": entities[normalized_name],
+                    },
+                )
+            relations = {
+                (
+                    relation.subject_normalized_name,
+                    relation.predicate,
+                    relation.object_normalized_name,
+                    relation.evidence_unit_id,
+                )
+                for relation in batch.relations
+            }
+            for subject, predicate, object_name, evidence_unit_id in sorted(relations):
+                self._connection.execute(
+                    "MATCH (a:Entity {id: $subject}), (b:Entity {id: $object}) "
+                    "CREATE (a)-[:RELATED_TO {predicate: $predicate, evidence_unit_id: $unit, "
+                    "source_id: $source}]->(b)",
+                    {
+                        "subject": entities[subject],
+                        "object": entities[object_name],
+                        "predicate": predicate,
+                        "unit": evidence_unit_id,
+                        "source": batch.source_id,
+                    },
+                )
 
     def delete_source(self, tenant_id: str, source_id: str) -> None:
-        with self._lock:
+        with self._lock, self._transaction():
             self._delete_source(tenant_id, source_id)
 
+    @contextmanager
+    def _transaction(self) -> Iterator[None]:
+        self._connection.execute("BEGIN TRANSACTION")
+        try:
+            yield
+            self._connection.execute("COMMIT")
+        except Exception as exc:
+            try:
+                self._connection.execute("ROLLBACK")
+            except Exception as rollback_exc:
+                # Kuzu can automatically end a failed transaction after a constraint error.
+                # Preserve the original persistence failure instead of replacing it with
+                # "No active transaction for ROLLBACK".
+                exc.add_note(f"Graph rollback also failed: {rollback_exc}")
+            raise
+
     def _delete_source(self, tenant_id: str, source_id: str) -> None:
-        # Tenant predicate prevents an internal caller from deleting another tenant's source.
+        ownership: Any = self._connection.execute(
+            "MATCH (s:Source {id: $source, tenant_id: $tenant}) "
+            "RETURN s.knowledge_base_id LIMIT 1",
+            {"source": source_id, "tenant": tenant_id},
+        )
+        if not ownership.has_next():
+            return
+        knowledge_base_id = str(ownership.get_next()[0])
+        self._connection.execute(
+            "MATCH (a:Entity)-[r:RELATED_TO]->(b:Entity) "
+            "WHERE r.source_id=$source DELETE r",
+            {"source": source_id},
+        )
         self._connection.execute(
             "MATCH (s:Source {id: $source, tenant_id: $tenant})-[:CONTAINS]->(u:KnowledgeUnit) "
             "DETACH DELETE u",
@@ -154,43 +210,161 @@ class KuzuGraphRepository:
             "MATCH (s:Source {id: $source, tenant_id: $tenant}) DETACH DELETE s",
             {"source": source_id, "tenant": tenant_id},
         )
+        self._connection.execute(
+            "MATCH (e:Entity) WHERE e.tenant_id=$tenant AND e.knowledge_base_id=$kb "
+            "AND NOT (e)<-[:MENTIONS]-(:KnowledgeUnit) DETACH DELETE e",
+            {"tenant": tenant_id, "kb": knowledge_base_id},
+        )
 
     def search(self, request: GraphSearchQuery) -> list[GraphSearchResult]:
-        tokens = sorted(set(re.findall(r"[\w-]{2,}", request.query.casefold())))
-        if not tokens:
-            return []
         with self._lock:
-            result: Any = self._connection.execute(
-                "MATCH (s:Source)-[:CONTAINS]->(u:KnowledgeUnit)"
-                "-[m:MENTIONS]->(e:Entity) "
-                "WHERE e.tenant_id=$tenant AND e.knowledge_base_id=$kb "
-                "RETURN e.normalized_name, e.aliases, m.evidence_unit_id, u.source_id, "
-                "s.name, u.text, "
-                "u.page_number, u.section_path, u.sheet_name, u.cell_range",
-                {"tenant": request.tenant_id, "kb": request.knowledge_base_id},
+            return DeterministicGraphSearch(self).search(request)
+
+    def list_search_entities(self, request: GraphSearchQuery) -> list[GraphEntityRecord]:
+        if request.document_ids == ():
+            return []
+        query = (
+            "MATCH (s:Source)-[:CONTAINS]->(u:KnowledgeUnit)-[:MENTIONS]->(e:Entity) "
+            "WHERE s.tenant_id=$tenant AND s.knowledge_base_id=$kb "
+            "AND e.tenant_id=$tenant AND e.knowledge_base_id=$kb "
+        )
+        parameters = _search_parameters(request)
+        if request.document_ids is not None:
+            query += "AND s.id IN $documents "
+        query += (
+            "RETURN DISTINCT e.id, e.normalized_name, e.aliases "
+            "ORDER BY e.normalized_name, e.id"
+        )
+        result: Any = self._connection.execute(query, parameters)
+        rows: list[GraphEntityRecord] = []
+        while result.has_next():
+            row = result.get_next()
+            rows.append(
+                GraphEntityRecord(
+                    entity_id=str(row[0]),
+                    normalized_name=str(row[1]),
+                    aliases=_json_string_tuple(row[2]),
+                )
             )
-            rows: list[GraphSearchResult] = []
-            while result.has_next():
-                row = result.get_next()
-                haystack = f"{row[0]} {row[1]}".casefold()
-                score = sum(token in haystack for token in tokens)
-                if score:
-                    rows.append(
-                        GraphSearchResult(
-                            entity=str(row[0]),
-                            unit_id=str(row[2]),
-                            document_id=str(row[3]),
-                            source_name=str(row[4]),
-                            text=str(row[5]),
-                            page_number=int(row[6]) if row[6] is not None else None,
-                            section_path=tuple(json.loads(row[7] or "[]")),
-                            sheet_name=str(row[8]) if row[8] is not None else None,
-                            cell_range=str(row[9]) if row[9] is not None else None,
-                            chunk_index=0,
-                            score=float(score),
-                        )
+        return rows
+
+    def load_entity_mentions(
+        self, request: GraphSearchQuery, entity_ids: Sequence[str]
+    ) -> list[GraphMentionRecord]:
+        if not entity_ids or request.document_ids == ():
+            return []
+        query = (
+            "MATCH (s:Source)-[:CONTAINS]->(u:KnowledgeUnit)-[m:MENTIONS]->(e:Entity) "
+            "WHERE s.tenant_id=$tenant AND s.knowledge_base_id=$kb "
+            "AND e.tenant_id=$tenant AND e.knowledge_base_id=$kb "
+            "AND e.id IN $entity_ids "
+        )
+        parameters = _search_parameters(request)
+        parameters["entity_ids"] = list(entity_ids)
+        if request.document_ids is not None:
+            query += "AND s.id IN $documents "
+        query += (
+            "RETURN e.id, m.evidence_unit_id, u.source_id, s.name, u.text, "
+            "u.page_number, u.section_path, u.sheet_name, u.cell_range "
+            "ORDER BY u.source_id, m.evidence_unit_id, e.id"
+        )
+        result: Any = self._connection.execute(query, parameters)
+        rows: list[GraphMentionRecord] = []
+        while result.has_next():
+            row = result.get_next()
+            rows.append(
+                GraphMentionRecord(
+                    entity_id=str(row[0]),
+                    evidence=_evidence_unit(row[1:]),
+                )
+            )
+        return rows
+
+    def load_graph_edges(
+        self,
+        request: GraphSearchQuery,
+        frontier_ids: Sequence[str],
+        *,
+        outgoing: bool,
+        limit: int,
+    ) -> list[GraphEdgeRecord]:
+        if not frontier_ids or request.document_ids == ():
+            return []
+        anchor = "a" if outgoing else "b"
+        query = (
+            "MATCH (a:Entity)-[r:RELATED_TO]->(b:Entity) "
+            f"WHERE {anchor}.id IN $frontier_ids "
+            "AND a.tenant_id=$tenant AND a.knowledge_base_id=$kb "
+            "AND b.tenant_id=$tenant AND b.knowledge_base_id=$kb "
+        )
+        parameters = _search_parameters(request)
+        parameters.update({"frontier_ids": list(frontier_ids), "edge_limit": limit})
+        if request.document_ids is not None:
+            query += "AND r.source_id IN $documents "
+        query += (
+            "RETURN DISTINCT a.id, r.predicate, b.id, r.source_id, r.evidence_unit_id "
+            "ORDER BY a.id, r.predicate, b.id, r.source_id, r.evidence_unit_id "
+            "LIMIT $edge_limit"
+        )
+        result: Any = self._connection.execute(query, parameters)
+        rows: list[GraphEdgeRecord] = []
+        while result.has_next():
+            row = result.get_next()
+            rows.append(
+                GraphEdgeRecord(
+                    subject_id=str(row[0]),
+                    predicate=str(row[1]),
+                    object_id=str(row[2]),
+                    source_id=str(row[3]),
+                    evidence_unit_id=str(row[4]),
+                )
+            )
+        return rows
+
+    def load_evidence_units(
+        self, request: GraphSearchQuery, identities: Sequence[tuple[str, str]]
+    ) -> list[GraphEvidenceUnit]:
+        if not identities or request.document_ids == ():
+            return []
+        identities_by_node_id = {
+            _unit_node_id(source_id, unit_id): (source_id, unit_id)
+            for source_id, unit_id in identities
+        }
+        query = (
+            "MATCH (s:Source)-[:CONTAINS]->(u:KnowledgeUnit) "
+            "WHERE s.tenant_id=$tenant AND s.knowledge_base_id=$kb "
+            "AND u.id IN $unit_node_ids "
+        )
+        parameters = _search_parameters(request)
+        parameters["unit_node_ids"] = list(sorted(identities_by_node_id))
+        if request.document_ids is not None:
+            query += "AND s.id IN $documents "
+        query += (
+            "RETURN u.id, u.source_id, s.name, u.text, u.page_number, "
+            "u.section_path, u.sheet_name, u.cell_range ORDER BY u.source_id, u.id"
+        )
+        result: Any = self._connection.execute(query, parameters)
+        rows: list[GraphEvidenceUnit] = []
+        while result.has_next():
+            row = result.get_next()
+            identity = identities_by_node_id.get(str(row[0]))
+            if identity is None or identity[0] != str(row[1]):
+                continue
+            rows.append(
+                _evidence_unit(
+                    (
+                        identity[1],
+                        row[1],
+                        row[2],
+                        row[3],
+                        row[4],
+                        row[5],
+                        row[6],
+                        row[7],
                     )
-            return sorted(rows, key=lambda item: (-item.score, item.unit_id))[: request.limit]
+                )
+            )
+        return rows
 
 
 class GraphServiceClient:
@@ -237,7 +411,12 @@ class GraphServiceClient:
                     headers={"X-Graph-Token": self._token},
                 )
                 response.raise_for_status()
-                return [GraphSearchResult(**item) for item in response.json().get("results", [])]
+                rows: list[GraphSearchResult] = []
+                for item in response.json().get("results", []):
+                    payload = dict(item)
+                    payload["section_path"] = tuple(payload.get("section_path", ()))
+                    rows.append(GraphSearchResult(**payload))
+                return rows
         except httpx.HTTPError as exc:
             raise GraphUnavailableError("Graph service is unavailable") from exc
 
@@ -261,6 +440,39 @@ class GraphServiceClient:
             raise GraphUnavailableError("Graph service is unavailable") from exc
 
 
+def _search_parameters(request: GraphSearchQuery) -> dict[str, Any]:
+    parameters: dict[str, Any] = {
+        "tenant": request.tenant_id,
+        "kb": request.knowledge_base_id,
+    }
+    if request.document_ids is not None:
+        parameters["documents"] = list(request.document_ids)
+    return parameters
+
+
+def _evidence_unit(row: Sequence[Any]) -> GraphEvidenceUnit:
+    return GraphEvidenceUnit(
+        unit_id=str(row[0]),
+        document_id=str(row[1]),
+        source_name=str(row[2]),
+        text=str(row[3]),
+        page_number=int(row[4]) if row[4] is not None else None,
+        section_path=_json_string_tuple(row[5]),
+        sheet_name=str(row[6]) if row[6] is not None else None,
+        cell_range=str(row[7]) if row[7] is not None else None,
+    )
+
+
+def _json_string_tuple(value: Any) -> tuple[str, ...]:
+    try:
+        parsed = json.loads(str(value or "[]"))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return ()
+    if not isinstance(parsed, list):
+        return ()
+    return tuple(str(item) for item in parsed)
+
+
 def _entity_id(tenant_id: str, knowledge_base_id: str, normalized_name: str) -> str:
     return hashlib.sha256(
         f"{tenant_id}:{knowledge_base_id}:{normalized_name}".encode()
@@ -271,12 +483,3 @@ def _unit_node_id(source_id: str, unit_id: str) -> str:
     """Return the source-scoped identity used only for the internal Kuzu node key."""
     identity = json.dumps([source_id, unit_id], ensure_ascii=False, separators=(",", ":"))
     return hashlib.sha256(identity.encode("utf-8")).hexdigest()[:32]
-
-
-_EXTRACTION_PROMPT = """You extract only facts explicitly supported by the supplied knowledge units.
-Return strict JSON: {"entities":[{"name":"","normalized_name":"","entity_type":"",
-"aliases":[],"evidence_unit_id":""}],"relations":[{"subject_normalized_name":"",
-"predicate":"","object_normalized_name":"","evidence_unit_id":""}]}.
-Every item must cite one supplied unit_id. Do not infer unsupported facts.
-Every relation subject and object must exactly match an entity normalized_name in the response.
-Use empty arrays when none."""

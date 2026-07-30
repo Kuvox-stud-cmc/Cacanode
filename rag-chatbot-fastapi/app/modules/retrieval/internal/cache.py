@@ -22,7 +22,7 @@ from app.modules.retrieval.internal.config import RetrievalConfig
 
 CACHE_NAME = "retrieval"
 RETRIEVAL_CACHE_SCHEMA_VERSION = 1
-RETRIEVAL_PIPELINE_VERSION = 1
+RETRIEVAL_PIPELINE_VERSION = 2
 
 
 def retrieval_configuration_fingerprint(settings: RetrievalConfig) -> str:

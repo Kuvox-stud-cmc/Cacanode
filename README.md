@@ -608,23 +608,23 @@ flowchart TD
 
     Route --> DenseQuery[EmbeddingGemma query]
     Route --> SparseQuery[BM25 sparse query]
-    Route --> GraphQuery[Entity-evidence query]
+    Route --> GraphQuery[Scoped graph query]
 
     DenseQuery --> DenseSearch[Qdrant dense top 40]
     SparseQuery --> SparseSearch[Qdrant sparse top 40]
-    GraphQuery --> GraphSearch[Kuzu entity and alias matching]
+    GraphQuery --> GraphSeed[Kuzu entity and alias seed matching]
+    GraphSeed --> GraphTraverse[Bounded bidirectional RELATED_TO traversal]
+    GraphTraverse --> GraphEvidence[Grounded path-evidence ranking top 20]
 
     DenseSearch --> Fusion[Adaptive weighted RRF, k=30]
     SparseSearch --> Fusion
-    GraphSearch --> Fusion
+    GraphEvidence --> Fusion
 
     Fusion --> Rerank[Optional TEI bge-reranker-v2-m3]
     Rerank --> Primary[Select five diverse primary units]
     Primary --> Context[Add up to three eligible neighbors]
     Context --> Generate[Grounded LLM generation]
     Generate --> Stream[JSON or SSE response]
-
-    GraphSearch -. future research extension .-> MultiHop[RELATED_TO multi-hop path traversal]
 ```
 
 ### Retrieval rules
@@ -637,6 +637,8 @@ flowchart TD
 - Reranking, graph search, and neighbor expansion fail open without discarding usable channel evidence.
 - Context contains five primary units plus at most three prose/page neighbors; every unit has its own citation.
 - Graph facts must retain evidence links to source units.
+- Graph traversal is limited to zero through three hops, rejects cycles, and filters document scope
+  before the graph candidate limit.
 - The current implementation returns an unavailable answer when no context unit is available. Calibrated
   score-based abstention remains an evaluation and research task.
 - Uploaded content is untrusted data and cannot override system or chatbot policy.
@@ -658,10 +660,11 @@ experimental paper based on Cacanode. It distinguishes project-owned algorithms 
 inference and from infrastructure integration so that academic claims remain reproducible and accurate.
 
 The strongest implemented research direction is an **adaptive hybrid Retrieval-Augmented Generation
-(RAG) pipeline with safety-constrained semantic answer caching**. The repository does not currently
-contain neural-network training, back-propagation, LoRA/QLoRA, optimizer, loss-function, or checkpoint
-creation code. It does contain substantial project-owned Information Retrieval (IR), grounding,
-semantic-cache, structural parsing, constrained reasoning, and consistency algorithms.
+(RAG) pipeline with evidence-grounded multi-hop graph search and safety-constrained semantic answer
+caching**. The repository does not currently contain neural-network training, back-propagation,
+LoRA/QLoRA, optimizer, loss-function, or checkpoint creation code. It does contain substantial
+project-owned Information Retrieval (IR), graph search, grounding, semantic-cache, structural parsing,
+constrained reasoning, and consistency algorithms.
 
 ### Academic terminology
 
@@ -671,7 +674,9 @@ semantic-cache, structural parsing, constrained reasoning, and consistency algor
 | Dense retrieval | Semantic nearest-neighbor search over pretrained text-embedding vectors |
 | Sparse retrieval | Lexical BM25 sparse-vector search, useful for identifiers, prices, and exact wording |
 | Knowledge graph | Evidence-linked `Source`, `KnowledgeUnit`, and `Entity` nodes stored in Kuzu |
-| Graph-assisted retrieval | Match query terms to graph entities and return their evidence-bearing knowledge units |
+| Graph-assisted retrieval | Match query terms to graph entities and rank their evidence-bearing knowledge units |
+| Multi-hop graph retrieval | Traverse grounded `RELATED_TO` paths in either direction and recover each edge's cited unit |
+| Beam search | Retain a deterministic bounded set of the highest-scoring graph paths at each hop |
 | Hybrid retrieval | Combine dense, sparse, and graph rankings rather than trusting one retrieval channel |
 | Query routing | Deterministically classify a query into semantic, exact, relational, or calculation profiles |
 | Rank fusion | Merge independently scored rankings through weighted Reciprocal Rank Fusion (RRF) |
@@ -696,7 +701,7 @@ semantic-cache, structural parsing, constrained reasoning, and consistency algor
 | Structural document and spreadsheet chunking | Implemented in project code | Document-representation algorithm |
 | Revision-aware semantic answer cache | Implemented in project code | AI-systems and semantic-similarity algorithm |
 | Grounded graph projection | Implemented in project code | Evidence-constrained knowledge representation |
-| Multi-hop relationship traversal | Not currently implemented | Future GraphRAG research extension |
+| Bounded multi-hop relationship traversal | Implemented in project code | Deterministic graph-search and ranking algorithm |
 | Spreadsheet calculation executor | Implemented in project code | Constrained neuro-symbolic reasoning |
 | EmbeddingGemma inference | Pretrained model served locally | Model integration, not model training |
 | Qdrant/FastEmbed BM25 | Pretrained/local sparse encoder | Model integration, not BM25 implementation from first principles |
@@ -726,7 +731,7 @@ For each query, the pipeline obtains three ordered candidate rankings:
 
 - $R_d(q)$: dense semantic retrieval from Qdrant;
 - $R_s(q)$: BM25 sparse retrieval from Qdrant;
-- $R_g(q)$: entity-evidence retrieval from Kuzu.
+- $R_g(q)$: scoped entity seeding and bounded evidence-grounded path retrieval from Kuzu.
 
 The current default profile weights are configuration values rather than learned parameters:
 
@@ -755,7 +760,7 @@ The implemented retrieval algorithm is:
 
 1. Normalize and classify the query.
 2. Generate the dense query vector and the sparse BM25 vector.
-3. Execute dense, sparse, and graph retrieval concurrently.
+3. Execute dense, sparse, and bounded graph-path retrieval concurrently.
 4. Treat a failed optional channel as an empty ranking and retain evidence from healthy channels.
 5. Fuse at most 40 dense, 40 sparse, and 20 graph candidates into 30 WRRF candidates.
 6. Optionally rerank fused candidates with `BAAI/bge-reranker-v2-m3`.
@@ -845,7 +850,7 @@ Implementation sources:
 - Ingestion coordination:
   [`pipeline.py`](rag-chatbot-fastapi/app/modules/ingestion/internal/pipeline.py)
 
-### Evidence-grounded graph projection
+### Evidence-grounded graph projection and bounded multi-hop retrieval
 
 The graph layer stores an evidence-linked projection rather than an unconstrained graph generated
 from model memory.
@@ -868,35 +873,103 @@ Entity and relation extraction is requested from a chat model, but project-owned
 - deterministic, tenant-scoped graph identities;
 - idempotent replacement of one source projection.
 
-For query token set $T(q)$, the current graph score is a lexical entity-match count:
+Graph search is a deterministic project-owned algorithm. It does not call an LLM at query time. Text
+is normalized with Unicode NFKC, case folding, and whitespace collapsing. Let $T(x)$ be the set of
+Unicode word or hyphen tokens of length at least two. For entity $e$, its normalized name and aliases
+form the entity token set $T(e)$. The lexical seed score is:
 
 $$
-\mathrm{GraphScore}(e,q)
-= \sum_{t \in T(q)}
-\mathbf{1}\left[t \subseteq
-\mathrm{casefold}(\mathrm{name}(e) \Vert \mathrm{aliases}(e))\right].
+L(e,q)
+=\frac{|T(q)\cap T(e)|}{\max(1,|T(e)|)}
++I_{phrase}(e,q),
 $$
 
-Matching entities return the knowledge units connected through `MENTIONS`. Results are ordered by
-descending match count and deterministic unit identity.
+where $I_{phrase}(e,q)=1$ when a normalized entity name or alias occurs as a complete query phrase,
+and zero otherwise. Only the 32 highest-scoring seeds are retained.
 
-#### Current GraphRAG limitation
+For relationship predicate $r$, query-predicate overlap is:
 
-The schema persists `RELATED_TO` edges, but the current query implementation does not traverse those
-edges and does not use `GRAPH_MAX_HOPS` to perform breadth-first, beam, or path search. Consequently,
-the scientifically accurate term for the implemented channel is **entity-grounded graph-assisted
-retrieval**, not multi-hop GraphRAG. A future experiment may add one-to-three-hop path traversal,
-predicate-aware path scoring, and edge-evidence aggregation, then compare graph-off, entity-only, and
-multi-hop conditions on a relational-query subset.
+$$
+O(r,q)
+=\frac{|T(q)\cap T(r)|}{\max(1,|T(r)|)}.
+$$
+
+For a cycle-free path $\pi_h=(e_0,r_1,e_1,\ldots,r_h,e_h)$ of length $h$, the path score is:
+
+$$
+P(\pi_h\mid q)
+=L(e_0,q)\lambda^h\cdot
+\left(1+\frac{\beta}{h}\sum_{i=1}^{h}O(r_i,q)\right),
+\qquad \lambda=0.75,\quad \beta=0.25.
+$$
+
+Direct `MENTIONS` evidence is treated as $h=0$ with score $L(e_0,q)$. Each retained relationship
+path contributes the unit named by the edge's `(source_id, evidence_unit_id)`. For evidence unit $u$,
+let $m_u$ be the number of distinct grounded mention or relationship supports. Its graph-channel score
+is:
+
+$$
+S(u,q)
+=\max_{\pi\in\Pi(u)}P(\pi\mid q)\cdot
+\left(1+\gamma\min(m_u-1,4)\right),
+\qquad \gamma=0.05.
+$$
+
+The implementation performs separate outgoing and incoming one-hop Kuzu queries, so directed facts can
+be discovered from either endpoint without using cycle-producing variable-length Cypher. At each hop it
+deduplicates physical edges, rejects a neighbor already present in the path, reads at most 4,096 edges
+per direction, and retains the best 256 path states. `GRAPH_MAX_HOPS` is validated in the range zero to
+three: zero is the entity-only ablation, while the default retrieval pipeline uses three hops.
+
+```mermaid
+flowchart TD
+    Q[Normalized query q] --> Scope[Tenant knowledge-base and document scope]
+    Scope --> Seeds[Lexical entity and alias seeds top 32]
+    Seeds --> Mentions[Direct MENTIONS evidence hop 0]
+    Seeds --> Out[Outgoing RELATED_TO expansion]
+    Seeds --> In[Incoming RELATED_TO expansion]
+    Out --> Paths[Cycle-free scored path states top 256]
+    In --> Paths
+    Paths --> Ground{Current evidence unit exists and is visible?}
+    Ground -->|yes| Units[Aggregate grounded unit support]
+    Ground -->|no| Skip[Discard stale or out-of-scope edge]
+    Mentions --> Rank[Stable evidence ranking]
+    Units --> Rank
+    Rank --> Limit[Apply graph candidate limit]
+```
+
+Document visibility is applied during seed selection, relationship expansion, and evidence recovery,
+before the result limit. Results are deduplicated by `(document_id, unit_id)` and ties are resolved by
+document, unit, and matched seed identity. Source replacement and deletion remove source-owned
+`RELATED_TO` edges transactionally, while an entity shared by another source remains available.
+
+No Kuzu schema migration is required. For an existing Kuzu volume, deploy the graph role before the AI
+role and then run the existing one-shot Java `DocumentReindexCommand` for completed documents.
+Replacing every source clears stale relationship rows created by the older lifecycle logic. Disable the
+maintenance reindex flag again after all requests have been enqueued. Retrieval pipeline version 2
+prevents pre-traversal retrieval or semantic-answer cache entries from being reused under the new
+ranking semantics.
+
+#### GraphRAG claim boundary
+
+The repository now implements **bounded evidence-grounded multi-hop graph retrieval**. It does not
+implement community detection, graph-community summaries, global-search GraphRAG, a learned entity
+linker, or a trained neural path retriever. Seed selection, hop decay, predicate boost, beam width, and
+support bonus are explicit heuristic parameters and must be reported as such in an academic paper.
 
 Implementation sources:
 
 - Grounded entity/relation extraction:
   [`entity_extraction.py`](rag-chatbot-fastapi/app/modules/ingestion/internal/entity_extraction.py)
-- Kuzu schema, projection replacement, and current entity search:
+- Deterministic seed scoring, bidirectional beam traversal, path ranking, and evidence aggregation:
+  [`search.py`](rag-chatbot-fastapi/app/modules/graph/internal/search.py)
+- Kuzu schema, transactional projection lifecycle, and graph query adapter:
   [`service.py`](rag-chatbot-fastapi/app/modules/graph/internal/service.py)
 - Graph boundary types and evidence invariants:
   [`graph/api`](rag-chatbot-fastapi/app/modules/graph/api/__init__.py)
+- Versioned traversal fixture and Kuzu behavior tests:
+  [`test_graph_search.py`](rag-chatbot-fastapi/tests/test_graph_search.py) and
+  [`graph_traversal_v1.json`](rag-chatbot-fastapi/tests/fixtures/graph_traversal_v1.json)
 
 ### Safety-constrained semantic answer caching
 
@@ -1066,8 +1139,9 @@ The report may accurately state the following implemented contributions:
 2. **C2 — Structure-aware evidence representation.** The ingestion pipeline preserves document and
    spreadsheet structure and applies block-specific deterministic chunking instead of one universal
    fixed-window rule.
-3. **C3 — Evidence-grounded graph projection.** Extracted entities and relations are accepted only when
-   they cite valid source units, producing an auditable graph projection.
+3. **C3 — Evidence-grounded multi-hop graph retrieval.** Extracted entities and relations are accepted
+   only when they cite valid source units; deterministic bidirectional path search then ranks the
+   relation evidence with hop decay, predicate overlap, and bounded support aggregation.
 4. **C4 — Safety-constrained semantic caching.** Semantic answer reuse is isolated by authoritative
    execution scope and protected against negation, number, date, currency, identifier, visibility, and
    revision mismatches.
@@ -1082,7 +1156,7 @@ Academic claim boundaries:
 |---|---|
 | Implemented and adapted weighted RRF for Cacanode's query profiles | Invented Reciprocal Rank Fusion |
 | Designed a safety-constrained semantic-cache policy | Proved that semantic caching can never return a false hit |
-| Implemented entity-grounded graph-assisted retrieval | Implemented multi-hop graph traversal or community-based GraphRAG |
+| Implemented bounded evidence-grounded multi-hop traversal | Implemented community-based/global-search GraphRAG or a learned graph retriever |
 | Locally serves pretrained embedding and sparse models | Trained EmbeddingGemma or BM25 from scratch |
 | Integrates an optional pretrained BGE reranker | Fine-tuned the reranker in this repository |
 | Uses an LLM for entity extraction and calculation planning | Implements a generative foundation model from scratch |
@@ -1092,32 +1166,35 @@ Academic claim boundaries:
 
 Suggested English title:
 
-> **Adaptive Hybrid Retrieval and Safety-Constrained Semantic Caching for a Vietnamese Multi-Tenant
-> Retrieval-Augmented Generation System**
+> **Adaptive Hybrid Retrieval with Evidence-Grounded Multi-Hop Graph Search and Safety-Constrained
+> Semantic Caching for a Vietnamese Multi-Tenant RAG System**
 
 Suggested Vietnamese title:
 
-> **Truy xuất lai thích ứng và bộ nhớ đệm ngữ nghĩa có ràng buộc an toàn cho hệ thống RAG đa thuê bao
-> tiếng Việt**
+> **Truy xuất lai thích ứng với tìm kiếm đồ thị đa bước có căn cứ và bộ nhớ đệm ngữ nghĩa an toàn cho
+> hệ thống RAG đa thuê bao tiếng Việt**
 
 A teammate can map the implementation into the following paper structure:
 
 1. **Introduction:** motivation, Vietnamese enterprise question answering, multi-tenant safety, research
    problem, objectives, and contribution summary.
-2. **Background and related work:** RAG, dense and sparse retrieval, BM25, RRF, graph-assisted RAG,
-   reranking, semantic caching, grounding, and neuro-symbolic execution.
-3. **Proposed method:** query router, weighted fusion, structural chunking, graph projection, semantic
-   cache guards, deterministic calculation, and revision/citation invariants.
+2. **Background and related work:** RAG, dense and sparse retrieval, BM25, RRF, bounded multi-hop graph
+   retrieval, reranking, semantic caching, grounding, and neuro-symbolic execution.
+3. **Proposed method:** query router, weighted fusion, structural chunking, grounded graph projection,
+   beam traversal and path ranking, semantic-cache guards, deterministic calculation, and
+   revision/citation invariants.
 4. **System implementation:** Spring control plane, FastAPI AI service, Qdrant, Kuzu, Redis, model
    adapters, data contracts, and source-code map.
 5. **Experimental methodology:** dataset construction, train/validation/test separation when tuning,
    baselines, ablations, metrics, hardware, model versions, and reproducibility controls.
 6. **Results and discussion:** retrieval quality, cache safety, latency/token savings, error analysis,
    Vietnamese-language behavior, and component trade-offs.
-7. **Threats to validity and limitations:** small current fixture, heuristic router, unlearned fusion
-   weights, provider dependence, absent multi-hop traversal, and absence of fine-tuning code.
-8. **Conclusion and future work:** learned routing or weight optimization, model/reranker fine-tuning,
-   calibrated abstention, larger evaluation data, and multi-hop graph retrieval.
+7. **Threats to validity and limitations:** small current fixtures, lexical graph seeding, fixed path
+   parameters, heuristic router, unlearned fusion weights, provider dependence, and absence of
+   fine-tuning code.
+8. **Conclusion and future work:** learned entity linking or path scoring, community/global graph
+   retrieval, learned routing or fusion weights, model/reranker fine-tuning, calibrated abstention,
+   and larger evaluation data.
 
 ### Research questions
 
@@ -1132,8 +1209,8 @@ A paper based on the current implementation can study:
   while still reducing latency and token usage?
 - **RQ5:** How much do literal, negation, visibility, and revision guards reduce unsafe semantic-cache
   reuse?
-- **RQ6:** On relational queries, what additional benefit is obtained by future multi-hop graph traversal
-  compared with the currently implemented entity-only graph channel?
+- **RQ6:** On relational queries, how do `GRAPH_MAX_HOPS` values zero, one, two, and three affect
+  Recall@K, MRR, nDCG@10, graph latency, and citation coverage?
 
 ### Required ablation study
 
@@ -1144,11 +1221,11 @@ Use the same held-out queries and knowledge-base snapshot for every condition:
 | A1 | Yes | No | No | N/A | No | No | Dense baseline |
 | A2 | No | Yes | No | N/A | No | No | Lexical baseline |
 | A3 | Yes | Yes | No | Fixed | No | No | Basic hybrid retrieval |
-| A4 | Yes | Yes | Yes | Fixed | No | No | Contribution of entity graph evidence |
-| A5 | Yes | Yes | Yes | Profile-specific | No | No | Contribution of query-adaptive fusion |
-| A6 | Yes | Yes | Yes | Profile-specific | Yes | No | Contribution of cross-encoder reranking |
-| A7 | Yes | Yes | Yes | Profile-specific | Optional | Yes | Full current pipeline |
-| A8 | Yes | Yes | Multi-hop | Profile-specific | Optional | Yes | Future graph-traversal extension |
+| A4 | Yes | Yes | Entity-only, $H=0$ | Fixed | No | No | Contribution of direct graph evidence |
+| A5 | Yes | Yes | Entity-only, $H=0$ | Profile-specific | No | No | Contribution of query-adaptive fusion |
+| A6 | Yes | Yes | Entity-only, $H=0$ | Profile-specific | Yes | No | Contribution of cross-encoder reranking |
+| A7 | Yes | Yes | Entity-only, $H=0$ | Profile-specific | Optional | Yes | Full entity-only baseline |
+| A8 | Yes | Yes | Multi-hop, $H=1,2,3$ | Profile-specific | Optional | Yes | Effect of bounded graph traversal |
 
 For semantic caching, compare:
 
@@ -1209,8 +1286,11 @@ comparing retrieval variants.
 ### Dataset and reproducibility requirements
 
 The checked-in Vietnamese retrieval fixture contains only five examples and is suitable for contract
-testing, not final scientific conclusions. A paper dataset should add a substantially larger,
-versioned, manually reviewed query set with at least these strata:
+testing, not final scientific conclusions. The versioned `graph_traversal_v1.json` fixture and its test
+suite separately verify zero-to-three-hop, reverse-direction, alias, cycle, duplicate-edge, replacement,
+and document-scope behavior against temporary Kuzu databases; they are correctness evidence, not a
+publication-grade benchmark. A paper dataset should add a substantially larger, versioned, manually
+reviewed query set with at least these strata:
 
 - semantic paraphrases;
 - exact identifiers, codes, dates, currencies, and numeric literals;
@@ -1224,7 +1304,9 @@ versioned, manually reviewed query set with at least these strata:
 - customer-visibility and cross-tenant negative cases.
 
 If fusion weights or cache thresholds are tuned, separate development/validation queries from the final
-test set. Do not select parameters on the same examples used for the reported result.
+test set. Do not select parameters on the same examples used for the reported result. For the graph
+ablation, record results independently for `GRAPH_MAX_HOPS=0`, `1`, `2`, and `3` while holding the
+knowledge-base snapshot, graph candidate count, fusion weights, reranker, and context policy constant.
 
 The existing evaluator can score recorded rankings:
 
@@ -1241,6 +1323,7 @@ Relevant verification suites can be run with:
 ```bash
 cd rag-chatbot-fastapi
 python -m pytest \
+  tests/test_graph_search.py \
   tests/test_hybrid_retrieval.py \
   tests/test_semantic_answer_cache.py \
   tests/test_semantic_answer_cache_integration.py \
@@ -1250,8 +1333,8 @@ python -m pytest \
 
 The real semantic-cache integration test requires `REDIS_TEST_URL` and `QDRANT_TEST_URL`. Record the
 exact Git commit, environment configuration, model identifiers, vector dimension, parser/chunker
-versions, retrieval weights, random seeds for any later learned component, and dataset version with
-every reported experiment.
+versions, retrieval weights, graph hop count, graph-search constants, random seeds for any later learned
+component, and dataset version with every reported experiment.
 
 ### Consolidated implementation-source map
 
@@ -1264,7 +1347,8 @@ every reported experiment.
 | Structural parsing | [`extraction.py`](rag-chatbot-fastapi/app/modules/ingestion/internal/extraction.py) | [`test_digital_formats.py`](rag-chatbot-fastapi/tests/test_digital_formats.py) |
 | Structure-aware chunking | [`chunking.py`](rag-chatbot-fastapi/app/modules/ingestion/internal/chunking.py) | [`test_hybrid_retrieval.py`](rag-chatbot-fastapi/tests/test_hybrid_retrieval.py) |
 | Grounded entity/relation extraction | [`entity_extraction.py`](rag-chatbot-fastapi/app/modules/ingestion/internal/entity_extraction.py) | [`test_digital_formats.py`](rag-chatbot-fastapi/tests/test_digital_formats.py) |
-| Kuzu graph projection and search | [`graph service.py`](rag-chatbot-fastapi/app/modules/graph/internal/service.py) | [`test_digital_formats.py`](rag-chatbot-fastapi/tests/test_digital_formats.py) |
+| Bounded graph traversal and path ranking | [`graph search.py`](rag-chatbot-fastapi/app/modules/graph/internal/search.py) | [`test_graph_search.py`](rag-chatbot-fastapi/tests/test_graph_search.py) and [`graph_traversal_v1.json`](rag-chatbot-fastapi/tests/fixtures/graph_traversal_v1.json) |
+| Kuzu graph projection and lifecycle | [`graph service.py`](rag-chatbot-fastapi/app/modules/graph/internal/service.py) | [`test_digital_formats.py`](rag-chatbot-fastapi/tests/test_digital_formats.py) and [`test_graph_search.py`](rag-chatbot-fastapi/tests/test_graph_search.py) |
 | Semantic answer cache | [`semantic_answer_cache.py`](rag-chatbot-fastapi/app/modules/generation/internal/semantic_answer_cache.py) | [`test_semantic_answer_cache.py`](rag-chatbot-fastapi/tests/test_semantic_answer_cache.py) |
 | Real Redis/Qdrant cache path | [`semantic cache integration test`](rag-chatbot-fastapi/tests/test_semantic_answer_cache_integration.py) | Requires local integration services |
 | Constrained spreadsheet execution | [`spreadsheets.py`](rag-chatbot-fastapi/app/modules/generation/internal/spreadsheets.py) | [`test_digital_formats.py`](rag-chatbot-fastapi/tests/test_digital_formats.py) |
@@ -1948,7 +2032,7 @@ Every graph node and relationship is tenant-scoped and evidence-backed.
 ```text
 (:Source)-[:CONTAINS]->(:KnowledgeUnit)
 (:KnowledgeUnit)-[:MENTIONS]->(:Entity)
-(:Entity)-[:RELATED_TO {type, evidence_unit_id}]->(:Entity)
+(:Entity)-[:RELATED_TO {predicate, evidence_unit_id, source_id}]->(:Entity)
 (:Policy)-[:APPLIES_TO]->(:Product)
 ```
 

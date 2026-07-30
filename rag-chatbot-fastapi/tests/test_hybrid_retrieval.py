@@ -252,3 +252,5 @@ async def test_hybrid_retrieval_falls_back_and_caps_expanded_context() -> None:
     assert dense.calls[0]["document_ids"] == ["doc-a", "doc-b", "doc-c", "doc-d"]
     assert graph.requests[0].tenant_id == "tenant-1"
     assert graph.requests[0].knowledge_base_id == "kb-1"
+    assert graph.requests[0].max_hops == settings.GRAPH_MAX_HOPS
+    assert graph.requests[0].document_ids == ("doc-a", "doc-b", "doc-c", "doc-d")

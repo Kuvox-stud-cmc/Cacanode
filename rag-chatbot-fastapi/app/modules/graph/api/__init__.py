@@ -89,6 +89,27 @@ class GraphSearchQuery:
     knowledge_base_id: str
     query: str
     limit: int = 10
+    max_hops: int = 0
+    document_ids: tuple[str, ...] | None = None
+
+    def __post_init__(self) -> None:
+        if not self.tenant_id or not self.knowledge_base_id:
+            raise ValueError("Graph search scope must be non-empty")
+        if not self.query.strip():
+            raise ValueError("Graph search query must be non-empty")
+        if not 1 <= self.limit <= 100:
+            raise ValueError("Graph search limit must be between 1 and 100")
+        if not 0 <= self.max_hops <= 3:
+            raise ValueError("Graph search max_hops must be between 0 and 3")
+        if self.document_ids is None:
+            return
+        if any(not str(document_id).strip() for document_id in self.document_ids):
+            raise ValueError("Graph search document identifiers must be non-empty")
+        object.__setattr__(
+            self,
+            "document_ids",
+            tuple(sorted({str(document_id) for document_id in self.document_ids})),
+        )
 
 
 @dataclass(frozen=True, slots=True)

@@ -412,6 +412,11 @@ The readiness group includes `modularReadiness`. Its default maximum pending age
 configurable through `app.module-events.readiness-max-pending-age-seconds`. Normal analytics
 freshness should remain under five seconds.
 
+Readiness becomes `DOWN` when the migration is missing, the health query fails, or pending event
+age exceeds the configured limit. A terminal `DEAD` event is reported as a degraded operational
+state through the health details and platform failure APIs, but it does not make an otherwise
+serving API reject traffic indefinitely. Operators must still repair or replay every dead event.
+
 Monitor outbox age, retries/dead letters, consumer failures, projection lag, and analytics endpoint
 errors. A `DEAD` event or a growing pending age is an operational incident, not a reason to bypass
 the event boundary.

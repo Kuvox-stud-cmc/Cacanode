@@ -10,6 +10,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.embedded.EmbeddedDatabaseBuilder;
 import org.springframework.jdbc.datasource.embedded.EmbeddedDatabaseType;
 
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
@@ -32,6 +33,10 @@ class AnalyticsProjectionRebuildServiceTest {
         LocalDateTime now = LocalDateTime.now();
         UUID tenantId = UUID.randomUUID();
         UUID conversationId = UUID.randomUUID();
+        UUID jobId = UUID.randomUUID();
+        UUID applicationId = UUID.randomUUID();
+        UUID interviewId = UUID.randomUUID();
+        Instant exportedAt = Instant.parse("2026-07-30T09:00:00Z");
         when(tenants.tenants(0, 500)).thenReturn(new TenantAnalyticsExportApi.SnapshotPage<>(List.of(
                 new TenantAnalyticsExportApi.TenantSnapshot(
                         tenantId, "Acme", "ACTIVE", "PRO", 10240, now, now)), false));
@@ -47,15 +52,31 @@ class AnalyticsProjectionRebuildServiceTest {
                         "assistant", null, 1250L, 2, now.plusNanos(1))), false));
         when(support.projectionTickets(0, 500)).thenReturn(
                 new SupportAnalyticsExportApi.TicketPage(List.of(), false));
-        when(recruitment.exportJobs(tenantId,null,500)).thenReturn(new RecruitmentAnalyticsExportApi.SnapshotPage<>(List.of(),null));
-        when(recruitment.exportApplications(tenantId,null,500)).thenReturn(new RecruitmentAnalyticsExportApi.SnapshotPage<>(List.of(),null));
-        when(recruitment.exportInterviews(tenantId,null,500)).thenReturn(new RecruitmentAnalyticsExportApi.SnapshotPage<>(List.of(),null));
+        when(recruitment.exportJobs(tenantId,null,500)).thenReturn(
+                new RecruitmentAnalyticsExportApi.SnapshotPage<>(List.of(
+                        new RecruitmentAnalyticsExportApi.JobStatusSnapshot(
+                                jobId, "PUBLISHED", exportedAt, exportedAt.plusSeconds(1),
+                                exportedAt.plusSeconds(1), null, null, null)), null));
+        when(recruitment.exportApplications(tenantId,null,500)).thenReturn(
+                new RecruitmentAnalyticsExportApi.SnapshotPage<>(List.of(
+                        new RecruitmentAnalyticsExportApi.ApplicationStatusSnapshot(
+                                applicationId, jobId, "INTERVIEW_SCHEDULED", exportedAt,
+                                exportedAt.plusSeconds(1), exportedAt, exportedAt, null)), null));
+        when(recruitment.exportInterviews(tenantId,null,500)).thenReturn(
+                new RecruitmentAnalyticsExportApi.SnapshotPage<>(List.of(
+                        new RecruitmentAnalyticsExportApi.InterviewStatusSnapshot(
+                                interviewId, applicationId, jobId, "SCHEDULED", exportedAt,
+                                exportedAt.plusSeconds(1), exportedAt, exportedAt.plusSeconds(3600),
+                                exportedAt.plusSeconds(5400), null, null, null, null)), null));
 
         var result = new AnalyticsProjectionRebuildService(
                 jdbc, tenants, documents, chats, support, recruitment).rebuild();
 
         assertThat(result.tenants()).isEqualTo(1);
         assertThat(result.messages()).isEqualTo(2);
+        assertThat(result.recruitmentJobs()).isEqualTo(1);
+        assertThat(result.recruitmentApplications()).isEqualTo(1);
+        assertThat(result.recruitmentInterviews()).isEqualTo(1);
         assertThat(jdbc.queryForObject("""
                 SELECT COUNT(*) FROM analytics_message_projection
                 WHERE role = 'assistant' AND question_text IS NULL AND response_duration_ms = 1250

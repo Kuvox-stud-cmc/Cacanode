@@ -305,8 +305,11 @@ class HybridRetriever:
                 knowledge_base_id=knowledge_base_id,
                 query=query_text,
                 limit=self._settings.GRAPH_CANDIDATE_COUNT,
+                max_hops=self._settings.GRAPH_MAX_HOPS,
+                document_ids=(tuple(document_ids) if document_ids is not None else None),
             )
         )
+        # Keep a caller-side guard for mixed-version deployments and defensive isolation.
         allowed = set(document_ids) if document_ids is not None else None
         return [
             _retrieved(row)

@@ -241,6 +241,8 @@ class Settings(BaseSettings):
         )
         if any(value <= 0 for value in retrieval_counts):
             raise ValueError("Retrieval candidate and context limits must be positive")
+        if not 0 <= self.GRAPH_MAX_HOPS <= 3:
+            raise ValueError("GRAPH_MAX_HOPS must be between 0 and 3")
         if self.PRIMARY_CONTEXT_TOP_K > self.FINAL_CONTEXT_TOP_K:
             raise ValueError("PRIMARY_CONTEXT_TOP_K cannot exceed FINAL_CONTEXT_TOP_K")
         if self.RERANKER_TIMEOUT_SECONDS <= 0:

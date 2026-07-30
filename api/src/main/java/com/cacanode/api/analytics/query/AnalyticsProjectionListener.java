@@ -278,7 +278,9 @@ public class AnalyticsProjectionListener {
                     completed_at=EXCLUDED.completed_at,cancelled_at=EXCLUDED.cancelled_at,
                     expired_at=EXCLUDED.expired_at
                 """, event.interviewId(), event.tenantId(), event.applicationId(), event.jobId(), event.status(),
-                event.createdAt(), event.updatedAt(), event.invitedAt(), event.scheduledStartAt(),
-                event.scheduledEndAt(), event.startedAt(), event.completedAt(), event.cancelledAt(), event.expiredAt());
+                event.createdAt(), event.updatedAt(), event.invitedAt(),
+                AnalyticsJdbcTypes.timestamptz(event.scheduledStartAt()),
+                AnalyticsJdbcTypes.timestamptz(event.scheduledEndAt()), event.startedAt(), event.completedAt(),
+                event.cancelledAt(), event.expiredAt());
     }
 }

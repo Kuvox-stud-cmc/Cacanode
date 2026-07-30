@@ -19,10 +19,19 @@ from app.common.cache import (
 from app.common.concurrent_loads import ConcurrentLoadTracker
 from app.modules.generation.internal.models import RetrievedChunk
 from app.modules.retrieval.internal.cache import (
+    RETRIEVAL_PIPELINE_VERSION,
     CachedRetriever,
     RetrievalCacheKeyBuilder,
     RetrievedChunkCacheCodec,
+    retrieval_configuration_fingerprint,
 )
+
+
+def test_graph_traversal_configuration_changes_the_versioned_cache_fingerprint() -> None:
+    assert RETRIEVAL_PIPELINE_VERSION == 2
+    assert retrieval_configuration_fingerprint(
+        Settings(_env_file=(), GRAPH_MAX_HOPS=0)
+    ) != retrieval_configuration_fingerprint(Settings(_env_file=(), GRAPH_MAX_HOPS=3))
 
 
 class MemoryCacheStore(CacheStore):

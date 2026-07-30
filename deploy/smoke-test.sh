@@ -7,10 +7,23 @@ DELAY_SECONDS="${SMOKE_TEST_DELAY_SECONDS:-5}"
 
 check() {
   local path="$1"
-  curl --fail --silent --show-error \
-    --connect-timeout 5 \
-    --max-time 20 \
-    "${BASE_URL}${path}" >/dev/null
+  local response status body
+  if ! response="$(curl --silent --show-error \
+      --connect-timeout 5 \
+      --max-time 20 \
+      --write-out $'\n%{http_code}' \
+      "${BASE_URL}${path}" 2>&1)"; then
+    LAST_FAILURE="${path}: ${response}"
+    return 1
+  fi
+  status="${response##*$'\n'}"
+  body="${response%$'\n'*}"
+  if [[ "${status}" =~ ^2[0-9][0-9]$ ]]; then
+    return 0
+  fi
+  body="${body:0:500}"
+  LAST_FAILURE="${path} returned HTTP ${status}${body:+: ${body}}"
+  return 1
 }
 
 operational_checks() {
@@ -33,12 +46,13 @@ operational_checks() {
 }
 
 for ((attempt = 1; attempt <= ATTEMPTS; attempt += 1)); do
+  LAST_FAILURE="unknown failure"
   if check "/health/live" && check "/health/ready" && check "/actuator/health" && check "/"; then
     operational_checks
     echo "Production smoke checks passed at ${BASE_URL}"
     exit 0
   fi
-  echo "Waiting for production health checks (${attempt}/${ATTEMPTS})..."
+  echo "Waiting for production health checks (${attempt}/${ATTEMPTS}): ${LAST_FAILURE}"
   sleep "${DELAY_SECONDS}"
 done
 

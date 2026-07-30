@@ -29,6 +29,15 @@ def test_readiness_diagnostic_bounds_are_validated() -> None:
         Settings(_env_file=(), READINESS_INGESTION_SCAN_LIMIT=0)
 
 
+def test_graph_hop_bounds_are_validated() -> None:
+    assert Settings(_env_file=(), GRAPH_MAX_HOPS=0).GRAPH_MAX_HOPS == 0
+    assert Settings(_env_file=(), GRAPH_MAX_HOPS=3).GRAPH_MAX_HOPS == 3
+    with pytest.raises(ValidationError, match="GRAPH_MAX_HOPS"):
+        Settings(_env_file=(), GRAPH_MAX_HOPS=-1)
+    with pytest.raises(ValidationError, match="GRAPH_MAX_HOPS"):
+        Settings(_env_file=(), GRAPH_MAX_HOPS=4)
+
+
 def test_mtls_requires_complete_server_material() -> None:
     with pytest.raises(ValidationError, match="mTLS material"):
         Settings(_env_file=(), GRPC_PLAINTEXT=False)

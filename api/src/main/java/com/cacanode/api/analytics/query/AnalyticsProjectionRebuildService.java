@@ -191,8 +191,13 @@ public class AnalyticsProjectionRebuildService implements AnalyticsProjectionReb
                             INSERT INTO analytics_recruitment_job_projection
                             (job_id,tenant_id,status,created_at,updated_at,published_at,paused_at,closed_at,archived_at)
                             VALUES (?,?,?,?,?,?,?,?,?)
-                            """, item.jobId(), tenant, item.status(), item.createdAt(), item.updatedAt(),
-                            item.publishedAt(), item.pausedAt(), item.closedAt(), item.archivedAt());
+                            """, item.jobId(), tenant, item.status(),
+                            AnalyticsJdbcTypes.timestamp(item.createdAt()),
+                            AnalyticsJdbcTypes.timestamp(item.updatedAt()),
+                            AnalyticsJdbcTypes.timestamp(item.publishedAt()),
+                            AnalyticsJdbcTypes.timestamp(item.pausedAt()),
+                            AnalyticsJdbcTypes.timestamp(item.closedAt()),
+                            AnalyticsJdbcTypes.timestamp(item.archivedAt()));
                     count++;
                 }
                 cursor = page.nextCursor();
@@ -212,8 +217,12 @@ public class AnalyticsProjectionRebuildService implements AnalyticsProjectionReb
                             INSERT INTO analytics_recruitment_application_projection
                             (application_id,tenant_id,job_id,status,created_at,updated_at,submitted_at,verified_at,withdrawn_at)
                             VALUES (?,?,?,?,?,?,?,?,?)
-                            """, item.applicationId(), tenant, item.jobId(), item.status(), item.createdAt(),
-                            item.updatedAt(), item.submittedAt(), item.verifiedAt(), item.withdrawnAt());
+                            """, item.applicationId(), tenant, item.jobId(), item.status(),
+                            AnalyticsJdbcTypes.timestamp(item.createdAt()),
+                            AnalyticsJdbcTypes.timestamp(item.updatedAt()),
+                            AnalyticsJdbcTypes.timestamp(item.submittedAt()),
+                            AnalyticsJdbcTypes.timestamp(item.verifiedAt()),
+                            AnalyticsJdbcTypes.timestamp(item.withdrawnAt()));
                     count++;
                 }
                 cursor = page.nextCursor();
@@ -235,9 +244,15 @@ public class AnalyticsProjectionRebuildService implements AnalyticsProjectionReb
                              scheduled_start_at,scheduled_end_at,started_at,completed_at,cancelled_at,expired_at)
                             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                             """, item.interviewId(), tenant, item.applicationId(), item.jobId(), item.status(),
-                            item.createdAt(), item.updatedAt(), item.invitedAt(), item.scheduledStartAt(),
-                            item.scheduledEndAt(), item.startedAt(), item.completedAt(), item.cancelledAt(),
-                            item.expiredAt());
+                            AnalyticsJdbcTypes.timestamp(item.createdAt()),
+                            AnalyticsJdbcTypes.timestamp(item.updatedAt()),
+                            AnalyticsJdbcTypes.timestamp(item.invitedAt()),
+                            AnalyticsJdbcTypes.timestamptz(item.scheduledStartAt()),
+                            AnalyticsJdbcTypes.timestamptz(item.scheduledEndAt()),
+                            AnalyticsJdbcTypes.timestamp(item.startedAt()),
+                            AnalyticsJdbcTypes.timestamp(item.completedAt()),
+                            AnalyticsJdbcTypes.timestamp(item.cancelledAt()),
+                            AnalyticsJdbcTypes.timestamp(item.expiredAt()));
                     count++;
                 }
                 cursor = page.nextCursor();
