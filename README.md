@@ -330,7 +330,7 @@ sequenceDiagram
         API-->>Gateway: Replay identical JSON response
         Gateway-->>Client: HTTP 200
     else New or retryable turn
-        API->>DB: Consume quota and persist or reuse<br/>the user message; set turn PENDING
+        API->>DB: Consume quota and persist or reuse<br/>the user message, then set turn PENDING
         API->>AI: Unary GenerateAnswer<br/>with scope, history, and revision
         AI-->>API: Answer, citations, action, and usage
         API->>DB: Lock session and compare the knowledge revision
@@ -378,7 +378,7 @@ sequenceDiagram
     end
 
     AI-->>API: Answer, citations, optional action, and usage
-    Note over AI,Cache: Redis failures are fail-open;<br/>generation can continue without the cache.
+    Note over AI,Cache: Redis failures are fail-open.<br/>Generation can continue without the cache.
 ```
 
 #### Durable document ingestion
@@ -458,7 +458,7 @@ sequenceDiagram
         Worker->>Checkpoint: Mark FAILED and release lease
     end
 
-    Note over MQ,Worker: Transient failures are retried;<br/>terminal requests use dead-letter routing.
+    Note over MQ,Worker: Transient failures are retried.<br/>Terminal requests use dead-letter routing.
 ```
 
 #### PayOS checkout and activation
@@ -490,7 +490,7 @@ sequenceDiagram
     Admin->>PayOS: Complete payment
     PayOS-->>Console: Return to payment-status page
 
-    Note over Console,API: Return and cancel URLs control presentation only;<br/>they never prove that payment succeeded.
+    Note over Console,API: Return and cancel URLs control presentation only.<br/>They never prove that payment succeeded.
 ```
 
 ##### 2. Verified activation and reconciliation
@@ -539,7 +539,7 @@ sequenceDiagram
         API-->>Gateway: Internal payment status
         Gateway-->>Console: Render authoritative status
     end
-    Note over API,DB: Every trigger shares the same idempotent activation logic;<br/>duplicate success never extends the subscription twice.
+    Note over API,DB: Every trigger shares the same idempotent activation logic.<br/>Duplicate success never extends the subscription twice.
 ```
 
 ---
