@@ -303,120 +303,167 @@ The public Chat API is a Cacanode API contract. The internal vLLM OpenAI-compati
 
 ### Core runtime sequences
 
-The following sequences reflect the delivered Spring Boot and FastAPI control paths, including
-their persistence, idempotency, and asynchronous messaging boundaries.
+The following sequences reflect the delivered Spring Boot and FastAPI control paths. Each workflow
+is split at its natural boundary so the diagrams retain implementation detail without forcing too
+many participant lanes into one viewport.
 
 #### External chat turn
+
+##### 1. Request control and persistence
 
 ```mermaid
 sequenceDiagram
     autonumber
-    actor Client as Customer app or widget
+    actor Client as App or widget
     participant Gateway as Nginx gateway
-    participant API as Spring Business API
+    participant API as Spring chat API
     participant DB as PostgreSQL
-    participant AI as FastAPI gRPC service
-    participant Cache as Redis generation cache
-    participant Retrieval as Hybrid retrieval stack
-    participant Models as Embedding and LLM services
+    participant AI as FastAPI inference
 
     Client->>Gateway: POST a session message
-    Gateway->>API: Forward token, origin, request ID, and idempotency key
-    API->>API: Authenticate scope and, for widgets, the parent origin
+    Gateway->>API: Forward token and origin<br/>request ID and idempotency key
+    API->>API: Authenticate scope<br/>and widget parent origin
     API->>DB: Lock session and check idempotency
 
     alt Completed idempotent replay
         DB-->>API: Previously stored assistant response
+        API-->>Gateway: Replay identical JSON response
+        Gateway-->>Client: HTTP 200
     else New or retryable turn
-        API->>DB: Consume quota, persist or reuse the user message, and set the turn PENDING
-        API->>AI: Unary GenerateAnswer with tenant scope and knowledge revision
-        AI->>Cache: Look up generation ID
-        alt Generation result already exists
-            Cache-->>AI: Cached protobuf response
-        else Fresh inference
-            AI->>Models: Embed the question
-            Models-->>AI: Query vector
-            AI->>Retrieval: Retrieve by tenant, knowledge base, revision, and visibility
-            Retrieval-->>AI: Ranked evidence with provenance
-            AI->>Models: Generate a grounded completion
-            Models-->>AI: Answer and token usage
-            AI->>Cache: Store result for generation-ID deduplication
-        end
+        API->>DB: Consume quota and persist or reuse<br/>the user message; set turn PENDING
+        API->>AI: Unary GenerateAnswer<br/>with scope, history, and revision
         AI-->>API: Answer, citations, action, and usage
         API->>DB: Lock session and compare the knowledge revision
         alt Revision is current
-            API->>DB: Persist assistant message and complete the turn
+            API->>API: Validate citation visibility
+            API->>DB: Persist assistant message<br/>and mark turn COMPLETED
         else Revision changed during generation
             API->>DB: Rebuild context at the latest revision
             API->>AI: Retry once with the same turn
             AI-->>API: Regenerated answer
             API->>DB: Revalidate and finalize or mark the turn failed
         end
+        API-->>Gateway: Completed JSON response or explicit error
+        Gateway-->>Client: HTTP response
     end
 
-    API-->>Gateway: Completed JSON response or explicit error
-    Gateway-->>Client: HTTP response
-    Note over API,DB: Failed turns roll back their message-quota consumption.
+    Note over API,DB: Failed turns are marked FAILED<br/>and their quota increment is rolled back.
+```
+
+##### 2. Inference and retrieval
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant API as Spring chat API
+    participant AI as FastAPI inference
+    participant Cache as Redis result cache
+    participant Models as Embedding + LLM
+    participant Retrieval as Qdrant + Kuzu<br/>+ optional reranker
+
+    API->>AI: GenerateAnswer with authoritative scope
+    AI->>Cache: Look up generation ID
+
+    alt Generation result already exists
+        Cache-->>AI: Cached protobuf response
+    else Fresh inference
+        AI->>Models: Embed the question
+        Models-->>AI: Query vector
+        AI->>Retrieval: Search by tenant, knowledge base,<br/>revision, and document visibility
+        Retrieval->>Retrieval: Dense + sparse + graph fusion<br/>then optional reranking
+        Retrieval-->>AI: Ranked evidence with provenance
+        AI->>Models: Generate grounded completion
+        Models-->>AI: Answer and token usage
+        AI->>Cache: Store result for generation-ID deduplication
+    end
+
+    AI-->>API: Answer, citations, optional action, and usage
+    Note over AI,Cache: Redis failures are fail-open;<br/>generation can continue without the cache.
 ```
 
 #### Durable document ingestion
+
+##### 1. Upload acceptance and durable publication
 
 ```mermaid
 sequenceDiagram
     autonumber
     actor Admin as Tenant user
     participant Gateway as Nginx gateway
-    participant API as Spring Business API
-    participant DB as PostgreSQL and outbox
+    participant API as Spring control plane
+    participant DB as PostgreSQL<br/>document + outbox
     participant Object as SeaweedFS
-    participant Relay as Spring outbox relay
     participant MQ as RabbitMQ
-    participant Worker as FastAPI document worker
-    participant Checkpoint as Redis checkpoints
-    participant Models as Embedding and extraction models
-    participant Vector as Qdrant
-    participant Graph as Kuzu graph service
 
     Admin->>Gateway: POST multipart document
     Gateway->>API: Forward authenticated upload
-    API->>API: Validate role, knowledge base, file, and quota
+    API->>API: Validate role, knowledge base,<br/>file type, signature, size, and quota
     API->>DB: Create PENDING document and job ID
     API->>Object: Store the raw source
     Object-->>API: Storage key confirmed
-    API->>DB: Commit document and document.ingest.requested outbox row
+    API->>DB: Add document.ingest.requested<br/>outbox row and commit
     API-->>Gateway: 202 Accepted with document and job IDs
     Gateway-->>Admin: PENDING status
 
+    Note over Admin,DB: The synchronous upload request ends at HTTP 202.
+
     loop Due outbox rows
-        Relay->>DB: Lock unpublished event
-        Relay->>MQ: Publish persistent ingestion request
-        MQ-->>Relay: Publisher confirmation
-        Relay->>DB: Mark event PUBLISHED
+        API->>DB: Lock unpublished event
+        API->>MQ: Publish persistent ingestion request
+        MQ-->>API: Publisher confirmation
+        API->>DB: Mark event PUBLISHED
     end
+
+    Note over API,MQ: Failed publications remain in the outbox<br/>and retry with capped exponential backoff.
+```
+
+##### 2. Worker indexing and status propagation
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant MQ as RabbitMQ
+    participant Worker as Document worker
+    participant Checkpoint as Redis checkpoints
+    participant Object as SeaweedFS
+    participant Models as Embedding + extraction
+    participant Index as Qdrant + Kuzu
+    participant Control as Spring listener<br/>+ PostgreSQL
 
     MQ->>Worker: Deliver ingestion request
     Worker->>Checkpoint: Claim job lease and checkpoint phase
     Worker->>MQ: Publish PROCESSING status
-    MQ->>API: Deliver status event
-    API->>DB: Deduplicate in inbox and set PROCESSING
+    MQ->>Control: Deliver status event
+    Control->>Control: Deduplicate inbox event<br/>and set PROCESSING
     Worker->>Object: Download raw source
     Object-->>Worker: Source bytes
     Worker->>Worker: Parse, normalize, and structure-aware chunk
     Worker->>Models: Create dense and sparse representations
     Models-->>Worker: Embeddings and sparse vectors
-    Worker->>Vector: Replace the document index
-    Worker->>Models: Extract grounded entities and relations
-    Models-->>Worker: Graph batch
-    Worker->>Graph: Replace the source graph
-    Worker->>MQ: Publish COMPLETED with chunk count
-    MQ->>API: Deliver status event
-    API->>DB: Set COMPLETED and increment search revision
-    Worker->>Checkpoint: Mark COMPLETE and release lease
+    Worker->>Index: Replace Qdrant document index
+    Worker->>Models: Extract grounded entities and relations<br/>or build structural graph units
+    Models-->>Worker: Graph facts and evidence links
+    Worker->>Index: Replace Kuzu source graph
 
-    Note over Worker,MQ: Transient failures are retried. Permanent or exhausted failures clean partial indexes, publish FAILED, and use dead-letter routing.
+    alt Pipeline completed
+        Worker->>MQ: Publish COMPLETED with chunk count
+        MQ->>Control: Deliver status event
+        Control->>Control: Set COMPLETED<br/>and increment search revision
+        Worker->>Checkpoint: Mark COMPLETE and release lease
+    else Permanent or exhausted failure
+        Worker->>Index: Delete partial index data when required
+        Worker->>MQ: Publish FAILED with safe error
+        MQ->>Control: Deliver status event
+        Control->>Control: Set FAILED
+        Worker->>Checkpoint: Mark FAILED and release lease
+    end
+
+    Note over MQ,Worker: Transient failures are retried;<br/>terminal requests use dead-letter routing.
 ```
 
 #### PayOS checkout and activation
+
+##### 1. Checkout creation
 
 ```mermaid
 sequenceDiagram
@@ -432,38 +479,67 @@ sequenceDiagram
     Console->>Gateway: POST /api/v1/billing/checkouts
     Gateway->>API: Forward JWT and idempotency key
     API->>API: Require TENANT_ADMIN and resolve catalog price
-    API->>DB: Lock account and persist PENDING payment plus entitlement snapshot
+    API->>DB: Lock account and check idempotency
+    API->>DB: Persist PENDING payment<br/>and entitlement snapshot
     API->>PayOS: Create expiring hosted payment link
     PayOS-->>API: Payment-link ID and checkout URL
     API->>DB: Attach provider identity and checkout URL
-    API-->>Console: 201 Created with checkout URL
-    Console-->>Admin: Open hosted checkout
+    API-->>Gateway: 201 Created with checkout URL
+    Gateway-->>Console: Checkout details
+    Console->>PayOS: Open hosted checkout
     Admin->>PayOS: Complete payment
+    PayOS-->>Console: Return to payment-status page
 
-    par Verified webhook path
+    Note over Console,API: Return and cancel URLs control presentation only;<br/>they never prove that payment succeeded.
+```
+
+##### 2. Verified activation and reconciliation
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Console as Management console
+    participant Gateway as Nginx gateway
+    participant API as Spring billing module
+    participant DB as PostgreSQL
+    participant PayOS as PayOS
+
+    alt Signed webhook trigger
         PayOS->>Gateway: POST public webhook
         Gateway->>API: Forward payload
         API->>API: Deduplicate payload and verify SDK signature
         API->>DB: Lock payment order and subscription
-        API->>API: Validate order code, link ID, VND currency, and amount
-        alt Valid successful payment
-            API->>DB: Mark PAID, activate subscription, and project entitlements
-        else Identity or amount mismatch
-            API->>DB: Mark payment REVIEW without activation
-        end
-    and Browser return and reconciliation path
-        PayOS-->>Console: Return to presentation URL with payment ID
-        loop While the payment remains open
-            Console->>Gateway: GET /api/v1/billing/payments/{paymentId}
-            Gateway->>API: Poll payment status
-            API->>PayOS: Read authoritative provider status
-            PayOS-->>API: Current payment state
-            API->>DB: Reconcile and activate only after validated PAID
-            API-->>Console: Internal payment status
+    else Browser polling trigger
+        Console->>Gateway: GET /api/v1/billing/payments/{paymentId}
+        Gateway->>API: Poll internal payment status
+        API->>DB: Lock payment order and subscription
+        API->>PayOS: Read authoritative provider status
+        PayOS-->>API: Current payment state
+    else Five-minute reconciliation trigger
+        API->>DB: Find open, unexpired payment orders
+        API->>DB: Lock each payment order and subscription
+        API->>PayOS: Read authoritative provider status
+        PayOS-->>API: Current payment state
+    end
+
+    API->>API: Validate order code, payment-link ID,<br/>currency or paid amount, and expected amount
+
+    alt Provider identity or amount mismatch
+        API->>DB: Mark payment REVIEW without activation
+    else Provider data matches
+        alt Provider confirms PAID
+            API->>DB: Mark PAID and activate subscription
+            API->>DB: Project entitlements<br/>and cancel other open orders
+        else Payment is not paid
+            API->>DB: Update provider status without activation
         end
     end
 
-    Note over API,DB: Webhook, polling, and the five-minute background reconciler share idempotent activation logic.
+    opt Browser requested the payment status
+        API-->>Gateway: Internal payment status
+        Gateway-->>Console: Render authoritative status
+    end
+    Note over API,DB: Every trigger shares the same idempotent activation logic;<br/>duplicate success never extends the subscription twice.
 ```
 
 ---
