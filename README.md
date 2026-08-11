@@ -301,6 +301,171 @@ Only the gateway is public. The following services are private network services:
 
 The public Chat API is a Cacanode API contract. The internal vLLM OpenAI-compatible endpoint is not exposed to tenants.
 
+### Core runtime sequences
+
+The following sequences reflect the delivered Spring Boot and FastAPI control paths, including
+their persistence, idempotency, and asynchronous messaging boundaries.
+
+#### External chat turn
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Client as Customer app or widget
+    participant Gateway as Nginx gateway
+    participant API as Spring Business API
+    participant DB as PostgreSQL
+    participant AI as FastAPI gRPC service
+    participant Cache as Redis generation cache
+    participant Retrieval as Hybrid retrieval stack
+    participant Models as Embedding and LLM services
+
+    Client->>Gateway: POST a session message
+    Gateway->>API: Forward token, origin, request ID, and idempotency key
+    API->>API: Authenticate scope and, for widgets, the parent origin
+    API->>DB: Lock session and check idempotency
+
+    alt Completed idempotent replay
+        DB-->>API: Previously stored assistant response
+    else New or retryable turn
+        API->>DB: Consume quota, persist or reuse the user message, and set the turn PENDING
+        API->>AI: Unary GenerateAnswer with tenant scope and knowledge revision
+        AI->>Cache: Look up generation ID
+        alt Generation result already exists
+            Cache-->>AI: Cached protobuf response
+        else Fresh inference
+            AI->>Models: Embed the question
+            Models-->>AI: Query vector
+            AI->>Retrieval: Retrieve by tenant, knowledge base, revision, and visibility
+            Retrieval-->>AI: Ranked evidence with provenance
+            AI->>Models: Generate a grounded completion
+            Models-->>AI: Answer and token usage
+            AI->>Cache: Store result for generation-ID deduplication
+        end
+        AI-->>API: Answer, citations, action, and usage
+        API->>DB: Lock session and compare the knowledge revision
+        alt Revision is current
+            API->>DB: Persist assistant message and complete the turn
+        else Revision changed during generation
+            API->>DB: Rebuild context at the latest revision
+            API->>AI: Retry once with the same turn
+            AI-->>API: Regenerated answer
+            API->>DB: Revalidate and finalize or mark the turn failed
+        end
+    end
+
+    API-->>Gateway: Completed JSON response or explicit error
+    Gateway-->>Client: HTTP response
+    Note over API,DB: Failed turns roll back their message-quota consumption.
+```
+
+#### Durable document ingestion
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Admin as Tenant user
+    participant Gateway as Nginx gateway
+    participant API as Spring Business API
+    participant DB as PostgreSQL and outbox
+    participant Object as SeaweedFS
+    participant Relay as Spring outbox relay
+    participant MQ as RabbitMQ
+    participant Worker as FastAPI document worker
+    participant Checkpoint as Redis checkpoints
+    participant Models as Embedding and extraction models
+    participant Vector as Qdrant
+    participant Graph as Kuzu graph service
+
+    Admin->>Gateway: POST multipart document
+    Gateway->>API: Forward authenticated upload
+    API->>API: Validate role, knowledge base, file, and quota
+    API->>DB: Create PENDING document and job ID
+    API->>Object: Store the raw source
+    Object-->>API: Storage key confirmed
+    API->>DB: Commit document and document.ingest.requested outbox row
+    API-->>Gateway: 202 Accepted with document and job IDs
+    Gateway-->>Admin: PENDING status
+
+    loop Due outbox rows
+        Relay->>DB: Lock unpublished event
+        Relay->>MQ: Publish persistent ingestion request
+        MQ-->>Relay: Publisher confirmation
+        Relay->>DB: Mark event PUBLISHED
+    end
+
+    MQ->>Worker: Deliver ingestion request
+    Worker->>Checkpoint: Claim job lease and checkpoint phase
+    Worker->>MQ: Publish PROCESSING status
+    MQ->>API: Deliver status event
+    API->>DB: Deduplicate in inbox and set PROCESSING
+    Worker->>Object: Download raw source
+    Object-->>Worker: Source bytes
+    Worker->>Worker: Parse, normalize, and structure-aware chunk
+    Worker->>Models: Create dense and sparse representations
+    Models-->>Worker: Embeddings and sparse vectors
+    Worker->>Vector: Replace the document index
+    Worker->>Models: Extract grounded entities and relations
+    Models-->>Worker: Graph batch
+    Worker->>Graph: Replace the source graph
+    Worker->>MQ: Publish COMPLETED with chunk count
+    MQ->>API: Deliver status event
+    API->>DB: Set COMPLETED and increment search revision
+    Worker->>Checkpoint: Mark COMPLETE and release lease
+
+    Note over Worker,MQ: Transient failures are retried. Permanent or exhausted failures clean partial indexes, publish FAILED, and use dead-letter routing.
+```
+
+#### PayOS checkout and activation
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Admin as Tenant admin
+    participant Console as Management console
+    participant Gateway as Nginx gateway
+    participant API as Spring billing module
+    participant DB as PostgreSQL
+    participant PayOS as PayOS
+
+    Admin->>Console: Select Pro or Business billing interval
+    Console->>Gateway: POST /api/v1/billing/checkouts
+    Gateway->>API: Forward JWT and idempotency key
+    API->>API: Require TENANT_ADMIN and resolve catalog price
+    API->>DB: Lock account and persist PENDING payment plus entitlement snapshot
+    API->>PayOS: Create expiring hosted payment link
+    PayOS-->>API: Payment-link ID and checkout URL
+    API->>DB: Attach provider identity and checkout URL
+    API-->>Console: 201 Created with checkout URL
+    Console-->>Admin: Open hosted checkout
+    Admin->>PayOS: Complete payment
+
+    par Verified webhook path
+        PayOS->>Gateway: POST public webhook
+        Gateway->>API: Forward payload
+        API->>API: Deduplicate payload and verify SDK signature
+        API->>DB: Lock payment order and subscription
+        API->>API: Validate order code, link ID, VND currency, and amount
+        alt Valid successful payment
+            API->>DB: Mark PAID, activate subscription, and project entitlements
+        else Identity or amount mismatch
+            API->>DB: Mark payment REVIEW without activation
+        end
+    and Browser return and reconciliation path
+        PayOS-->>Console: Return to presentation URL with payment ID
+        loop While the payment remains open
+            Console->>Gateway: GET /api/v1/billing/payments/{paymentId}
+            Gateway->>API: Poll payment status
+            API->>PayOS: Read authoritative provider status
+            PayOS-->>API: Current payment state
+            API->>DB: Reconcile and activate only after validated PAID
+            API-->>Console: Internal payment status
+        end
+    end
+
+    Note over API,DB: Webhook, polling, and the five-minute background reconciler share idempotent activation logic.
+```
+
 ---
 
 ## Service Responsibilities
@@ -470,29 +635,23 @@ All ingestion is asynchronous.
 ### Source status lifecycle
 
 ```text
-PENDING
-  -> VALIDATING
-  -> STORED
-  -> PARSING
-  -> INDEXING
-  -> READY
-
-Any processing state -> FAILED
-READY -> DELETING -> DELETED
-READY -> REINDEXING -> READY
+PENDING -> PROCESSING -> COMPLETED
+PENDING -> FAILED
+PROCESSING -> FAILED
 ```
 
-Each status record contains:
+These are the persisted public document statuses. Redis worker checkpoints separately track
+fine-grained phases such as the processing-status publication, vector-index replacement,
+graph replacement, completion publication, cleanup, and terminal failure.
 
-- `tenant_id`
-- `knowledge_base_id`
-- `source_id`
-- current stage
-- progress percentage when measurable
-- parser and model versions
-- retry count
-- safe error code and message
-- created, started, completed, and updated timestamps
+Each public status record contains:
+
+- document and ingestion job IDs
+- file name, type, size, visibility, and knowledge-base ID
+- current status
+- chunk count when processing succeeds
+- safe error message when processing fails
+- upload timestamp
 
 ### Document pipeline
 
@@ -1861,7 +2020,7 @@ Pending payments are also reconciled against PayOS every five minutes as a backg
 
 ### Quota and feature enforcement
 
-- Message usage is stored in billing-anniversary `usage_metrics` periods. The Python chat service locks the tenant and atomically increments the applicable period row.
+- Message usage is stored in billing-anniversary `usage_metrics` periods. The Spring billing service locks the tenant and atomically increments the applicable period row before invoking FastAPI inference.
 - Reaching the message limit returns the existing `MESSAGE_QUOTA_EXCEEDED` response with HTTP `429`.
 - Document uploads lock the tenant entitlement row and reject before object storage when document count or storage would exceed the limit.
 - Team-member limits count active members plus unexpired pending invitations and apply to invitations, acceptance, and reactivation.
